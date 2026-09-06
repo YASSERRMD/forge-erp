@@ -15,12 +15,14 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
+	"github.com/YASSERRMD/forge-erp/backend/internal/documentsvc"
 	"github.com/YASSERRMD/forge-erp/backend/internal/finance"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/YASSERRMD/forge-erp/backend/internal/procurement"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
+	"github.com/YASSERRMD/forge-erp/backend/internal/search"
 	"github.com/YASSERRMD/forge-erp/backend/migrations"
 )
 
@@ -50,6 +52,12 @@ func run() error {
 		return fmt.Errorf("migrate: %w", err)
 	}
 
+	if n, err := platform.OverlayFromDB(ctx, pool, &cfg); err != nil {
+		log.Printf("forgeerp: config overlay skipped: %v", err)
+	} else if n > 0 {
+		log.Printf("forgeerp: applied %d config overlay keys", n)
+	}
+
 	issuer, err := identity.NewIssuer(cfg.JWTSecret)
 	if err != nil {
 		return fmt.Errorf("jwt: %w", err)
@@ -76,13 +84,53 @@ func run() error {
 		return fmt.Errorf("seed demo finance: %w", err)
 	}
 
-	base := platform.Router(platform.BuildInfo{Version: version, Commit: commit})
+	// Cross-cutting (Phase 09): document storage, metrics, search.
+	build := platform.BuildInfo{Version: version, Commit: commit}
+	metrics := platform.NewMetrics()
+	storageDir := os.Getenv("FERP_STORAGE_DIR")
+	if storageDir == "" {
+		storageDir = "./var/docs"
+	}
+	dirStorage, err := documentsvc.NewDirStorage(storageDir)
+	if err != nil {
+		return fmt.Errorf("storage dir: %w", err)
+	}
+	// documentsvc metadata needs a Store; PG metadata lands with the PG adapter —
+	// serve metadata in-memory for now is wrong for prod, so wire a minimal PG
+	// metadata store inline via pool below.
+	docSvc := &documentsvc.Service{Store: documentsvc.NewPGStore(pool), Storage: dirStorage}
+	searcher := search.NewMemorySearcher()
+	searcher.Register("organization", func(ctx context.Context, entityID int64) ([]search.Result, error) {
+		orgs, err := pstore.ListOrgs(ctx, entityID, 500, 0)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]search.Result, 0, len(orgs))
+		for _, o := range orgs {
+			out = append(out, search.Result{ID: o.ID, Label: o.Name, Ref: o.CustomerCode})
+		}
+		return out, nil
+	})
+	searcher.Register("product", func(ctx context.Context, entityID int64) ([]search.Result, error) {
+		prods, err := cstore.ListProducts(ctx, entityID, 500, 0)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]search.Result, 0, len(prods))
+		for _, p := range prods {
+			out = append(out, search.Result{ID: p.ID, Label: p.Name, Ref: p.SKU})
+		}
+		return out, nil
+	})
+
+	base := platform.Router(build)
 	mux, ok := base.(chi.Router)
 	if !ok {
 		return errors.New("platform router is not a chi router")
 	}
 	identDeps := identity.Deps{Store: store, Issuer: issuer}
 	idH := identity.NewHandler(identDeps)
+	mux.Use(metrics.Instrument)
 	mux.Route("/api/v1", func(r chi.Router) {
 		identity.Routes(r, identDeps)
 		partners.Routes(r, partners.Deps{Store: pstore, Bus: platform.NewMemoryBus()},
@@ -94,7 +142,10 @@ func run() error {
 		procurement.Routes(r, procurement.Deps{Store: procstore, Catalog: cstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
 		finance.Routes(r, finance.Deps{Store: fstore}, idH.Require)
+		documentsvc.Routes(r, docSvc, idH.Require)
+		search.Routes(r, searcher, idH.Require)
 	})
+	mux.Handle("/metrics", metrics.Handler(build))
 	handler := mux
 	srv := &http.Server{
 		Addr:         ":" + cfg.HTTPPort,

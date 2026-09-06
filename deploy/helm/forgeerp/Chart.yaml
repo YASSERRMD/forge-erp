@@ -1,0 +1,6 @@
+apiVersion: v2
+name: forgeerp
+description: ForgeERP modular-monolith ERP/CRM (Dolibarr functional successor)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

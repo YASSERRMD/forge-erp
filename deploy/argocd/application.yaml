@@ -1,0 +1,19 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: forgeerp
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YASSERRMD/forge-erp.git
+    targetRevision: main
+    path: deploy/helm/forgeerp
+    helm:
+      valueFiles: [values.yaml]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: forgeerp
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]
