@@ -1,0 +1,33 @@
+openapi: 3.1.0
+info:
+  title: ForgeERP API
+  version: 0.1.0
+  description: >
+    ForgeERP modernized ERP/CRM API (Dolibarr functional successor).
+    This document is authoritative for REST surface; phase routers must register
+    every path declared here.
+servers:
+  - url: http://localhost:8080
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness probe
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  version: { type: string }
+                  commit: { type: string }
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness probe (includes DB check)
+      responses:
+        '200': { description: Ready }
+        '503': { description: Degraded }
