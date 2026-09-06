@@ -154,3 +154,43 @@ paths:
       summary: Post an inventory-count correction (requires catalog.stock.write)
       responses:
         '201': { description: Created }
+  /api/v1/sales/documents:
+    get:
+      operationId: listSalesDocuments
+      summary: Page commercial documents by type (requires sales.document.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createSalesDocument
+      summary: Create a draft document (requires sales.document.write)
+      responses:
+        '201': { description: Created with server ref + totals }
+        '422': { description: Validation failed }
+  /api/v1/sales/documents/{id}/status:
+    post:
+      operationId: setDocumentStatus
+      summary: Kernel-checked status transition (requires sales.document.validate)
+      responses:
+        '200': { description: Updated }
+        '422': { description: Illegal transition }
+  /api/v1/sales/documents/{id}/convert:
+    post:
+      operationId: convertDocument
+      summary: Clone into next family with lineage (requires sales.document.write)
+      responses:
+        '201': { description: Converted }
+        '422': { description: Illegal conversion }
+  /api/v1/sales/payments:
+    post:
+      operationId: recordPayment
+      summary: Record + allocate a payment (requires sales.payment.write)
+      responses:
+        '201': { description: Recorded with allocation }
+        '422': { description: Overpayment refused }
+  /api/v1/sales/shipments/{id}/fulfill:
+    post:
+      operationId: fulfillShipment
+      summary: Post stock shipments for a validated shipment (requires sales.shipment.write)
+      responses:
+        '200': { description: Fulfilled, shipment closed }
+        '422': { description: Guard violation }

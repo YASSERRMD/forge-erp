@@ -10,12 +10,15 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
+	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 	"github.com/YASSERRMD/forge-erp/backend/migrations"
 )
 
@@ -61,6 +64,10 @@ func run() error {
 	if err := seedDemoCatalog(ctx, cstore); err != nil {
 		return fmt.Errorf("seed demo catalog: %w", err)
 	}
+	sstore := sales.NewPGStore(pool)
+	if err := seedDemoSales(ctx, sstore, pstore, cstore); err != nil {
+		return fmt.Errorf("seed demo sales: %w", err)
+	}
 
 	base := platform.Router(platform.BuildInfo{Version: version, Commit: commit})
 	mux, ok := base.(chi.Router)
@@ -74,6 +81,8 @@ func run() error {
 		partners.Routes(r, partners.Deps{Store: pstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
 		catalog.Routes(r, catalog.Deps{Store: cstore, Bus: platform.NewMemoryBus()},
+			idH.Require)
+		sales.Routes(r, sales.Deps{Store: sstore, Catalog: cstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
 	})
 	handler := mux
@@ -199,5 +208,78 @@ func seedDemoCatalog(ctx context.Context, store *catalog.PGStore) error {
 		return err
 	}
 	log.Print("forgeerp: seeded demo catalog")
+	return nil
+}
+
+// seedDemoSales inserts a demo quote-to-cash chain (proposal → order → shipment →
+// invoice, partially paid) when no sales documents exist. Development/demo only.
+func seedDemoSales(ctx context.Context, sstore *sales.PGStore, pstore *partners.PGStore, cstore *catalog.PGStore) error {
+	existing, err := sstore.ListDocs(ctx, 1, "invoice", 1, 0)
+	if err != nil {
+		return err
+	}
+	if len(existing) > 0 {
+		return nil
+	}
+	orgs, err := pstore.ListOrgs(ctx, 1, 1, 0)
+	if err != nil || len(orgs) == 0 {
+		return err
+	}
+	prods, err := cstore.ListProducts(ctx, 1, 1, 0)
+	if err != nil || len(prods) == 0 {
+		return err
+	}
+	ym := "202609"
+	lines := []documents.Line{{ProductID: prods[0].ID, Label: prods[0].Name,
+		Qty: 2, UnitNet: prods[0].NetPrice, VATRateBps: prods[0].VATRateBps}}
+	mkDoc := func(t documents.DocType, srcT documents.DocType, srcID int64) *sales.Document {
+		return &sales.Document{EntityID: 1, Type: t, OrgID: orgs[0].ID,
+			Currency: "USD", RateToBase: 1000000, SourceType: srcT, SourceID: srcID, Lines: lines}
+	}
+	prop := mkDoc(documents.TypeProposal, "", 0)
+	if err := sstore.CreateDoc(ctx, prop, ym); err != nil {
+		return err
+	}
+	if _, err := sstore.SetStatus(ctx, prop.ID, sales.ProposalSigned); err != nil {
+		// Signed requires validated first; walk the chain explicitly.
+		if _, err := sstore.SetStatus(ctx, prop.ID, sales.ProposalValidated); err != nil {
+			return err
+		}
+		if _, err := sstore.SetStatus(ctx, prop.ID, sales.ProposalSigned); err != nil {
+			return err
+		}
+	}
+	next, err := sales.Convert(*prop, documents.TypeOrder)
+	if err != nil {
+		return err
+	}
+	ord := &next
+	if err := sstore.CreateDoc(ctx, ord, ym); err != nil {
+		return err
+	}
+	if _, err := sstore.SetStatus(ctx, ord.ID, sales.OrderValidated); err != nil {
+		return err
+	}
+	nx2, err := sales.Convert(*ord, documents.TypeInvoice)
+	if err != nil {
+		return err
+	}
+	inv := &nx2
+	if err := sstore.CreateDoc(ctx, inv, ym); err != nil {
+		return err
+	}
+	if _, err := sstore.SetStatus(ctx, inv.ID, sales.InvoiceValidated); err != nil {
+		return err
+	}
+	bal, err := sstore.InvoiceBalance(ctx, inv.ID)
+	if err != nil {
+		return err
+	}
+	pay := &sales.Payment{EntityID: 1, OrgID: orgs[0].ID, Amount: bal / 2,
+		Currency: "USD", Method: "transfer", PaidAt: time.Now().UTC()}
+	if _, err := sstore.RecordPayment(ctx, pay, []int64{inv.ID}, ym); err != nil {
+		return err
+	}
+	log.Print("forgeerp: seeded demo sales chain")
 	return nil
 }
