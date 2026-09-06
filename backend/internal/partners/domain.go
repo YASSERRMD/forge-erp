@@ -33,29 +33,29 @@ type Address struct {
 
 // Organization is a third party scoped to an entity (Dolibarr llx_societe + entity).
 type Organization struct {
-	ID             int64
-	EntityID       int64
-	Name           string // llx_societe.nom
-	Alias          string // name_alias
-	RefExt         string // external reference
-	ParentID       *int64 // parent subsidiary hierarchy (llx_societe.parent)
-	Status         OrgStatus
-	IsCustomer     bool
-	IsSupplier     bool
-	IsProspect     bool
-	CustomerCode   string // code_client, unique per entity
-	SupplierCode   string // code_fournisseur, unique per entity
-	Email          string
-	Phone          string
-	Address        Address
-	AcctCustomer   string // accountancy_code_customer_general
-	AcctSupplier   string // accountancy_code_supplier_general
-	CustomFields   map[string]any
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	CreatedBy      *int64
-	UpdatedBy      *int64
-	RowVersion     int64
+	ID             int64         `json:"id"`
+	EntityID       int64         `json:"entity_id"`
+	Name           string        `json:"name"` // llx_societe.nom
+	Alias          string        `json:"alias"` // name_alias
+	RefExt         string        `json:"ref_ext"` // external reference
+	ParentID       *int64        `json:"parent_id"` // parent subsidiary hierarchy (llx_societe.parent)
+	Status         OrgStatus     `json:"status"`
+	IsCustomer     bool          `json:"is_customer"`
+	IsSupplier     bool          `json:"is_supplier"`
+	IsProspect     bool          `json:"is_prospect"`
+	CustomerCode   string        `json:"customer_code"` // code_client, unique per entity
+	SupplierCode   string        `json:"supplier_code"` // code_fournisseur, unique per entity
+	Email          string        `json:"email"`
+	Phone          string        `json:"phone"`
+	Address        Address       `json:"address"`
+	AcctCustomer   string        `json:"acct_customer"` // accountancy_code_customer_general
+	AcctSupplier   string        `json:"acct_supplier"` // accountancy_code_supplier_general
+	CustomFields   map[string]any `json:"custom_fields"`
+	CreatedAt      time.Time     `json:"created_at"`
+	UpdatedAt      time.Time     `json:"updated_at"`
+	CreatedBy      *int64        `json:"created_by"`
+	UpdatedBy      *int64        `json:"updated_by"`
+	RowVersion     int64         `json:"row_version"`
 }
 
 // Validate enforces master-data rules (characterized from Societe.class.php:
@@ -104,21 +104,21 @@ func CheckNoCycle(id int64, parentID *int64, lookup func(id int64) (parent *int6
 // Contact is a person attached to an organization (Dolibarr llx_socpeople;
 // roles generalize element_contact contact types).
 type Contact struct {
-	ID          int64
-	EntityID    int64
-	OrgID       int64
-	FirstName   string
-	LastName    string
-	Email       string
-	Phone       string
-	Role        string // billing | shipping | technical | sales | other
-	IsDefault   bool
-	CustomFields map[string]any
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	CreatedBy   *int64
-	UpdatedBy   *int64
-	RowVersion  int64
+	ID           int64          `json:"id"`
+	EntityID     int64          `json:"entity_id"`
+	OrgID        int64          `json:"org_id"`
+	FirstName    string         `json:"first_name"`
+	LastName     string         `json:"last_name"`
+	Email        string         `json:"email"`
+	Phone        string         `json:"phone"`
+	Role         string         `json:"role"` // billing | shipping | technical | sales | other
+	IsDefault    bool           `json:"is_default"`
+	CustomFields map[string]any `json:"custom_fields"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	CreatedBy    *int64         `json:"created_by"`
+	UpdatedBy    *int64         `json:"updated_by"`
+	RowVersion   int64          `json:"row_version"`
 }
 
 // ValidRoles enumerates contact roles.
@@ -146,11 +146,11 @@ func (c Contact) Validate() error {
 // Category scopes cross-entity tags (Dolibarr llx_categorie + categorie_* link tables,
 // collapsed into one table with a scope discriminator).
 type Category struct {
-	ID       int64
-	EntityID int64
-	Code     string
-	Label    string
-	Scope    string // organization | contact | product | ...
+	ID       int64  `json:"id"`
+	EntityID int64  `json:"entity_id"`
+	Code     string `json:"code"`
+	Label    string `json:"label"`
+	Scope    string `json:"scope"` // organization | contact | product | ...
 }
 
 // Validate scopes.

@@ -33,32 +33,32 @@ const (
 
 // User is a login-capable account scoped to an entity (Dolibarr: llx_user + entity).
 type User struct {
-	ID             int64
-	EntityID       int64
-	Login          string
-	Email          string
-	FirstName      string
-	LastName       string
-	Status         UserStatus
-	PasswordHash   string // argon2id PHC string; empty for SSO-only accounts
-	IsAdmin        bool   // bypasses rights checks (Dolibarr admin flag)
-	FailedAttempts int
-	LockedUntil    *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	CreatedBy      *int64
-	UpdatedBy      *int64
-	RowVersion     int64
+	ID             int64      `json:"id"`
+	EntityID       int64      `json:"entity_id"`
+	Login          string     `json:"login"`
+	Email          string     `json:"email"`
+	FirstName      string     `json:"first_name"`
+	LastName       string     `json:"last_name"`
+	Status         UserStatus `json:"status"`
+	PasswordHash   string     `json:"-"`
+	IsAdmin        bool       `json:"is_admin"`
+	FailedAttempts int        `json:"-"`
+	LockedUntil    *time.Time `json:"-"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	CreatedBy      *int64     `json:"created_by"`
+	UpdatedBy      *int64     `json:"updated_by"`
+	RowVersion     int64      `json:"row_version"`
 }
 
 // Group bundles rights (Dolibarr: llx_usergroup).
 type Group struct {
-	ID        int64
-	EntityID  int64
-	Code      string
-	Label     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        int64     `json:"id"`
+	EntityID  int64     `json:"entity_id"`
+	Code      string    `json:"code"`
+	Label     string    `json:"label"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Right is one grant in the matrix (Dolibarr: llx_rights_def + grants).
