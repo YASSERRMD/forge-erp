@@ -46,6 +46,8 @@ type Document struct {
 	Totals     documents.Totals  `json:"totals"`
 	CreatedAt  time.Time         `json:"created_at"`
 	UpdatedAt  time.Time         `json:"updated_at"`
+	CreatedBy  *int64            `json:"created_by"`
+	UpdatedBy  *int64            `json:"updated_by"`
 	RowVersion int64             `json:"row_version"`
 }
 
