@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/YASSERRMD/forge-erp/backend/migrations"
 )
@@ -51,14 +52,22 @@ func run() error {
 	if err := seedAdmin(ctx, cfg, store); err != nil {
 		return fmt.Errorf("seed admin: %w", err)
 	}
+	pstore := partners.NewPGStore(pool)
+	if err := seedDemoOrgs(ctx, pstore); err != nil {
+		return fmt.Errorf("seed demo orgs: %w", err)
+	}
 
 	base := platform.Router(platform.BuildInfo{Version: version, Commit: commit})
 	mux, ok := base.(chi.Router)
 	if !ok {
 		return errors.New("platform router is not a chi router")
 	}
+	identDeps := identity.Deps{Store: store, Issuer: issuer}
+	idH := identity.NewHandler(identDeps)
 	mux.Route("/api/v1", func(r chi.Router) {
-		identity.Routes(r, identity.Deps{Store: store, Issuer: issuer})
+		identity.Routes(r, identDeps)
+		partners.Routes(r, partners.Deps{Store: pstore, Bus: platform.NewMemoryBus()},
+			idH.Require)
 	})
 	handler := mux
 	srv := &http.Server{
@@ -107,5 +116,41 @@ func seedAdmin(ctx context.Context, cfg platform.Config, store *identity.PGStore
 		return err
 	}
 	log.Printf("forgeerp: seeded admin user %q", cfg.AdminEmail)
+	return nil
+}
+
+// seedDemoOrgs inserts a minimal demo dataset (one customer + one supplier with
+// contacts) when the organizations table is empty. Development/demo only.
+func seedDemoOrgs(ctx context.Context, store *partners.PGStore) error {
+	existing, err := store.ListOrgs(ctx, 1, 1, 0)
+	if err != nil {
+		return err
+	}
+	if len(existing) > 0 {
+		return nil
+	}
+	demo := []partners.Organization{
+		{EntityID: 1, Name: "Acme Industries", IsCustomer: true, CustomerCode: "ACME-001",
+			Email: "contact@acme.example", Status: partners.OrgActive},
+		{EntityID: 1, Name: "Globex Supplies", IsSupplier: true, SupplierCode: "GLOB-001",
+			Email: "sales@globex.example", Status: partners.OrgActive},
+	}
+	for i := range demo {
+		if err := demo[i].Validate(); err != nil {
+			return err
+		}
+		if err := store.CreateOrg(ctx, &demo[i]); err != nil {
+			return err
+		}
+	}
+	contact := &partners.Contact{EntityID: 1, OrgID: demo[0].ID,
+		FirstName: "Ada", LastName: "Lovelace", Email: "ada@acme.example", Role: "billing"}
+	if err := contact.Validate(); err != nil {
+		return err
+	}
+	if err := store.CreateContact(ctx, contact); err != nil {
+		return err
+	}
+	log.Print("forgeerp: seeded demo organizations")
 	return nil
 }

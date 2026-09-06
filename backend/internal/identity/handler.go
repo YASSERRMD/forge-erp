@@ -43,6 +43,9 @@ func Routes(r chi.Router, d Deps) {
 // Handler implements the identity HTTP surface.
 type Handler struct{ deps Deps }
 
+// NewHandler builds a Handler (also exposes Require for other contexts' routes).
+func NewHandler(d Deps) *Handler { return &Handler{deps: d} }
+
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
