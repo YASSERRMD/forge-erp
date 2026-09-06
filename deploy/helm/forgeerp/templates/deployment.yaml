@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-api
+  labels: { app: forgeerp }
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: { app: forgeerp }
+  template:
+    metadata:
+      labels: { app: forgeerp }
+    spec:
+      containers:
+        - name: api
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: FERP_ENV
+              value: {{ .Values.env.FERP_ENV | quote }}
+            - name: FERP_DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: forgeerp-db, key: url }
+            - name: FERP_JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: forgeerp-jwt, key: secret }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 5
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8080 }
+            initialDelaySeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

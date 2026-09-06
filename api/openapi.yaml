@@ -261,3 +261,22 @@ paths:
       summary: Record a bank movement (requires finance.bank.write)
       responses:
         '201': { description: Recorded }
+  /api/v1/documents/upload:
+    post:
+      operationId: uploadDocument
+      summary: Upload a file with metadata (requires documents.file.write)
+      responses:
+        '201': { description: Stored }
+        '422': { description: Validation failed }
+  /api/v1/documents:
+    get:
+      operationId: listDocuments
+      summary: List file metadata (requires documents.file.read)
+      responses:
+        '200': { description: List }
+  /api/v1/search:
+    get:
+      operationId: search
+      summary: Cross-entity substring search (requires search.query.read)
+      responses:
+        '200': { description: Hits }

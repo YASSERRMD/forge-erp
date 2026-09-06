@@ -1,0 +1,17 @@
+replicaCount: 2
+image:
+  repository: forgeerp/api
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  port: 8080
+env:
+  FERP_ENV: production
+  FERP_DATABASE_URL: "postgres://forgeerp:forgeerp@postgres:5432/forgeerp?sslmode=require"
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits: { cpu: 1000m, memory: 512Mi }
+ingress:
+  enabled: false
+  host: erp.example.com
