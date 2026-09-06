@@ -16,6 +16,12 @@ const (
 	TypeOrder    DocType = "order"    // llx_commande
 	TypeShipment DocType = "shipment" // llx_expedition
 	TypeInvoice  DocType = "invoice"  // llx_facture
+	// Supplier families (Dolibarr supplier_proposal / commande_fournisseur /
+	// reception / facture_fourn) share kernel semantics with own lifecycles.
+	TypeSupplierProposal DocType = "supplier_proposal"
+	TypeSupplierOrder    DocType = "supplier_order"
+	TypeReception        DocType = "reception"
+	TypeSupplierInvoice  DocType = "supplier_invoice"
 )
 
 // Prefix returns the reference prefix per type (Dolibarr numbering masks equivalent).
@@ -29,6 +35,14 @@ func (t DocType) Prefix() string {
 		return "SHIP"
 	case TypeInvoice:
 		return "INV"
+	case TypeSupplierProposal:
+		return "SPROP"
+	case TypeSupplierOrder:
+		return "SORD"
+	case TypeReception:
+		return "RCV"
+	case TypeSupplierInvoice:
+		return "SINV"
 	}
 	return "DOC"
 }
@@ -62,6 +76,28 @@ var Transitions = map[DocType]map[int16][]int16{
 		1: {2, 9},
 	},
 	TypeInvoice: {
+		0: {1, 9},
+		1: {2, 3, 9},
+		2: {3, 9},
+	},
+	// Supplier lifecycles mirror the sales ones.
+	TypeSupplierProposal: {
+		0: {1, 9},
+		1: {2, 9},
+		2: {3, 9},
+		3: {4},
+	},
+	TypeSupplierOrder: {
+		0: {1, 9},
+		1: {2, 9},
+		2: {3, 9},
+		3: {4},
+	},
+	TypeReception: {
+		0: {1, 9},
+		1: {2, 9},
+	},
+	TypeSupplierInvoice: {
 		0: {1, 9},
 		1: {2, 3, 9},
 		2: {3, 9},
