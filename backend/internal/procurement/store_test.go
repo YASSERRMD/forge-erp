@@ -35,11 +35,9 @@ func TestMemoryStoreProcureChain(t *testing.T) {
 		t.Fatal("unapproved large order validated")
 	}
 	approver := int64(1)
-	ord.ApprovedBy = &approver
-	// MemoryStore.SetStatus reads stored doc; persist approval first via stored copy.
-	stored, _ := st.DocByID(ctx, ord.ID)
-	stored.ApprovedBy = &approver
-	st.docs[ord.ID] = stored
+	if _, err := st.SetApproval(ctx, ord.ID, approver); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.SetStatus(ctx, ord.ID, Validated); err != nil {
 		t.Fatal(err)
 	}

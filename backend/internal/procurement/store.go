@@ -28,7 +28,9 @@ type SupplierPayment struct {
 type Store interface {
 	CreateDoc(ctx context.Context, d *Document, yearMonth string) error
 	DocByID(ctx context.Context, id int64) (Document, error)
+	ListDocs(ctx context.Context, entityID int64, t documents.DocType, limit, offset int) ([]Document, error)
 	SetStatus(ctx context.Context, id int64, to int16) (Document, error)
+	SetApproval(ctx context.Context, id int64, approverID int64) (Document, error)
 	UpsertPrice(ctx context.Context, p *SupplierPrice) error
 	PricesFor(ctx context.Context, entityID, productID, orgID int64) ([]SupplierPrice, error)
 	RecordPayment(ctx context.Context, p *SupplierPayment, invoiceIDs []int64, yearMonth string) ([]int64, error)
@@ -160,6 +162,48 @@ func (s *PGStore) SetStatus(ctx context.Context, id int64, to int16) (Document, 
 		return Document{}, identity.ErrVersionConflict
 	}
 	d.Status = to
+	d.RowVersion++
+	return d, nil
+}
+
+// ListDocs pages supplier documents of one family.
+func (s *PGStore) ListDocs(ctx context.Context, entityID int64, t documents.DocType, limit, offset int) ([]Document, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+docCols+` FROM ferp_supplier_docs
+		WHERE entity_id=$1 AND type=$2 ORDER BY id DESC LIMIT $3 OFFSET $4`,
+		entityID, string(t), limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Document
+	for rows.Next() {
+		d, err := scanDoc(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// SetApproval stamps an approver on an order (unblocks above-threshold validation).
+func (s *PGStore) SetApproval(ctx context.Context, id int64, approverID int64) (Document, error) {
+	d, err := s.DocByID(ctx, id)
+	if err != nil {
+		return Document{}, err
+	}
+	if d.Type != documents.TypeSupplierOrder {
+		return Document{}, errors.New("procurement: approval applies to supplier orders")
+	}
+	tag, err := s.pool.Exec(ctx, `UPDATE ferp_supplier_docs SET approved_by=$1, updated_at=now(), row_version=row_version+1
+		WHERE id=$2 AND row_version=$3`, approverID, id, d.RowVersion)
+	if err != nil {
+		return Document{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return Document{}, identity.ErrVersionConflict
+	}
+	d.ApprovedBy = &approverID
 	d.RowVersion++
 	return d, nil
 }
@@ -339,6 +383,43 @@ func (m *MemoryStore) SetStatus(_ context.Context, id int64, to int16) (Document
 		return Document{}, errors.New("procurement: order above threshold requires approval")
 	}
 	d.Status = to
+	d.RowVersion++
+	m.docs[id] = d
+	return d, nil
+}
+
+// ListDocs pages supplier documents of one family.
+func (m *MemoryStore) ListDocs(_ context.Context, entityID int64, t documents.DocType, limit, offset int) ([]Document, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Document
+	for _, d := range m.docs {
+		if d.EntityID == entityID && d.Type == t {
+			out = append(out, d)
+		}
+	}
+	if offset > len(out) {
+		return nil, nil
+	}
+	out = out[offset:]
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// SetApproval stamps an approver on an order.
+func (m *MemoryStore) SetApproval(_ context.Context, id int64, approverID int64) (Document, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.docs[id]
+	if !ok {
+		return Document{}, identity.ErrNotFound
+	}
+	if d.Type != documents.TypeSupplierOrder {
+		return Document{}, errors.New("procurement: approval applies to supplier orders")
+	}
+	d.ApprovedBy = &approverID
 	d.RowVersion++
 	m.docs[id] = d
 	return d, nil
