@@ -131,7 +131,10 @@ func run() error {
 	identDeps := identity.Deps{Store: store, Issuer: issuer}
 	idH := identity.NewHandler(identDeps)
 	mux.Use(metrics.Instrument)
-	mux.Route("/api/v1", func(r chi.Router) {
+	// Abuse caps: 20 rps burst 40 per IP across the API (login endpoints additionally
+	// guarded by per-account lockout in the identity context).
+	apiLimiter := platform.NewRateLimiter(20, 40)
+	mux.With(apiLimiter.Limit).Route("/api/v1", func(r chi.Router) {
 		identity.Routes(r, identDeps)
 		partners.Routes(r, partners.Deps{Store: pstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
