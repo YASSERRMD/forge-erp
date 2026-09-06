@@ -1,1 +1,22 @@
 .forgeerp-temp/
+
+# Go
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
