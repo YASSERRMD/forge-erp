@@ -18,6 +18,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/YASSERRMD/forge-erp/backend/internal/procurement"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 	"github.com/YASSERRMD/forge-erp/backend/migrations"
 )
@@ -68,6 +69,7 @@ func run() error {
 	if err := seedDemoSales(ctx, sstore, pstore, cstore); err != nil {
 		return fmt.Errorf("seed demo sales: %w", err)
 	}
+	procstore := procurement.NewPGStore(pool)
 
 	base := platform.Router(platform.BuildInfo{Version: version, Commit: commit})
 	mux, ok := base.(chi.Router)
@@ -83,6 +85,8 @@ func run() error {
 		catalog.Routes(r, catalog.Deps{Store: cstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
 		sales.Routes(r, sales.Deps{Store: sstore, Catalog: cstore, Bus: platform.NewMemoryBus()},
+			idH.Require)
+		procurement.Routes(r, procurement.Deps{Store: procstore, Catalog: cstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
 	})
 	handler := mux
