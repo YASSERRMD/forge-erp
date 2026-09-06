@@ -194,3 +194,39 @@ paths:
       responses:
         '200': { description: Fulfilled, shipment closed }
         '422': { description: Guard violation }
+  /api/v1/purchase/documents:
+    get:
+      operationId: listPurchaseDocuments
+      summary: Page supplier documents by type (requires procurement.document.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createPurchaseDocument
+      summary: Create a draft supplier document with contract-price check (requires procurement.document.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Off-contract price or validation failure }
+  /api/v1/purchase/documents/{id}/approve:
+    post:
+      operationId: approvePurchaseOrder
+      summary: Stamp approval for above-threshold orders (requires procurement.document.write)
+      responses:
+        '200': { description: Approved }
+  /api/v1/purchase/prices:
+    post:
+      operationId: upsertSupplierPrice
+      summary: Pin a contract price (requires procurement.price.write)
+      responses:
+        '201': { description: Pinned }
+  /api/v1/purchase/payments:
+    post:
+      operationId: recordSupplierPayment
+      summary: Record + allocate a supplier payment (requires procurement.payment.write)
+      responses:
+        '201': { description: Recorded }
+  /api/v1/purchase/receptions/{id}/receive:
+    post:
+      operationId: receiveReception
+      summary: Post stock receipts for a validated reception (requires procurement.reception.write)
+      responses:
+        '200': { description: Received, reception closed }
