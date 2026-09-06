@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Organization status (Dolibarr llx_societe.status: 1 active, 0 closed).
@@ -50,6 +51,8 @@ type Organization struct {
 	AcctCustomer   string // accountancy_code_customer_general
 	AcctSupplier   string // accountancy_code_supplier_general
 	CustomFields   map[string]any
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 	CreatedBy      *int64
 	UpdatedBy      *int64
 	RowVersion     int64
@@ -111,6 +114,8 @@ type Contact struct {
 	Role        string // billing | shipping | technical | sales | other
 	IsDefault   bool
 	CustomFields map[string]any
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 	CreatedBy   *int64
 	UpdatedBy   *int64
 	RowVersion  int64
