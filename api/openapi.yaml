@@ -31,3 +31,61 @@ paths:
       responses:
         '200': { description: Ready }
         '503': { description: Degraded }
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      summary: Authenticate with native credentials (Dolibarr functions_dolibarr.php equivalent)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [login, password]
+              properties:
+                login: { type: string }
+                password: { type: string }
+                entity_id: { type: integer, default: 1 }
+      responses:
+        '200': { description: Access + refresh tokens }
+        '401': { description: Invalid credentials, locked, or disabled }
+  /api/v1/auth/refresh:
+    post:
+      operationId: refresh
+      summary: Rotate an opaque refresh token (single-use)
+      responses:
+        '200': { description: New token pair }
+        '401': { description: Invalid refresh token }
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      summary: Revoke a refresh token
+      responses:
+        '204': { description: Revoked }
+  /api/v1/auth/me:
+    get:
+      operationId: me
+      summary: Authenticated user profile (requires identity.user.read)
+      responses:
+        '200': { description: Profile }
+        '401': { description: Unauthorized }
+        '403': { description: Missing right }
+  /api/v1/users:
+    post:
+      operationId: createUser
+      summary: Register a native account (requires identity.user.write)
+      responses:
+        '201': { description: Created }
+        '403': { description: Missing right }
+  /api/v1/groups:
+    post:
+      operationId: createGroup
+      summary: Create a rights group (requires identity.group.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/rights/grant:
+    post:
+      operationId: grantRight
+      summary: Issue one module.entity.action triple (requires identity.right.write)
+      responses:
+        '204': { description: Granted }
