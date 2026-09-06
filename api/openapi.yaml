@@ -230,3 +230,34 @@ paths:
       summary: Post stock receipts for a validated reception (requires procurement.reception.write)
       responses:
         '200': { description: Received, reception closed }
+  /api/v1/finance/accounts:
+    post:
+      operationId: createAccount
+      summary: Add a chart-of-accounts row (requires finance.account.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/finance/entries:
+    post:
+      operationId: postEntry
+      summary: Validate, chain-link and post an entry (requires finance.entry.write)
+      responses:
+        '201': { description: Posted }
+        '422': { description: Unbalanced or locked year }
+  /api/v1/finance/trial-balance:
+    get:
+      operationId: trialBalance
+      summary: Per-account sums with balance assertion (requires finance.entry.read)
+      responses:
+        '200': { description: Balanced trial balance }
+  /api/v1/finance/chain-verify:
+    get:
+      operationId: verifyChain
+      summary: Recompute the tamper-evident chain (requires finance.entry.read)
+      responses:
+        '200': { description: Chain verdict }
+  /api/v1/finance/bank-transactions:
+    post:
+      operationId: recordBankTransaction
+      summary: Record a bank movement (requires finance.bank.write)
+      responses:
+        '201': { description: Recorded }

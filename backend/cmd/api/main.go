@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
+	"github.com/YASSERRMD/forge-erp/backend/internal/finance"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
@@ -70,6 +71,10 @@ func run() error {
 		return fmt.Errorf("seed demo sales: %w", err)
 	}
 	procstore := procurement.NewPGStore(pool)
+	fstore := finance.NewPGStore(pool)
+	if err := seedDemoFinance(ctx, fstore); err != nil {
+		return fmt.Errorf("seed demo finance: %w", err)
+	}
 
 	base := platform.Router(platform.BuildInfo{Version: version, Commit: commit})
 	mux, ok := base.(chi.Router)
@@ -88,6 +93,7 @@ func run() error {
 			idH.Require)
 		procurement.Routes(r, procurement.Deps{Store: procstore, Catalog: cstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
+		finance.Routes(r, finance.Deps{Store: fstore}, idH.Require)
 	})
 	handler := mux
 	srv := &http.Server{
@@ -285,5 +291,53 @@ func seedDemoSales(ctx context.Context, sstore *sales.PGStore, pstore *partners.
 		return err
 	}
 	log.Print("forgeerp: seeded demo sales chain")
+	return nil
+}
+
+// seedDemoFinance inserts a minimal chart of accounts, journals, an open fiscal
+// year, and a demo bank account. Development/demo only.
+func seedDemoFinance(ctx context.Context, store *finance.PGStore) error {
+	tb, err := store.TrialBalance(ctx, 1)
+	if err != nil {
+		return err
+	}
+	if len(tb) > 0 {
+		return nil
+	}
+	accts := []finance.Account{
+		{EntityID: 1, Code: "411000", Label: "Customers", Type: "asset"},
+		{EntityID: 1, Code: "401000", Label: "Suppliers", Type: "liability"},
+		{EntityID: 1, Code: "512000", Label: "Bank", Type: "asset"},
+		{EntityID: 1, Code: "707000", Label: "Sales", Type: "revenue"},
+		{EntityID: 1, Code: "607000", Label: "Purchases", Type: "expense"},
+		{EntityID: 1, Code: "445700", Label: "VAT collected", Type: "liability"},
+	}
+	for i := range accts {
+		if err := store.CreateAccount(ctx, &accts[i]); err != nil {
+			return err
+		}
+	}
+	for _, j := range []finance.Journal{
+		{EntityID: 1, Code: "VEN", Label: "Sales"},
+		{EntityID: 1, Code: "ACH", Label: "Purchases"},
+		{EntityID: 1, Code: "BNK", Label: "Bank"},
+	} {
+		jj := j
+		if err := store.CreateJournal(ctx, &jj); err != nil {
+			return err
+		}
+	}
+	now := time.Now().UTC()
+	fy := &finance.FiscalYear{EntityID: 1, Label: "FY", Locked: false,
+		StartDate: time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC),
+		EndDate:   time.Date(now.Year(), 12, 31, 23, 59, 59, 0, time.UTC)}
+	if err := store.CreateFiscalYear(ctx, fy); err != nil {
+		return err
+	}
+	ba := &finance.BankAccount{EntityID: 1, Code: "BNK1", Label: "Main account"}
+	if err := store.CreateBankAccount(ctx, ba); err != nil {
+		return err
+	}
+	log.Print("forgeerp: seeded demo finance")
 	return nil
 }
