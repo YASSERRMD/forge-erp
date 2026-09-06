@@ -89,3 +89,30 @@ paths:
       summary: Issue one module.entity.action triple (requires identity.right.write)
       responses:
         '204': { description: Granted }
+  /api/v1/organizations:
+    get:
+      operationId: listOrganizations
+      summary: Page organizations in caller's entity (requires partners.organization.read)
+      responses:
+        '200': { description: List }
+        '403': { description: Missing right }
+    post:
+      operationId: createOrganization
+      summary: Create a third party (requires partners.organization.write)
+      responses:
+        '201': { description: Created }
+        '409': { description: Duplicate code }
+        '422': { description: Validation failed }
+  /api/v1/organizations/{id}:
+    get:
+      operationId: getOrganization
+      summary: Fetch one organization
+      responses:
+        '200': { description: Organization }
+        '404': { description: Not found }
+  /api/v1/categories:
+    post:
+      operationId: createCategory
+      summary: Create a tag category (requires partners.category.write)
+      responses:
+        '201': { description: Created }
