@@ -72,7 +72,7 @@ func TestMemoryLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("activate: %v", err)
 	}
-	p = pActive
+	*p = pActive
 	tk := &Task{EntityID: 1, ProjectID: p.ID, Label: "Design"}
 	if err := m.CreateTask(ctx, tk); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -105,7 +105,7 @@ func TestMemoryLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("close project: %v", err)
 	}
-	p = pClosed
+	*p = pClosed
 	if err := m.CreateTask(ctx, &Task{EntityID: 1, ProjectID: p.ID, Label: "late"}); err == nil {
 		t.Error("task on closed project accepted")
 	}
