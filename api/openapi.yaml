@@ -116,3 +116,41 @@ paths:
       summary: Create a tag category (requires partners.category.write)
       responses:
         '201': { description: Created }
+  /api/v1/products:
+    get:
+      operationId: listProducts
+      summary: Page products (requires catalog.product.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createProduct
+      summary: Create a product (requires catalog.product.write)
+      responses:
+        '201': { description: Created }
+        '409': { description: Duplicate SKU }
+        '422': { description: Validation failed }
+  /api/v1/warehouses:
+    post:
+      operationId: createWarehouse
+      summary: Open a warehouse (requires catalog.warehouse.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/stock-movements:
+    post:
+      operationId: appendMovement
+      summary: Record a stock movement (requires catalog.stock.write)
+      responses:
+        '201': { description: Created with new level }
+        '422': { description: Guard violation (e.g. oversell) }
+  /api/v1/stock-levels:
+    get:
+      operationId: getStockLevel
+      summary: On-hand position with PMP valuation (requires catalog.stock.read)
+      responses:
+        '200': { description: Level + PMP }
+  /api/v1/inventory-adjust:
+    post:
+      operationId: inventoryAdjust
+      summary: Post an inventory-count correction (requires catalog.stock.write)
+      responses:
+        '201': { description: Created }

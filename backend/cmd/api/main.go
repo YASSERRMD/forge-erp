@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
@@ -56,6 +57,10 @@ func run() error {
 	if err := seedDemoOrgs(ctx, pstore); err != nil {
 		return fmt.Errorf("seed demo orgs: %w", err)
 	}
+	cstore := catalog.NewPGStore(pool)
+	if err := seedDemoCatalog(ctx, cstore); err != nil {
+		return fmt.Errorf("seed demo catalog: %w", err)
+	}
 
 	base := platform.Router(platform.BuildInfo{Version: version, Commit: commit})
 	mux, ok := base.(chi.Router)
@@ -67,6 +72,8 @@ func run() error {
 	mux.Route("/api/v1", func(r chi.Router) {
 		identity.Routes(r, identDeps)
 		partners.Routes(r, partners.Deps{Store: pstore, Bus: platform.NewMemoryBus()},
+			idH.Require)
+		catalog.Routes(r, catalog.Deps{Store: cstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
 	})
 	handler := mux
@@ -152,5 +159,45 @@ func seedDemoOrgs(ctx context.Context, store *partners.PGStore) error {
 		return err
 	}
 	log.Print("forgeerp: seeded demo organizations")
+	return nil
+}
+
+// seedDemoCatalog inserts a demo warehouse + products with opening stock.
+// Development/demo only.
+func seedDemoCatalog(ctx context.Context, store *catalog.PGStore) error {
+	existing, err := store.ListProducts(ctx, 1, 1, 0)
+	if err != nil {
+		return err
+	}
+	if len(existing) > 0 {
+		return nil
+	}
+	w := &catalog.Warehouse{EntityID: 1, Code: "MAIN", Label: "Main warehouse", Status: 1}
+	if err := w.Validate(); err != nil {
+		return err
+	}
+	if err := store.CreateWarehouse(ctx, w); err != nil {
+		return err
+	}
+	demo := []catalog.Product{
+		{EntityID: 1, SKU: "WID-001", Name: "Standard widget", Type: catalog.ProductGoods,
+			Unit: "unit", NetPrice: 1990, VATRateBps: 2000, Status: catalog.ProductActive, StockTracked: true},
+		{EntityID: 1, SKU: "SVC-001", Name: "Consulting hour", Type: catalog.ProductService,
+			Unit: "hour", NetPrice: 12000, VATRateBps: 2000, Status: catalog.ProductActive},
+	}
+	for i := range demo {
+		if err := demo[i].Validate(); err != nil {
+			return err
+		}
+		if err := store.CreateProduct(ctx, &demo[i]); err != nil {
+			return err
+		}
+	}
+	if _, err := store.AppendMovement(ctx, &catalog.StockMovement{EntityID: 1,
+		ProductID: demo[0].ID, WarehouseID: w.ID, Qty: 100, UnitCost: 1200,
+		Reason: catalog.ReasonReceipt, Ref: "OPENING"}, false); err != nil {
+		return err
+	}
+	log.Print("forgeerp: seeded demo catalog")
 	return nil
 }
