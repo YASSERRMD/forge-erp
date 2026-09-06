@@ -34,6 +34,21 @@ export interface SalesDocument {
   totals: { net: number; vat: number; gross: number };
 }
 
+export interface Project {
+  id: number;
+  ref: string;
+  label: string;
+  status: number;
+}
+
+export interface Ticket {
+  id: number;
+  ref: string;
+  subject: string;
+  priority: number;
+  status: number;
+}
+
 const BASE = '';
 
 export function authHeaders(token: string | null): Record<string, string> {
@@ -76,4 +91,8 @@ export const api = {
       token,
       `/api/v1/search?q=${encodeURIComponent(q)}`,
     ),
+  projects: (token: string) =>
+    request<Project[]>(token, '/api/v1/services/projects?limit=50'),
+  tickets: (token: string) =>
+    request<Ticket[]>(token, '/api/v1/services/tickets?limit=50'),
 };

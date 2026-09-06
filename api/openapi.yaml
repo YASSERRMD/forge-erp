@@ -280,3 +280,94 @@ paths:
       summary: Cross-entity substring search (requires search.query.read)
       responses:
         '200': { description: Hits }
+  /api/v1/services/projects:
+    get:
+      operationId: listProjects
+      summary: Page projects (requires services.project.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createProject
+      summary: Open a draft project (requires services.project.write)
+      responses:
+        '201': { description: Created }
+        '409': { description: Duplicate ref }
+        '422': { description: Validation failed }
+  /api/v1/services/projects/{id}/status:
+    post:
+      operationId: setProjectStatus
+      summary: State-machine transition for a project (requires services.project.validate)
+      responses:
+        '200': { description: Updated }
+        '422': { description: Illegal transition }
+  /api/v1/services/projects/{id}/tasks:
+    get:
+      operationId: listProjectTasks
+      summary: List a project's tasks (requires services.task.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createProjectTask
+      summary: Add a task to an open project (requires services.task.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Project closed or invalid }
+  /api/v1/services/tasks/{id}/time:
+    post:
+      operationId: bookTime
+      summary: Book hours against an open task (requires services.time.write)
+      responses:
+        '201': { description: Booked }
+        '422': { description: Task or project closed }
+  /api/v1/services/contracts:
+    post:
+      operationId: createServiceContract
+      summary: Open a draft service contract (requires services.contract.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Validation failed }
+  /api/v1/services/contracts/{id}/status:
+    post:
+      operationId: setContractStatus
+      summary: State-machine transition for a contract (requires services.contract.validate)
+      responses:
+        '200': { description: Updated }
+        '422': { description: Illegal transition }
+  /api/v1/services/interventions:
+    post:
+      operationId: createIntervention
+      summary: Schedule a field intervention (requires services.intervention.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Validation failed }
+  /api/v1/services/tickets:
+    get:
+      operationId: listTickets
+      summary: Page tickets (requires services.ticket.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createTicket
+      summary: Open a ticket (requires services.ticket.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Validation failed }
+  /api/v1/services/tickets/{id}/status:
+    post:
+      operationId: setTicketStatus
+      summary: State-machine transition for a ticket (requires services.ticket.validate)
+      responses:
+        '200': { description: Updated }
+        '422': { description: Illegal transition }
+  /api/v1/services/tickets/{id}/messages:
+    get:
+      operationId: listTicketMessages
+      summary: List a ticket's messages (requires services.ticket.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: addTicketMessage
+      summary: Append a message to an open ticket (requires services.ticket.write)
+      responses:
+        '201': { description: Stored }
+        '422': { description: Ticket closed or invalid }
