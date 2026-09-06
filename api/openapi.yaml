@@ -371,3 +371,44 @@ paths:
       responses:
         '201': { description: Stored }
         '422': { description: Ticket closed or invalid }
+  /api/v1/manufacturing/boms:
+    get:
+      operationId: listBOMs
+      summary: Page bills of materials (requires manufacturing.bom.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createBOM
+      summary: Open a draft BOM (requires manufacturing.bom.write)
+      responses:
+        '201': { description: Created }
+        '409': { description: Duplicate ref }
+        '422': { description: Validation failed }
+  /api/v1/manufacturing/boms/{id}/lines:
+    post:
+      operationId: addBOMLine
+      summary: Append a component line (requires manufacturing.bom.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Self-reference, duplicate or frozen BOM }
+  /api/v1/manufacturing/mos:
+    post:
+      operationId: createMO
+      summary: Open a draft manufacturing order (requires manufacturing.mo.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Validation failed }
+  /api/v1/manufacturing/mos/{id}/status:
+    post:
+      operationId: setMOStatus
+      summary: State-machine transition for an MO (requires manufacturing.mo.validate)
+      responses:
+        '200': { description: Updated }
+        '422': { description: Illegal transition }
+  /api/v1/manufacturing/mos/{id}/produce:
+    post:
+      operationId: produceMO
+      summary: Consume components and receipt finished goods (requires manufacturing.mo.produce)
+      responses:
+        '200': { description: Produced with plan }
+        '422': { description: Insufficient stock or wrong status }

@@ -35,9 +35,18 @@ behavioral or structural deviation so auditors can distinguish design from drift
     5 attempts / 15 min lockout.
 16. Scheduler is fixed-interval jobs (Dolibarr cron expressions not ported).
 17. Auth: Keycloak OIDC in production; HS256 JWT is dev/test only.
+    Realm export ships in deploy/keycloak/realm.json (roles admin/manager/user;
+    clients forgeerp-api bearer-only + forgeerp-web public SPA).
+18. Services: time books against tasks only when task and project are open;
+    messages rejected on closed tickets (Dolibarr permits late comments);
+    interventions must pass through in-progress.
+19. Manufacturing lite: BOM quantities are integer units (Dolibarr allows
+    fractional); produce pre-checks component availability then posts
+    consume+produce moves (no cross-table transaction — concurrent producers
+    can race, acceptable for lite scope); workstations/MRP scheduling not ported.
 
-## Deferred scope (Phase-11+ candidates)
+## Deferred scope (post-Phase-12 candidates)
 
-POS (takepos), manufacturing (bom/mrp), HR details (holiday/expensereport/salaries),
+POS (takepos), HR details (holiday/expensereport/salaries),
 payment plugins (stripe/paypal), surveys (opensurvey), calendar booking (bookcal),
 SOAP API, LDAP sync, DAV/FTP, full i18n (120 langs → English-first + i18n-ready schema).

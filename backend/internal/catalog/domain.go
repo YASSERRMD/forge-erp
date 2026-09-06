@@ -111,6 +111,8 @@ const (
 	ReasonAdjustOut    MovementReason = "adjust_out"
 	ReasonTransferIn   MovementReason = "transfer_in"
 	ReasonTransferOut  MovementReason = "transfer_out"
+	ReasonConsume      MovementReason = "consume" // MO component consumption (manufacturing)
+	ReasonProduce      MovementReason = "produce" // MO finished-good receipt (manufacturing)
 )
 
 // StockMovement is one append-only ledger line. Qty > 0 = stock in, < 0 = out.
@@ -142,7 +144,7 @@ func (m StockMovement) Validate() error {
 	}
 	switch m.Reason {
 	case ReasonReceipt, ReasonShipment, ReasonAdjustIn, ReasonAdjustOut,
-		ReasonTransferIn, ReasonTransferOut:
+		ReasonTransferIn, ReasonTransferOut, ReasonConsume, ReasonProduce:
 		return nil
 	}
 	return fmt.Errorf("catalog: unknown movement reason %q", m.Reason)
