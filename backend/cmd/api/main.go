@@ -23,6 +23,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/procurement"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 	"github.com/YASSERRMD/forge-erp/backend/internal/search"
+	"github.com/YASSERRMD/forge-erp/backend/internal/services"
 	"github.com/YASSERRMD/forge-erp/backend/migrations"
 )
 
@@ -80,6 +81,7 @@ func run() error {
 	}
 	procstore := procurement.NewPGStore(pool)
 	fstore := finance.NewPGStore(pool)
+	svcstore := services.NewPGStore(pool)
 	if err := seedDemoFinance(ctx, fstore); err != nil {
 		return fmt.Errorf("seed demo finance: %w", err)
 	}
@@ -145,6 +147,8 @@ func run() error {
 		procurement.Routes(r, procurement.Deps{Store: procstore, Catalog: cstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
 		finance.Routes(r, finance.Deps{Store: fstore}, idH.Require)
+		services.Routes(r, services.Deps{Store: svcstore, Bus: platform.NewMemoryBus()},
+			idH.Require)
 		documentsvc.Routes(r, docSvc, idH.Require)
 		search.Routes(r, searcher, idH.Require)
 	})
