@@ -854,6 +854,69 @@ paths:
       summary: Vote tally for a question (requires survey.vote.read)
       responses:
         '200': { description: Tally }
+  /api/v1/member-types:
+    get:
+      operationId: listMemberTypes
+      summary: List membership classes (requires members.type.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createMemberType
+      summary: Register a membership class (requires members.type.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/members:
+    get:
+      operationId: listMembers
+      summary: Page members (requires members.member.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createMember
+      summary: Register a draft member (requires members.member.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Validation failed }
+  /api/v1/members/{id}/status:
+    post:
+      operationId: setMemberStatus
+      summary: Member lifecycle transition (requires members.member.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/members/{id}/subscriptions:
+    get:
+      operationId: memberSubscriptions
+      summary: List a member's subscriptions (requires members.subscription.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createSubscription
+      summary: Open a draft subscription (requires members.subscription.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/subscriptions/{id}/status:
+    post:
+      operationId: setSubscriptionStatus
+      summary: Subscription flow transition (requires members.subscription.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/donations:
+    get:
+      operationId: listDonations
+      summary: Page donations (requires members.donation.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createDonation
+      summary: Record a promised donation (requires members.donation.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/donations/{id}/status:
+    post:
+      operationId: setDonationStatus
+      summary: Settle or cancel a donation (requires members.donation.validate)
+      responses:
+        '200': { description: Updated }
   /api/v1/exports/organizations.csv:
     get:
       operationId: exportOrganizations

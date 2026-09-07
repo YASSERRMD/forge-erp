@@ -23,6 +23,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/hr"
 	"github.com/YASSERRMD/forge-erp/backend/internal/manufacturing"
+	"github.com/YASSERRMD/forge-erp/backend/internal/members"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
 	"github.com/YASSERRMD/forge-erp/backend/internal/payments"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
@@ -229,6 +230,8 @@ func run() error {
 		booking.Routes(r, booking.Deps{Store: booking.NewPGStore(pool), Bus: platform.NewMemoryBus()},
 			idH.Require)
 		survey.Routes(r, survey.Deps{Store: survey.NewPGStore(pool), Bus: platform.NewMemoryBus()},
+			idH.Require)
+		members.Routes(r, members.Deps{Store: members.NewPGStore(pool), Bus: platform.NewMemoryBus()},
 			idH.Require)
 		dataio.Routes(r, dataio.Deps{Orgs: pstore, Products: cstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
