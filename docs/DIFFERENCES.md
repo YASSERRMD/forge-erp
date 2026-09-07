@@ -53,6 +53,12 @@ behavioral or structural deviation so auditors can distinguish design from drift
 22. Payments: online providers mint intent references without network calls
     until live secrets are configured; settlement is webhook-driven and
     idempotent on terminal status; manual provider settles at intent time.
+23. Audit backfill (Phase 18): draft commercial documents support full line
+    replacement via PUT (validated docs stay immutable); OIDC SSO verifies
+    RS256 id tokens against the realm JWKS (stdlib) with JIT provisioning at
+    POST /auth/oidc; OpenAPI now covers every registered route; web UI gained
+    POS checkout plus invoice validate/pay actions (full CRUD UI per context
+    remains follow-up).
 
 ## Deferred scope (post-Phase-12 candidates)
 
