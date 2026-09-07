@@ -47,6 +47,9 @@ behavioral or structural deviation so auditors can distinguish design from drift
 20. HR: leave counts inclusive calendar days (Dolibarr: working days per
     country calendar); expense payout is a status marker, not a finance
     posting (wire to finance in a follow-up if needed).
+21. POS lite: every sale needs a customer org (no anonymous walk-in sales);
+    voids are markers — the posted invoice/payment stand and must be reversed
+    with explicit credit notes; multi-tender and returns are follow-ups.
 
 ## Deferred scope (post-Phase-12 candidates)
 

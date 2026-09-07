@@ -463,3 +463,41 @@ paths:
       responses:
         '201': { description: Created }
         '422': { description: Unbalanced or invalid }
+  /api/v1/pos/terminals:
+    get:
+      operationId: listTerminals
+      summary: List tills (requires pos.terminal.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createTerminal
+      summary: Register a till (requires pos.terminal.write)
+      responses:
+        '201': { description: Created }
+        '409': { description: Duplicate code }
+  /api/v1/pos/sessions:
+    post:
+      operationId: openSession
+      summary: Open a cashier session (requires pos.session.write)
+      responses:
+        '201': { description: Opened }
+        '422': { description: Terminal inactive }
+  /api/v1/pos/sessions/{id}/close:
+    post:
+      operationId: closeSession
+      summary: Close a cashier session (requires pos.session.validate)
+      responses:
+        '200': { description: Closed }
+  /api/v1/pos/checkout:
+    post:
+      operationId: checkout
+      summary: Ring a sale posting invoice, payment and stock moves (requires pos.sale.write)
+      responses:
+        '201': { description: Completed with change }
+        '422': { description: Stock shortage, under-tender or closed session }
+  /api/v1/pos/sessions/{id}/sales:
+    get:
+      operationId: sessionSales
+      summary: List a session's till sales (requires pos.sale.read)
+      responses:
+        '200': { description: List }
