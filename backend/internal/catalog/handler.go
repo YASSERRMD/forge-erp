@@ -31,6 +31,8 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("catalog", "stock", "write")).Post("/stock-movements", h.AppendMovement)
 	r.With(mw("catalog", "stock", "read")).Get("/stock-levels", h.GetLevel)
 	r.With(mw("catalog", "stock", "write")).Post("/inventory-adjust", h.Adjust)
+	r.With(mw("catalog", "variant", "write")).Post("/products/{id}/variants", h.CreateVariant)
+	r.With(mw("catalog", "variant", "read")).Get("/products/{id}/variants", h.ListVariants)
 }
 
 // Handler implements the catalog HTTP surface.
@@ -221,4 +223,41 @@ func storeErrorCode(err error) int {
 	default:
 		return http.StatusUnprocessableEntity
 	}
+}
+
+// CreateVariant adds a sellable combination to a product.
+func (h *Handler) CreateVariant(w http.ResponseWriter, r *http.Request) {
+	pid, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || pid <= 0 {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	var v Variant
+	if err := decode(r, &v); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	v.ID = 0
+	v.EntityID = entityOf(r)
+	v.ProductID = pid
+	if err := h.deps.Store.CreateVariant(r.Context(), &v); err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, v)
+}
+
+// ListVariants lists a product's combinations.
+func (h *Handler) ListVariants(w http.ResponseWriter, r *http.Request) {
+	pid, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || pid <= 0 {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	list, err := h.deps.Store.VariantsOf(r.Context(), pid)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
 }
