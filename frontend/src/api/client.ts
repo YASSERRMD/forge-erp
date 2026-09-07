@@ -507,9 +507,29 @@ export const apiExt = {
   // services extras
   projectHours: (t: string, id: number) =>
     get<{ hours: number }>(t, `/api/v1/services/projects/${id}/hours`),
+  projectTasks: (t: string, projectId: number) =>
+    get<Array<{ id: number; label: string; status: number; row_version: number }>>(
+      t,
+      `/api/v1/services/projects/${projectId}/tasks`,
+    ),
+  createTask: (t: string, projectId: number, body: { label: string }) =>
+    post<unknown>(t, `/api/v1/services/projects/${projectId}/tasks`, body),
+  setTaskStatus: (t: string, id: number, body: { status: number; row_version: number }) =>
+    post<unknown>(t, `/api/v1/services/tasks/${id}/status`, body),
+  bookTime: (
+    t: string,
+    taskId: number,
+    body: { project_id: number; author: string; hours: number; entry_date: string },
+  ) => post<unknown>(t, `/api/v1/services/tasks/${taskId}/time`, body),
   createContract: (t: string, body: unknown) => post<unknown>(t, '/api/v1/services/contracts', body),
+  contractsOfOrg: (t: string, orgId: number) =>
+    get<unknown[]>(t, `/api/v1/services/organizations/${orgId}/contracts`),
+  setContractStatus: (t: string, id: number, body: { status: number; row_version: number }) =>
+    post<unknown>(t, `/api/v1/services/contracts/${id}/status`, body),
   createIntervention: (t: string, body: unknown) =>
     post<unknown>(t, '/api/v1/services/interventions', body),
+  setInterventionStatus: (t: string, id: number, body: { status: number; row_version: number }) =>
+    post<unknown>(t, `/api/v1/services/interventions/${id}/status`, body),
   ticketMessages: (t: string, id: number) =>
     get<unknown[]>(t, `/api/v1/services/tickets/${id}/messages`),
   addTicketMessage: (t: string, id: number, body: unknown) =>
