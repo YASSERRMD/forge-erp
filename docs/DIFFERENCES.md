@@ -62,6 +62,9 @@ behavioral or structural deviation so auditors can distinguish design from drift
 24. Object storage: FERP_STORAGE_BACKEND=s3 selects the stdlib SigV4 S3
     adapter (MinIO path-style); bucket must exist (create `forgeerp` once via
     MinIO console); default stays local dir.
+25. Search: FERP_SEARCH_BACKEND=opensearch queries the index with provider
+    fallback on any failure (freshness between reindexes); startup reindexes
+    entity 1; write-through indexing is follow-up.
 
 ## Deferred scope (post-Phase-12 candidates)
 
