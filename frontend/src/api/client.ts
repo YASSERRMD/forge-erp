@@ -339,9 +339,15 @@ function post<T>(token: string, path: string, body?: unknown): Promise<T> {
 }
 
 export const apiExt = {
-  // identity
-  users: (t: string) => get<unknown[]>(t, '/api/v1/users?limit=50'),
+  // identity admin
+  usersList: (t: string) => get<unknown[]>(t, '/api/v1/users?limit=50'),
+  createUser: (t: string, body: unknown) => post<unknown>(t, '/api/v1/users', body),
   groups: (t: string) => get<unknown[]>(t, '/api/v1/groups?limit=50'),
+  // sales workspace
+  salesDocs: (t: string, type: string) =>
+    get<SalesDocument[]>(t, `/api/v1/sales/documents?type=${type}&limit=50`),
+  createSalesDoc: (t: string, body: unknown) =>
+    post<SalesDocument>(t, '/api/v1/sales/documents', body),
   // catalog
   warehouses: (t: string) => get<Warehouse[]>(t, '/api/v1/warehouses?limit=50'),
   createWarehouse: (t: string, body: { code: string; label: string }) =>
@@ -354,9 +360,6 @@ export const apiExt = {
   createVariant: (t: string, productId: number, body: unknown) =>
     post<unknown>(t, `/api/v1/products/${productId}/variants`, body),
   // sales
-  salesDocs: (t: string, type: string) =>
-    get<SalesDocument[]>(t, `/api/v1/sales/documents?type=${type}&limit=50`),
-  createSalesDoc: (t: string, body: unknown) => post<SalesDocument>(t, '/api/v1/sales/documents', body),
   updateSalesDoc: (t: string, id: number, body: unknown) =>
     request<SalesDocument>(t, `/api/v1/sales/documents/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   convertDoc: (t: string, id: number, body: unknown) =>
@@ -502,6 +505,8 @@ export const apiExt = {
     post<unknown>(t, `/api/v1/events/${eventId}/registrations`, body),
   positions: (t: string) => get<unknown[]>(t, '/api/v1/positions'),
   createPosition: (t: string, body: unknown) => post<unknown>(t, '/api/v1/positions', body),
+  setPositionStatus: (t: string, id: number, body: unknown) =>
+    post<unknown>(t, `/api/v1/positions/${id}/status`, body),
   applyToPosition: (t: string, positionId: number, body: unknown) =>
     post<unknown>(t, `/api/v1/positions/${positionId}/applications`, body),
   setApplicationStatus: (t: string, id: number, body: unknown) =>
