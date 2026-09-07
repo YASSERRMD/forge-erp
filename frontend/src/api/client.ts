@@ -49,6 +49,22 @@ export interface Ticket {
   status: number;
 }
 
+export interface LeaveRequest {
+  id: number;
+  user_login: string;
+  type: string;
+  days: number;
+  status: number;
+}
+
+export interface ExpenseReport {
+  id: number;
+  ref: string;
+  user_login: string;
+  total: number;
+  status: number;
+}
+
 const BASE = '';
 
 export function authHeaders(token: string | null): Record<string, string> {
@@ -95,4 +111,8 @@ export const api = {
     request<Project[]>(token, '/api/v1/services/projects?limit=50'),
   tickets: (token: string) =>
     request<Ticket[]>(token, '/api/v1/services/tickets?limit=50'),
+  leaves: (token: string) =>
+    request<LeaveRequest[]>(token, '/api/v1/hr/leaves?limit=50'),
+  expenses: (token: string) =>
+    request<ExpenseReport[]>(token, '/api/v1/hr/expenses?limit=50'),
 };

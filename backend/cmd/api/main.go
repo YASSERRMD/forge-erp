@@ -18,6 +18,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/documentsvc"
 	"github.com/YASSERRMD/forge-erp/backend/internal/finance"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/hr"
 	"github.com/YASSERRMD/forge-erp/backend/internal/manufacturing"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
@@ -84,6 +85,7 @@ func run() error {
 	fstore := finance.NewPGStore(pool)
 	svcstore := services.NewPGStore(pool)
 	mfstore := manufacturing.NewPGStore(pool)
+	hrstore := hr.NewPGStore(pool)
 	if err := seedDemoFinance(ctx, fstore); err != nil {
 		return fmt.Errorf("seed demo finance: %w", err)
 	}
@@ -153,6 +155,7 @@ func run() error {
 			idH.Require)
 		manufacturing.Routes(r, manufacturing.Deps{Store: mfstore, Ledger: cstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
+		hr.Routes(r, hr.Deps{Store: hrstore, Bus: platform.NewMemoryBus()}, idH.Require)
 		documentsvc.Routes(r, docSvc, idH.Require)
 		search.Routes(r, searcher, idH.Require)
 	})
