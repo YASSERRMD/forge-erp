@@ -66,8 +66,11 @@ behavioral or structural deviation so auditors can distinguish design from drift
     adapter (MinIO path-style); bucket must exist (create `forgeerp` once via
     MinIO console); default stays local dir.
 25. Search: FERP_SEARCH_BACKEND=opensearch queries the index with provider
-    fallback on any failure (freshness between reindexes); startup reindexes
-    entity 1; write-through indexing is follow-up.
+    fallback on any failure; startup reindexes entity 1 plus write-through
+    indexing of created orgs/products via the shared bus.
+26. Events: one shared bus process-wide (FERP_BUS_BACKEND=nats selects NATS
+    JetStream with durable stream, else in-process memory); at-least-once
+    delivery — handlers stay idempotent via status guards and row versions.
 
 ## Deferred scope (post-Phase-12 candidates)
 

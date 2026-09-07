@@ -180,6 +180,39 @@ func run() error {
 	if !ok {
 		return errors.New("platform router is not a chi router")
 	}
+	// One shared event bus for all contexts (NATS JetStream when configured,
+	// otherwise the in-process bus). Subscribers below rely on shared delivery.
+	var bus platform.Bus = platform.NewMemoryBus()
+	if ncfg := platform.LoadNATSConfig(getenv); ncfg.Backend == "nats" {
+		if nbus, err := platform.ConnectNATS(ncfg); err != nil {
+			log.Printf("forgeerp: NATS unreachable (%v); using memory bus", err)
+		} else {
+			defer nbus.Close()
+			bus = nbus
+			log.Printf("forgeerp: event bus=nats (%s)", ncfg.URL)
+		}
+	} else {
+		log.Print("forgeerp: event bus=memory")
+	}
+	if oss, ok := searcher.(*search.OpenSearcher); ok {
+		// Write-through indexing: created orgs/products land in OpenSearch
+		// immediately; startup reindex + provider fallback cover the rest.
+		bus.Subscribe("forgeerp.partners.organization.created.v1", func(ctx context.Context, e platform.Event) {
+			o, err := pstore.OrgByID(ctx, e.ID)
+			if err != nil {
+				return
+			}
+			_ = oss.IndexOne(ctx, search.MakeDocument("organization", o.EntityID, o.ID, o.Name, o.CustomerCode))
+		})
+		bus.Subscribe("forgeerp.catalog.product.created.v1", func(ctx context.Context, e platform.Event) {
+			p, err := cstore.ProductByID(ctx, e.ID)
+			if err != nil {
+				return
+			}
+			_ = oss.IndexOne(ctx, search.MakeDocument("product", p.EntityID, p.ID, p.Name, p.SKU))
+		})
+		log.Print("forgeerp: search write-through subscribed")
+	}
 	identDeps := identity.Deps{Store: store, Issuer: issuer}
 	if kc := identity.LoadKeycloakConfig(func(k, d string) string {
 		if v := os.Getenv(k); v != "" {
@@ -203,26 +236,26 @@ func run() error {
 	apiLimiter := platform.NewRateLimiter(20, 40)
 	mux.With(apiLimiter.Limit).Route("/api/v1", func(r chi.Router) {
 		identity.Routes(r, identDeps)
-		partners.Routes(r, partners.Deps{Store: pstore, Bus: platform.NewMemoryBus()},
+		partners.Routes(r, partners.Deps{Store: pstore, Bus: bus},
 			idH.Require)
-		catalog.Routes(r, catalog.Deps{Store: cstore, Bus: platform.NewMemoryBus()},
+		catalog.Routes(r, catalog.Deps{Store: cstore, Bus: bus},
 			idH.Require)
-		sales.Routes(r, sales.Deps{Store: sstore, Catalog: cstore, Bus: platform.NewMemoryBus()},
+		sales.Routes(r, sales.Deps{Store: sstore, Catalog: cstore, Bus: bus},
 			idH.Require)
-		procurement.Routes(r, procurement.Deps{Store: procstore, Catalog: cstore, Bus: platform.NewMemoryBus()},
+		procurement.Routes(r, procurement.Deps{Store: procstore, Catalog: cstore, Bus: bus},
 			idH.Require)
 		finance.Routes(r, finance.Deps{Store: fstore}, idH.Require)
-		services.Routes(r, services.Deps{Store: svcstore, Bus: platform.NewMemoryBus()},
+		services.Routes(r, services.Deps{Store: svcstore, Bus: bus},
 			idH.Require)
-		manufacturing.Routes(r, manufacturing.Deps{Store: mfstore, Ledger: cstore, Bus: platform.NewMemoryBus()},
+		manufacturing.Routes(r, manufacturing.Deps{Store: mfstore, Ledger: cstore, Bus: bus},
 			idH.Require)
-		hr.Routes(r, hr.Deps{Store: hrstore, Finance: fstore, Bus: platform.NewMemoryBus()}, idH.Require)
+		hr.Routes(r, hr.Deps{Store: hrstore, Finance: fstore, Bus: bus}, idH.Require)
 		posstore := pos.NewPGStore(pool)
 		var walkinOrg int64
 		if v := os.Getenv("FERP_POS_WALKIN_ORG"); v != "" {
 			_, _ = fmt.Sscanf(v, "%d", &walkinOrg)
 		}
-		pos.Routes(r, pos.Deps{Store: posstore, Catalog: cstore, Sales: sstore, WalkinOrg: walkinOrg, Bus: platform.NewMemoryBus()},
+		pos.Routes(r, pos.Deps{Store: posstore, Catalog: cstore, Sales: sstore, WalkinOrg: walkinOrg, Bus: bus},
 			idH.Require)
 		reporting.Routes(r, reporting.Deps{Ledger: fstore, Billing: sstore, Stock: cstore, Orgs: pstore},
 			idH.Require)
@@ -231,27 +264,27 @@ func run() error {
 			payments.NewOnlineProvider(payments.ProviderStripe),
 			payments.NewOnlineProvider(payments.ProviderPayPal))
 		payments.Routes(r, payments.Deps{Store: paystore, Providers: payreg,
-			WebhookSecret: payments.WebhookSecretFromEnv(), Bus: platform.NewMemoryBus()},
+			WebhookSecret: payments.WebhookSecretFromEnv(), Bus: bus},
 			idH.Require)
-		booking.Routes(r, booking.Deps{Store: booking.NewPGStore(pool), Bus: platform.NewMemoryBus()},
+		booking.Routes(r, booking.Deps{Store: booking.NewPGStore(pool), Bus: bus},
 			idH.Require)
-		survey.Routes(r, survey.Deps{Store: survey.NewPGStore(pool), Bus: platform.NewMemoryBus()},
+		survey.Routes(r, survey.Deps{Store: survey.NewPGStore(pool), Bus: bus},
 			idH.Require)
-		members.Routes(r, members.Deps{Store: members.NewPGStore(pool), Bus: platform.NewMemoryBus()},
+		members.Routes(r, members.Deps{Store: members.NewPGStore(pool), Bus: bus},
 			idH.Require)
-		assets.Routes(r, assets.Deps{Store: assets.NewPGStore(pool), Bus: platform.NewMemoryBus()},
+		assets.Routes(r, assets.Deps{Store: assets.NewPGStore(pool), Bus: bus},
 			idH.Require)
-		kb.Routes(r, kb.Deps{Store: kb.NewPGStore(pool), Bus: platform.NewMemoryBus()},
+		kb.Routes(r, kb.Deps{Store: kb.NewPGStore(pool), Bus: bus},
 			idH.Require)
-		events.Routes(r, events.Deps{Store: events.NewPGStore(pool), Bus: platform.NewMemoryBus()},
+		events.Routes(r, events.Deps{Store: events.NewPGStore(pool), Bus: bus},
 			idH.Require)
-		dataio.Routes(r, dataio.Deps{Orgs: pstore, Products: cstore, Bus: platform.NewMemoryBus()},
+		dataio.Routes(r, dataio.Deps{Orgs: pstore, Products: cstore, Bus: bus},
 			idH.Require)
-		sepa.Routes(r, sepa.Deps{Store: sepa.NewPGStore(pool), Bus: platform.NewMemoryBus()},
+		sepa.Routes(r, sepa.Deps{Store: sepa.NewPGStore(pool), Bus: bus},
 			idH.Require)
-		inbound.Routes(r, inbound.Deps{Store: inbound.NewPGStore(pool), Tickets: svcstore, Bus: platform.NewMemoryBus()},
+		inbound.Routes(r, inbound.Deps{Store: inbound.NewPGStore(pool), Tickets: svcstore, Bus: bus},
 			idH.Require)
-		agenda.Routes(r, agenda.Deps{Store: agenda.NewPGStore(pool), Bus: platform.NewMemoryBus()},
+		agenda.Routes(r, agenda.Deps{Store: agenda.NewPGStore(pool), Bus: bus},
 			idH.Require)
 		agstore := agenda.NewPGStore(pool)
 		reminderSecs := 300
