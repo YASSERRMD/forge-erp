@@ -22,6 +22,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/manufacturing"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/YASSERRMD/forge-erp/backend/internal/pos"
 	"github.com/YASSERRMD/forge-erp/backend/internal/procurement"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 	"github.com/YASSERRMD/forge-erp/backend/internal/search"
@@ -156,6 +157,9 @@ func run() error {
 		manufacturing.Routes(r, manufacturing.Deps{Store: mfstore, Ledger: cstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
 		hr.Routes(r, hr.Deps{Store: hrstore, Bus: platform.NewMemoryBus()}, idH.Require)
+		posstore := pos.NewPGStore(pool)
+		pos.Routes(r, pos.Deps{Store: posstore, Catalog: cstore, Sales: sstore, Bus: platform.NewMemoryBus()},
+			idH.Require)
 		documentsvc.Routes(r, docSvc, idH.Require)
 		search.Routes(r, searcher, idH.Require)
 	})

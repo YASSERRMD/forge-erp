@@ -65,6 +65,14 @@ export interface ExpenseReport {
   status: number;
 }
 
+export interface POSSale {
+  id: number;
+  ref: string;
+  total_gross: number;
+  change: number;
+  status: number;
+}
+
 const BASE = '';
 
 export function authHeaders(token: string | null): Record<string, string> {
@@ -115,4 +123,6 @@ export const api = {
     request<LeaveRequest[]>(token, '/api/v1/hr/leaves?limit=50'),
   expenses: (token: string) =>
     request<ExpenseReport[]>(token, '/api/v1/hr/expenses?limit=50'),
+  sessionSales: (token: string, sessionId: number) =>
+    request<POSSale[]>(token, `/api/v1/pos/sessions/${sessionId}/sales`),
 };
