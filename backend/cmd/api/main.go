@@ -25,6 +25,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/kb"
 	"github.com/YASSERRMD/forge-erp/backend/internal/hr"
+	"github.com/YASSERRMD/forge-erp/backend/internal/inbound"
 	"github.com/YASSERRMD/forge-erp/backend/internal/manufacturing"
 	"github.com/YASSERRMD/forge-erp/backend/internal/members"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
@@ -35,6 +36,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/reporting"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 	"github.com/YASSERRMD/forge-erp/backend/internal/search"
+	"github.com/YASSERRMD/forge-erp/backend/internal/sepa"
 	"github.com/YASSERRMD/forge-erp/backend/internal/services"
 	"github.com/YASSERRMD/forge-erp/backend/internal/survey"
 	"github.com/YASSERRMD/forge-erp/backend/migrations"
@@ -221,7 +223,7 @@ func run() error {
 		}
 		pos.Routes(r, pos.Deps{Store: posstore, Catalog: cstore, Sales: sstore, WalkinOrg: walkinOrg, Bus: platform.NewMemoryBus()},
 			idH.Require)
-		reporting.Routes(r, reporting.Deps{Ledger: fstore, Billing: sstore, Stock: cstore},
+		reporting.Routes(r, reporting.Deps{Ledger: fstore, Billing: sstore, Stock: cstore, Orgs: pstore},
 			idH.Require)
 		paystore := payments.NewPGStore(pool)
 		payreg := payments.NewRegistry(
@@ -243,6 +245,10 @@ func run() error {
 		events.Routes(r, events.Deps{Store: events.NewPGStore(pool), Bus: platform.NewMemoryBus()},
 			idH.Require)
 		dataio.Routes(r, dataio.Deps{Orgs: pstore, Products: cstore, Bus: platform.NewMemoryBus()},
+			idH.Require)
+		sepa.Routes(r, sepa.Deps{Store: sepa.NewPGStore(pool), Bus: platform.NewMemoryBus()},
+			idH.Require)
+		inbound.Routes(r, inbound.Deps{Store: inbound.NewPGStore(pool), Tickets: svcstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
 		agenda.Routes(r, agenda.Deps{Store: agenda.NewPGStore(pool), Bus: platform.NewMemoryBus()},
 			idH.Require)

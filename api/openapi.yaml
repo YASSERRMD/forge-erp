@@ -534,6 +534,55 @@ paths:
       responses:
         '200': { description: Report }
         '400': { description: warehouse_id required }
+  /api/v1/reports/intra-eu:
+    get:
+      operationId: intraEU
+      summary: Intra-EU dispatches by country (?home=FR, requires reporting.intraeu.read)
+      responses:
+        '200': { description: Rows }
+  /api/v1/sepa/batches:
+    get:
+      operationId: listSepaBatches
+      summary: List direct-debit batches (requires sepa.batch.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createSepaBatch
+      summary: Open a draft batch with IBAN checks (requires sepa.batch.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Bad IBAN or batch }
+  /api/v1/sepa/batches/{id}/status:
+    post:
+      operationId: setSepaStatus
+      summary: Batch transition (requires sepa.batch.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/sepa/batches/{id}/xml:
+    get:
+      operationId: sepaXML
+      summary: pain.008 export for validated batches (requires sepa.batch.read)
+      responses:
+        '200': { description: XML }
+        '422': { description: Draft batch }
+  /api/v1/inbound/mailboxes:
+    get:
+      operationId: listMailboxes
+      summary: List fetch sources (requires inbound.mailbox.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: upsertMailbox
+      summary: Register a fetch source (requires inbound.mailbox.write)
+      responses:
+        '200': { description: Saved }
+  /api/v1/inbound/messages:
+    post:
+      operationId: receiveMessage
+      summary: File a fetched message as a ticket (requires inbound.message.write)
+      responses:
+        '201': { description: Ticket filed }
+        '404': { description: Unknown mailbox }
   /api/v1/payments/intents:
     post:
       operationId: createPaymentIntent

@@ -98,7 +98,7 @@ func Receivables(ctx context.Context, entityID int64, billing Billing) ([]Receiv
 	var out []Receivable
 	var total int64
 	for _, d := range docs {
-		if d.Status != sales.InvoiceValidated {
+		if d.Status == sales.InvoiceDraft || d.Status == 9 { // skip drafts/cancelled
 			continue
 		}
 		bal, err := billing.InvoiceBalance(ctx, d.ID)
