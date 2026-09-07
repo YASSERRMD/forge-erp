@@ -100,37 +100,69 @@ func run() error {
 	if storageDir == "" {
 		storageDir = "./var/docs"
 	}
-	dirStorage, err := documentsvc.NewDirStorage(storageDir)
-	if err != nil {
-		return fmt.Errorf("storage dir: %w", err)
+	getenv := func(k, d string) string {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+		return d
+	}
+	var byteStorage documentsvc.Storage
+	if documentsvc.S3Enabled(getenv) {
+		byteStorage = documentsvc.NewS3Storage(documentsvc.LoadS3Config(getenv))
+		log.Print("forgeerp: document storage backend=s3")
+	} else {
+		dirStorage, err := documentsvc.NewDirStorage(storageDir)
+		if err != nil {
+			return fmt.Errorf("storage dir: %w", err)
+		}
+		byteStorage = dirStorage
+		log.Print("forgeerp: document storage backend=dir")
 	}
 	// documentsvc metadata needs a Store; PG metadata lands with the PG adapter —
 	// serve metadata in-memory for now is wrong for prod, so wire a minimal PG
 	// metadata store inline via pool below.
-	docSvc := &documentsvc.Service{Store: documentsvc.NewPGStore(pool), Storage: dirStorage}
-	searcher := search.NewMemorySearcher()
-	searcher.Register("organization", func(ctx context.Context, entityID int64) ([]search.Result, error) {
-		orgs, err := pstore.ListOrgs(ctx, entityID, 500, 0)
-		if err != nil {
-			return nil, err
+	docSvc := &documentsvc.Service{Store: documentsvc.NewPGStore(pool), Storage: byteStorage}
+	providers := map[string]search.Provider{
+		"organization": func(ctx context.Context, entityID int64) ([]search.Result, error) {
+			orgs, err := pstore.ListOrgs(ctx, entityID, 500, 0)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]search.Result, 0, len(orgs))
+			for _, o := range orgs {
+				out = append(out, search.Result{ID: o.ID, Label: o.Name, Ref: o.CustomerCode})
+			}
+			return out, nil
+		},
+		"product": func(ctx context.Context, entityID int64) ([]search.Result, error) {
+			prods, err := cstore.ListProducts(ctx, entityID, 500, 0)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]search.Result, 0, len(prods))
+			for _, p := range prods {
+				out = append(out, search.Result{ID: p.ID, Label: p.Name, Ref: p.SKU})
+			}
+			return out, nil
+		},
+	}
+	var searcher search.Searcher
+	if search.OpenSearchEnabled(getenv) {
+		oss := search.NewOpenSearcher(search.LoadOSConfig(getenv), providers)
+		if n, err := oss.Reindex(ctx, 1); err != nil {
+			log.Printf("forgeerp: search reindex failed (%v); OpenSearch queries fall back to providers", err)
+		} else {
+			log.Printf("forgeerp: search backend=opensearch (%d docs indexed)", n)
 		}
-		out := make([]search.Result, 0, len(orgs))
-		for _, o := range orgs {
-			out = append(out, search.Result{ID: o.ID, Label: o.Name, Ref: o.CustomerCode})
+		searcher = oss
+	} else {
+		mem := search.NewMemorySearcher()
+		for scope, p := range providers {
+			mem.Register(scope, p)
 		}
-		return out, nil
-	})
-	searcher.Register("product", func(ctx context.Context, entityID int64) ([]search.Result, error) {
-		prods, err := cstore.ListProducts(ctx, entityID, 500, 0)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]search.Result, 0, len(prods))
-		for _, p := range prods {
-			out = append(out, search.Result{ID: p.ID, Label: p.Name, Ref: p.SKU})
-		}
-		return out, nil
-	})
+		log.Print("forgeerp: search backend=memory")
+		searcher = mem
+	}
 
 	base := platform.Router(build)
 	mux, ok := base.(chi.Router)
