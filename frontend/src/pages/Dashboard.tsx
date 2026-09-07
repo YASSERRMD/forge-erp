@@ -23,11 +23,13 @@ import {
 } from 'lucide-react';
 import { api, type AgendaEvent, type MonthlyPoint, type Project, type Ticket } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 import { Alert, Badge, Card, KPI, PageHeader, money, statusTone } from '../components/ui';
 import { LayoutDashboard } from 'lucide-react';
 
 export function Dashboard() {
   const { login, token } = useAuth();
+  const { t } = useLang();
   const [pnl, setPnl] = useState({ revenue: 0, expense: 0, net: 0 });
   const [receivable, setReceivable] = useState(0);
   const [monthly, setMonthly] = useState<MonthlyPoint[]>([]);
@@ -62,18 +64,18 @@ export function Dashboard() {
 
   return (
     <div>
-      <PageHeader icon={<LayoutDashboard size={22} />} title={`Welcome, ${login}`} sub="Live operating picture across sales, finance and services" />
+      <PageHeader icon={<LayoutDashboard size={22} />} title={`${t('welcome')}, ${login}`} sub={t('subtitle')} />
       {error && <Alert>{error}</Alert>}
       <div className="grid kpis">
-        <KPI icon={<TrendingUp size={20} color="#fff" />} label="Revenue (posted)" value={money(pnl.revenue)} color="#dcfce7" />
-        <KPI icon={<Wallet size={20} color="#fff" />} label="Outstanding receivables" value={money(receivable)} color="#dbeafe" />
-        <KPI icon={<Banknote size={20} color="#fff" />} label="Net result" value={money(pnl.net)} color="#ede9fe" />
-        <KPI icon={<AlertCircle size={20} color="#fff" />} label="Open tickets" value={String(openTickets)} color="#fef3c7" />
-        <KPI icon={<FolderKanban size={20} color="#fff" />} label="Active projects" value={String(activeProjects)} color="#ffedd5" />
-        <KPI icon={<CalendarDays size={20} color="#fff" />} label="Upcoming events" value={String(events.length)} color="#e0e7ff" />
+        <KPI icon={<TrendingUp size={20} color="#fff" />} label={t('revenue')} value={money(pnl.revenue)} color="#dcfce7" />
+        <KPI icon={<Wallet size={20} color="#fff" />} label={t('receivables')} value={money(receivable)} color="#dbeafe" />
+        <KPI icon={<Banknote size={20} color="#fff" />} label={t('net')} value={money(pnl.net)} color="#ede9fe" />
+        <KPI icon={<AlertCircle size={20} color="#fff" />} label={t('openTickets')} value={String(openTickets)} color="#fef3c7" />
+        <KPI icon={<FolderKanban size={20} color="#fff" />} label={t('activeProjects')} value={String(activeProjects)} color="#ffedd5" />
+        <KPI icon={<CalendarDays size={20} color="#fff" />} label={t('upcomingEvents')} value={String(events.length)} color="#e0e7ff" />
       </div>
       <div className="grid two" style={{ marginTop: '1rem' }}>
-        <Card title="Revenue by month (invoiced gross)">
+        <Card title={t('revenueByMonth')}>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={monthly.map((m) => ({ ...m, grossMajor: m.gross / 100 }))}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e3e8f2" />
@@ -84,7 +86,7 @@ export function Dashboard() {
             </BarChart>
           </ResponsiveContainer>
         </Card>
-        <Card title="Profit & loss mix">
+        <Card title={t('pnlMix')}>
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
               <Pie data={donut} dataKey="value" nameKey="name" innerRadius={60} outerRadius={95} paddingAngle={3}>
@@ -101,7 +103,7 @@ export function Dashboard() {
         </Card>
       </div>
       <div className="grid two" style={{ marginTop: '1rem' }}>
-        <Card title="Needs attention (open tickets)">
+        <Card title={t('needsAttention')}>
           {tickets.filter((t) => t.status < 2).slice(0, 6).map((t) => (
             <div key={t.id} style={{ display: 'flex', gap: '0.5rem', padding: '0.3rem 0' }}>
               <Badge tone={t.priority >= 3 ? 'bad' : 'warn'}>P{t.priority}</Badge>
@@ -110,9 +112,9 @@ export function Dashboard() {
               </span>
             </div>
           ))}
-          {openTickets === 0 && <p className="muted">Queue clear.</p>}
+          {openTickets === 0 && <p className="muted">{t('queueClear')}</p>}
         </Card>
-        <Card title="Upcoming events">
+        <Card title={t('upcoming')}>
           {events.slice(0, 6).map((e) => (
             <div key={e.id} style={{ display: 'flex', gap: '0.5rem', padding: '0.3rem 0' }}>
               <Receipt size={15} />
@@ -122,11 +124,11 @@ export function Dashboard() {
               </span>
             </div>
           ))}
-          {events.length === 0 && <p className="muted">Nothing scheduled.</p>}
+          {events.length === 0 && <p className="muted">{t('noneScheduled')}</p>}
         </Card>
       </div>
       <p className="muted" style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-        <TrendingDown size={14} /> Figures stream live from /reports endpoints — no mocks.
+        <TrendingDown size={14} /> {t('liveNote')}
       </p>
     </div>
   );

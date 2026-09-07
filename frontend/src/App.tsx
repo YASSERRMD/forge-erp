@@ -26,6 +26,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './auth/AuthContext';
+import { LangProvider, useLang, type DictKey } from './i18n/lang';
 import { Login } from './pages/Login';
 import { Invoices, Organizations, Products } from './pages/Entities';
 import { Dashboard } from './pages/Dashboard';
@@ -48,38 +49,45 @@ import { Happenings } from './pages/Happenings';
 import { Admin } from './pages/Admin';
 import { Collections } from './pages/Collections';
 
-const COMMERCE = [
-  { to: '/organizations', label: 'Organizations', icon: <Building2 size={17} /> },
-  { to: '/products', label: 'Products', icon: <Package size={17} /> },
-  { to: '/sales', label: 'Sales', icon: <FileText size={17} /> },
-  { to: '/invoices', label: 'Invoices', icon: <Receipt size={17} /> },
-  { to: '/pos', label: 'Point of sale', icon: <ShoppingCart size={17} /> },
-  { to: '/manufacturing', label: 'Manufacturing', icon: <Factory size={17} /> },
+interface NavItem {
+  to: string;
+  key: DictKey;
+  icon: React.ReactNode;
+}
+
+const COMMERCE: NavItem[] = [
+  { to: '/organizations', key: 'organizations', icon: <Building2 size={17} /> },
+  { to: '/products', key: 'products', icon: <Package size={17} /> },
+  { to: '/sales', key: 'sales', icon: <FileText size={17} /> },
+  { to: '/invoices', key: 'invoices', icon: <Receipt size={17} /> },
+  { to: '/pos', key: 'pos', icon: <ShoppingCart size={17} /> },
+  { to: '/manufacturing', key: 'manufacturing', icon: <Factory size={17} /> },
 ];
 
-const OPERATIONS = [
-  { to: '/services', label: 'Services', icon: <Wrench size={17} /> },
-  { to: '/hr', label: 'HR', icon: <Users size={17} /> },
-  { to: '/booking', label: 'Booking', icon: <CalendarDays size={17} /> },
-  { to: '/documents', label: 'Documents', icon: <FileUp size={17} /> },
-  { to: '/agenda', label: 'Agenda', icon: <ClipboardList size={17} /> },
-  { to: '/surveys', label: 'Surveys', icon: <BookOpenCheck size={17} /> },
-  { to: '/members', label: 'Members', icon: <HeartHandshake size={17} /> },
-  { to: '/events', label: 'Events & hiring', icon: <CalendarRange size={17} /> },
-  { to: '/knowledge', label: 'Knowledge', icon: <BookOpen size={17} /> },
+const OPERATIONS: NavItem[] = [
+  { to: '/services', key: 'services', icon: <Wrench size={17} /> },
+  { to: '/hr', key: 'hr', icon: <Users size={17} /> },
+  { to: '/booking', key: 'booking', icon: <CalendarDays size={17} /> },
+  { to: '/documents', key: 'documents', icon: <FileUp size={17} /> },
+  { to: '/agenda', key: 'agenda', icon: <ClipboardList size={17} /> },
+  { to: '/surveys', key: 'surveys', icon: <BookOpenCheck size={17} /> },
+  { to: '/members', key: 'members', icon: <HeartHandshake size={17} /> },
+  { to: '/events', key: 'events', icon: <CalendarRange size={17} /> },
+  { to: '/knowledge', key: 'knowledge', icon: <BookOpen size={17} /> },
 ];
 
-const FINANCE = [
-  { to: '/finance', label: 'Finance', icon: <Banknote size={17} /> },
-  { to: '/reports', label: 'Reports', icon: <Settings2 size={17} /> },
-  { to: '/suppliers', label: 'Suppliers', icon: <Truck size={17} /> },
-  { to: '/payments', label: 'Payments', icon: <CreditCard size={17} /> },
-  { to: '/collections', label: 'Collections', icon: <Euro size={17} /> },
-  { to: '/admin', label: 'Administration', icon: <ShieldCheck size={17} /> },
+const FINANCE: NavItem[] = [
+  { to: '/finance', key: 'financeNav', icon: <Banknote size={17} /> },
+  { to: '/reports', key: 'reports', icon: <Settings2 size={17} /> },
+  { to: '/suppliers', key: 'suppliers', icon: <Truck size={17} /> },
+  { to: '/payments', key: 'payments', icon: <CreditCard size={17} /> },
+  { to: '/collections', key: 'collections', icon: <Euro size={17} /> },
+  { to: '/admin', key: 'admin', icon: <ShieldCheck size={17} /> },
 ];
 
 function Shell() {
   const { token, login, signOut } = useAuth();
+  const { t, lang, setLang } = useLang();
   const nav = useNavigate();
   if (!token) return <Login />;
   return (
@@ -90,36 +98,44 @@ function Shell() {
         </div>
         <nav className="nav">
           <NavLink to="/" end>
-            <LayoutDashboard size={17} /> Dashboard
+            <LayoutDashboard size={17} /> {t('dashboard')}
           </NavLink>
-          <div className="nav-section">Commerce</div>
+          <div className="nav-section">{t('commerce')}</div>
           {COMMERCE.map((l) => (
             <NavLink key={l.to} to={l.to}>
-              {l.icon} {l.label}
+              {l.icon} {t(l.key)}
             </NavLink>
           ))}
-          <div className="nav-section">Operations</div>
+          <div className="nav-section">{t('operations')}</div>
           {OPERATIONS.map((l) => (
             <NavLink key={l.to} to={l.to}>
-              {l.icon} {l.label}
+              {l.icon} {t(l.key)}
             </NavLink>
           ))}
-          <div className="nav-section">Finance</div>
+          <div className="nav-section">{t('finance')}</div>
           {FINANCE.map((l) => (
             <NavLink key={l.to} to={l.to}>
-              {l.icon} {l.label}
+              {l.icon} {t(l.key)}
             </NavLink>
           ))}
         </nav>
         <div className="side-foot">
           <div>{login}</div>
+          <div style={{ display: 'flex', gap: '0.4rem', margin: '0.4rem 0' }}>
+            <button onClick={() => setLang('en')} disabled={lang === 'en'}>
+              EN
+            </button>
+            <button onClick={() => setLang('fr')} disabled={lang === 'fr'}>
+              FR
+            </button>
+          </div>
           <button
             onClick={() => {
               signOut();
               nav('/login');
             }}
           >
-            <LogOut size={14} style={{ verticalAlign: '-2px' }} /> Sign out
+            <LogOut size={14} style={{ verticalAlign: '-2px' }} /> {t('signOut')}
           </button>
         </div>
       </aside>
@@ -156,7 +172,9 @@ function Shell() {
 export function App() {
   return (
     <AuthProvider>
-      <Shell />
+      <LangProvider>
+        <Shell />
+      </LangProvider>
     </AuthProvider>
   );
 }
