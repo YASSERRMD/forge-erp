@@ -13,7 +13,7 @@ import (
 type Middleware func(module, entity, action string) func(http.Handler) http.Handler
 
 // Routes mounts GET /search (caller nests at /api/v1).
-func Routes(r chi.Router, s *MemorySearcher, mw Middleware) {
+func Routes(r chi.Router, s Searcher, mw Middleware) {
 	r.With(mw("search", "query", "read")).Get("/search", func(w http.ResponseWriter, req *http.Request) {
 		var entityID int64 = 1
 		if u, ok := identity.AuthUser(req); ok && u.EntityID != 0 {
