@@ -73,6 +73,23 @@ export interface POSSale {
   status: number;
 }
 
+export interface SalesDocumentDetail extends SalesDocument {
+  org_id: number;
+}
+
+export interface CheckoutLine {
+  product_id: number;
+  qty: number;
+}
+
+export interface CheckoutResult {
+  id: number;
+  ref: string;
+  total_gross: number;
+  change: number;
+  invoice_id: number;
+}
+
 const BASE = '';
 
 export function authHeaders(token: string | null): Record<string, string> {
@@ -132,4 +149,25 @@ export const api = {
     ),
   receivables: (token: string) =>
     request<{ rows: unknown[]; total: number }>(token, '/api/v1/reports/receivables'),
+  checkout: (
+    token: string,
+    body: {
+      session_id: number;
+      org_id: number;
+      lines: CheckoutLine[];
+      method: string;
+      tendered: number;
+    },
+  ) => request<CheckoutResult>(token, '/api/v1/pos/checkout', { method: 'POST', body: JSON.stringify(body) }),
+  payInvoice: (
+    token: string,
+    body: { org_id: number; amount: number; currency: string; method: string; invoice_ids: number[] },
+  ) => request<unknown>(token, '/api/v1/sales/payments', { method: 'POST', body: JSON.stringify(body) }),
+  setDocumentStatus: (token: string, id: number, to: number) =>
+    request<SalesDocument>(token, `/api/v1/sales/documents/${id}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ to }),
+    }),
+  getDocument: (token: string, id: number) =>
+    request<SalesDocumentDetail>(token, `/api/v1/sales/documents/${id}`),
 };
