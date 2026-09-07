@@ -64,3 +64,33 @@ func TestIntraEU(t *testing.T) {
 	_ = got
 	_ = total
 }
+
+func TestSalesMonthlyBuckets(t *testing.T) {
+	ctx := context.Background()
+	billing := sales.NewMemoryStore()
+	for i := 0; i < 3; i++ {
+		d := &sales.Document{EntityID: 1, Type: documents.TypeInvoice, OrgID: 7,
+			Currency: "USD", RateToBase: 1000000,
+			Lines: []documents.Line{{ProductID: 1, Label: "x", Qty: 1, UnitNet: 1000, VATRateBps: 0}}}
+		if err := billing.CreateDoc(ctx, d, "202609"); err != nil {
+			t.Fatalf("invoice: %v", err)
+		}
+		if _, err := billing.SetStatus(ctx, d.ID, sales.InvoiceValidated); err != nil {
+			t.Fatalf("validate: %v", err)
+		}
+	}
+	points, err := SalesMonthly(ctx, 1, billing)
+	if err != nil {
+		t.Fatalf("monthly: %v", err)
+	}
+	if len(points) == 0 {
+		t.Fatal("no buckets")
+	}
+	var gross int64
+	for _, p := range points {
+		gross += p.Gross
+	}
+	if gross != 3000 {
+		t.Fatalf("gross=%d want 3000", gross)
+	}
+}

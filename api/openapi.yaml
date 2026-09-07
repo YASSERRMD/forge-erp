@@ -540,6 +540,12 @@ paths:
       summary: Intra-EU dispatches by country (?home=FR, requires reporting.intraeu.read)
       responses:
         '200': { description: Rows }
+  /api/v1/reports/sales-monthly:
+    get:
+      operationId: salesMonthly
+      summary: 12-month invoice revenue series (requires reporting.monthly.read)
+      responses:
+        '200': { description: Points }
   /api/v1/sepa/batches:
     get:
       operationId: listSepaBatches

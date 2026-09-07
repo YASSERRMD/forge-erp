@@ -21,25 +21,34 @@ export function Login() {
   }
 
   return (
-    <main style={{ maxWidth: 360, margin: '4rem auto' }}>
-      <h1>ForgeERP</h1>
-      <form onSubmit={submit}>
-        <label>
-          Login
-          <input value={login} onChange={(e) => setLogin(e.target.value)} autoComplete="username" />
-        </label>
-        <label>
-          Password
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-          />
-        </label>
-        <button type="submit">Sign in</button>
-      </form>
-      {error && <p role="alert">{error}</p>}
-    </main>
+    <div className="login-wrap">
+      <div className="card login-card">
+        <h2>ForgeERP</h2>
+        <p className="muted">Modern open-source ERP</p>
+        <form onSubmit={submit}>
+          <label className="field">
+            Login
+            <input value={login} onChange={(e) => setLogin(e.target.value)} autoComplete="username" />
+          </label>
+          <label className="field">
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+          </label>
+          <button type="submit" className="primary">
+            Sign in
+          </button>
+        </form>
+        {error && (
+          <p role="alert" className="alert-error">
+            {error}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
