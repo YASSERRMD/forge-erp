@@ -245,6 +245,7 @@ export const api = {
       lines: CheckoutLine[];
       method: string;
       tendered: number;
+      payments?: Array<{ method: string; amount: number }>;
     },
   ) => request<CheckoutResult>(token, '/api/v1/pos/checkout', { method: 'POST', body: JSON.stringify(body) }),
   payInvoice: (

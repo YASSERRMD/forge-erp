@@ -117,6 +117,25 @@ func (l SaleLine) Validate() error {
 	return nil
 }
 
+// Tender is one payment leg of a sale (multi-tender: cash + card, ...).
+type Tender struct {
+	Method string `json:"method"`
+	Amount int64  `json:"amount"` // minor units, > 0
+}
+
+// Validate checks tender invariants.
+func (t Tender) Validate() error {
+	switch t.Method {
+	case PayCash, PayCard, PayTransfer:
+	default:
+		return fmt.Errorf("pos: unknown payment method %q", t.Method)
+	}
+	if t.Amount <= 0 {
+		return errors.New("pos: tender amount must be positive")
+	}
+	return nil
+}
+
 // Sale is a completed till transaction.
 type Sale struct {
 	ID          int64      `json:"id"`
@@ -152,7 +171,7 @@ func (s Sale) Validate() error {
 		}
 	}
 	switch s.Method {
-	case PayCash, PayCard, PayTransfer:
+	case PayCash, PayCard, PayTransfer, "mixed":
 	default:
 		return fmt.Errorf("pos: unknown payment method %q", s.Method)
 	}
