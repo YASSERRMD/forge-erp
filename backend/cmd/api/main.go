@@ -30,6 +30,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 	"github.com/YASSERRMD/forge-erp/backend/internal/search"
 	"github.com/YASSERRMD/forge-erp/backend/internal/services"
+	"github.com/YASSERRMD/forge-erp/backend/internal/survey"
 	"github.com/YASSERRMD/forge-erp/backend/migrations"
 )
 
@@ -224,6 +225,8 @@ func run() error {
 			WebhookSecret: payments.WebhookSecretFromEnv(), Bus: platform.NewMemoryBus()},
 			idH.Require)
 		booking.Routes(r, booking.Deps{Store: booking.NewPGStore(pool), Bus: platform.NewMemoryBus()},
+			idH.Require)
+		survey.Routes(r, survey.Deps{Store: survey.NewPGStore(pool), Bus: platform.NewMemoryBus()},
 			idH.Require)
 		documentsvc.Routes(r, docSvc, idH.Require)
 		search.Routes(r, searcher, idH.Require)
