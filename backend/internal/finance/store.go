@@ -16,6 +16,8 @@ var ErrNotFound = errors.New("finance: not found")
 // Store is the persistence contract for finance.
 type Store interface {
 	CreateAccount(ctx context.Context, a *Account) error
+	// Accounts lists the chart of accounts (reporting + UI).
+	Accounts(ctx context.Context, entityID int64) ([]Account, error)
 	CreateJournal(ctx context.Context, j *Journal) error
 	CreateFiscalYear(ctx context.Context, f *FiscalYear) error
 	// PostEntry validates balance + fiscal-year lock, chains the hash, and persists atomically.

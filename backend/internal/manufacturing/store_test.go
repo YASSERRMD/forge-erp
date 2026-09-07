@@ -139,3 +139,20 @@ func TestProduceInsufficientStock(t *testing.T) {
 		t.Error("produce from draft accepted")
 	}
 }
+
+func TestListMOsMemory(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemoryStore()
+	bom := &BOM{EntityID: 1, Ref: "BOM-L", ProductID: 1, Label: "L"}
+	if err := m.CreateBOM(ctx, bom); err != nil {
+		t.Fatalf("bom: %v", err)
+	}
+	mo := &ManufacturingOrder{EntityID: 1, Ref: "MO-L", BOMID: bom.ID, ProductID: 1, WarehouseID: 1, Qty: 2}
+	if err := m.CreateMO(ctx, mo); err != nil {
+		t.Fatalf("mo: %v", err)
+	}
+	list, err := m.ListMOs(ctx, 1, 10, 0)
+	if err != nil || len(list) != 1 || list[0].Ref != "MO-L" {
+		t.Fatalf("mos=%+v err=%v", list, err)
+	}
+}

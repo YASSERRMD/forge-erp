@@ -22,10 +22,22 @@ export function Dashboard() {
 }
 
 export function Organizations() {
+  const { token } = useAuth();
   const orgs = useFetch<Organization[]>((t) => api.organizations(t), []);
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+  const create = () => {
+    if (!token) return;
+    api
+      .createOrganization(token, { name, is_customer: true, customer_code: code })
+      .then(() => window.location.reload())
+      .catch((e: Error) => setError(e.message));
+  };
   return (
     <section>
       <h2>Organizations</h2>
+      {error && <p style={{ color: 'red' }}>{error}</p>}
       <ul>
         {orgs.map((o) => (
           <li key={o.id}>
@@ -33,15 +45,44 @@ export function Organizations() {
           </li>
         ))}
       </ul>
+      <h4>New customer</h4>
+      <label>
+        Name <input value={name} onChange={(e) => setName(e.target.value)} />
+      </label>{' '}
+      <label>
+        Code <input value={code} onChange={(e) => setCode(e.target.value)} />
+      </label>{' '}
+      <button onClick={create}>Create</button>
     </section>
   );
 }
 
 export function Products() {
+  const { token } = useAuth();
   const prods = useFetch<Product[]>((t) => api.products(t), []);
+  const [sku, setSku] = useState('');
+  const [name, setName] = useState('');
+  const [price, setPrice] = useState('');
+  const [error, setError] = useState('');
+  const create = () => {
+    if (!token) return;
+    api
+      .createProduct(token, {
+        sku,
+        name,
+        type: 0,
+        unit: 'unit',
+        net_price: Math.round(Number(price) * 100),
+        vat_rate_bps: 2000,
+        stock_tracked: true,
+      })
+      .then(() => window.location.reload())
+      .catch((e: Error) => setError(e.message));
+  };
   return (
     <section>
       <h2>Products</h2>
+      {error && <p style={{ color: 'red' }}>{error}</p>}
       <ul>
         {prods.map((p) => (
           <li key={p.id}>
@@ -49,6 +90,17 @@ export function Products() {
           </li>
         ))}
       </ul>
+      <h4>New product</h4>
+      <label>
+        SKU <input value={sku} onChange={(e) => setSku(e.target.value)} />
+      </label>{' '}
+      <label>
+        Name <input value={name} onChange={(e) => setName(e.target.value)} />
+      </label>{' '}
+      <label>
+        Net price <input value={price} onChange={(e) => setPrice(e.target.value)} />
+      </label>{' '}
+      <button onClick={create}>Create</button>
     </section>
   );
 }

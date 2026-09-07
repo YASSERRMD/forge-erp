@@ -23,6 +23,7 @@ type Middleware func(module, entity, action string) func(http.Handler) http.Hand
 func Routes(r chi.Router, d Deps, mw Middleware) {
 	h := &Handler{deps: d}
 	r.With(mw("finance", "account", "write")).Post("/finance/accounts", h.CreateAccount)
+	r.With(mw("finance", "account", "read")).Get("/finance/accounts", h.ListAccounts)
 	r.With(mw("finance", "journal", "write")).Post("/finance/journals", h.CreateJournal)
 	r.With(mw("finance", "entry", "write")).Post("/finance/entries", h.PostEntry)
 	r.With(mw("finance", "entry", "read")).Get("/finance/trial-balance", h.TrialBalance)
@@ -114,6 +115,16 @@ func (h *Handler) PostEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, e)
+}
+
+// ListAccounts lists the chart of accounts within the caller's entity.
+func (h *Handler) ListAccounts(w http.ResponseWriter, r *http.Request) {
+	list, err := h.deps.Store.Accounts(r.Context(), entityOf(r))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
 }
 
 // TrialBalance returns per-account sums; callers assert debits == credits.

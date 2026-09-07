@@ -39,6 +39,7 @@ export interface Project {
   ref: string;
   label: string;
   status: number;
+  row_version: number;
 }
 
 export interface Ticket {
@@ -47,6 +48,7 @@ export interface Ticket {
   subject: string;
   priority: number;
   status: number;
+  row_version: number;
 }
 
 export interface LeaveRequest {
@@ -55,6 +57,36 @@ export interface LeaveRequest {
   type: string;
   days: number;
   status: number;
+}
+
+export interface Resource {
+  id: number;
+  code: string;
+  label: string;
+  capacity: number;
+  status: number;
+}
+
+export interface BOM {
+  id: number;
+  ref: string;
+  label: string;
+  status: number;
+}
+
+export interface ManufacturingOrder {
+  id: number;
+  ref: string;
+  qty: number;
+  status: number;
+  row_version: number;
+}
+
+export interface FinAccount {
+  id: number;
+  code: string;
+  label: string;
+  type: string;
 }
 
 export interface ExpenseReport {
@@ -170,4 +202,41 @@ export const api = {
     }),
   getDocument: (token: string, id: number) =>
     request<SalesDocumentDetail>(token, `/api/v1/sales/documents/${id}`),
+  createOrganization: (token: string, body: { name: string; is_customer: boolean; customer_code: string }) =>
+    request<Organization>(token, '/api/v1/organizations', { method: 'POST', body: JSON.stringify(body) }),
+  createProduct: (
+    token: string,
+    body: { sku: string; name: string; type: number; unit: string; net_price: number; vat_rate_bps: number; stock_tracked: boolean },
+  ) => request<Product>(token, '/api/v1/products', { method: 'POST', body: JSON.stringify(body) }),
+  createProject: (token: string, body: { ref: string; label: string }) =>
+    request<Project>(token, '/api/v1/services/projects', { method: 'POST', body: JSON.stringify(body) }),
+  setProjectStatus: (token: string, id: number, status: number, row_version: number) =>
+    request<Project>(token, `/api/v1/services/projects/${id}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status, row_version }),
+    }),
+  createTicket: (token: string, body: { ref: string; subject: string; priority: number }) =>
+    request<Ticket>(token, '/api/v1/services/tickets', { method: 'POST', body: JSON.stringify(body) }),
+  setTicketStatus: (token: string, id: number, status: number, row_version: number) =>
+    request<Ticket>(token, `/api/v1/services/tickets/${id}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status, row_version }),
+    }),
+  resources: (token: string) => request<Resource[]>(token, '/api/v1/booking/resources'),
+  createBooking: (
+    token: string,
+    body: { resource_id: number; user_login: string; start_at: string; end_at: string; seats: number },
+  ) => request<unknown>(token, '/api/v1/bookings', { method: 'POST', body: JSON.stringify(body) }),
+  cancelBooking: (token: string, id: number, row_version: number) =>
+    request<unknown>(token, `/api/v1/bookings/${id}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status: -1, row_version }),
+    }),
+  boms: (token: string) => request<BOM[]>(token, '/api/v1/manufacturing/boms?limit=50'),
+  mos: (token: string) => request<ManufacturingOrder[]>(token, '/api/v1/manufacturing/mos?limit=50'),
+  produceMO: (token: string, id: number) =>
+    request<unknown>(token, `/api/v1/manufacturing/mos/${id}/produce`, { method: 'POST' }),
+  accounts: (token: string) => request<FinAccount[]>(token, '/api/v1/finance/accounts'),
+  createAccount: (token: string, body: { code: string; label: string; type: string }) =>
+    request<FinAccount>(token, '/api/v1/finance/accounts', { method: 'POST', body: JSON.stringify(body) }),
 };

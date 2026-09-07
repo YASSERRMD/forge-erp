@@ -392,6 +392,11 @@ paths:
         '201': { description: Created }
         '422': { description: Self-reference, duplicate or frozen BOM }
   /api/v1/manufacturing/mos:
+    get:
+      operationId: listMOs
+      summary: Page manufacturing orders (requires manufacturing.mo.read)
+      responses:
+        '200': { description: List }
     post:
       operationId: createMO
       summary: Open a draft manufacturing order (requires manufacturing.mo.write)
@@ -621,6 +626,12 @@ paths:
       summary: Open a bank account (requires finance.bank.write)
       responses:
         '201': { description: Created }
+  /api/v1/finance/accounts:
+    get:
+      operationId: listAccounts
+      summary: List the chart of accounts (requires finance.account.read)
+      responses:
+        '200': { description: List }
   /api/v1/finance/journals:
     post:
       operationId: createJournal
