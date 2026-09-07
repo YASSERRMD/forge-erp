@@ -148,3 +148,38 @@ func TestCheckoutFlow(t *testing.T) {
 		t.Fatalf("closed session: code=%d want 422", rec.Code)
 	}
 }
+
+func TestWalkinCheckout(t *testing.T) {
+	ledger := catalog.NewMemoryStore()
+	r := chi.NewRouter()
+	r.Route("/api/v1", func(r chi.Router) {
+		Routes(r, Deps{Store: NewMemoryStore(), Catalog: ledger, Sales: sales.NewMemoryStore(), WalkinOrg: 9}, passthrough)
+	})
+	seedGoods(t, ledger)
+	se := openTillOn(t, r)
+	rec := doReq(t, r, http.MethodPost, "/api/v1/pos/checkout", map[string]any{
+		"session_id": se.ID, "method": "cash", "tendered": 5000,
+		"lines": []map[string]any{{"product_id": 1, "qty": 1}},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("walk-in: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var sa Sale
+	_ = json.NewDecoder(rec.Body).Decode(&sa)
+	if sa.OrgID != 9 {
+		t.Fatalf("walk-in org=%d want 9", sa.OrgID)
+	}
+}
+
+func openTillOn(t *testing.T, h http.Handler) Session {
+	t.Helper()
+	rec := doReq(t, h, http.MethodPost, "/api/v1/pos/terminals",
+		map[string]any{"code": "TILL-W", "label": "Walk-in till", "warehouse_id": 1})
+	var term Terminal
+	_ = json.NewDecoder(rec.Body).Decode(&term)
+	rec = doReq(t, h, http.MethodPost, "/api/v1/pos/sessions",
+		map[string]any{"terminal_id": term.ID, "cashier": "ada"})
+	var se Session
+	_ = json.NewDecoder(rec.Body).Decode(&se)
+	return se
+}

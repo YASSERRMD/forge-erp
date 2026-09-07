@@ -45,11 +45,13 @@ behavioral or structural deviation so auditors can distinguish design from drift
     consume+produce moves (no cross-table transaction — concurrent producers
     can race, acceptable for lite scope); workstations/MRP scheduling not ported.
 20. HR: leave counts inclusive calendar days (Dolibarr: working days per
-    country calendar); expense payout is a status marker, not a finance
-    posting (wire to finance in a follow-up if needed).
-21. POS lite: every sale needs a customer org (no anonymous walk-in sales);
-    voids are markers — the posted invoice/payment stand and must be reversed
-    with explicit credit notes; multi-tender and returns are follow-ups.
+    country calendar); expense payout posts a real balanced entry via
+    POST /hr/expenses/{id}/pay with explicit journal/expense/bank accounts
+    (flip-first with best-effort revert bounds double-posting).
+21. POS lite: anonymous sales fall back to FERP_POS_WALKIN_ORG when configured
+    (else 422); voids are markers — the posted invoice/payment stand and must
+    be reversed with explicit credit notes; multi-tender and returns are
+    follow-ups.
 22. Payments: online providers mint intent references without network calls
     until live secrets are configured; settlement is webhook-driven and
     idempotent on terminal status; manual provider settles at intent time.
