@@ -21,6 +21,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/hr"
 	"github.com/YASSERRMD/forge-erp/backend/internal/manufacturing"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
+	"github.com/YASSERRMD/forge-erp/backend/internal/payments"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/YASSERRMD/forge-erp/backend/internal/pos"
 	"github.com/YASSERRMD/forge-erp/backend/internal/procurement"
@@ -162,6 +163,13 @@ func run() error {
 		pos.Routes(r, pos.Deps{Store: posstore, Catalog: cstore, Sales: sstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
 		reporting.Routes(r, reporting.Deps{Ledger: fstore, Billing: sstore, Stock: cstore},
+			idH.Require)
+		paystore := payments.NewPGStore(pool)
+		payreg := payments.NewRegistry(
+			payments.NewOnlineProvider(payments.ProviderStripe),
+			payments.NewOnlineProvider(payments.ProviderPayPal))
+		payments.Routes(r, payments.Deps{Store: paystore, Providers: payreg,
+			WebhookSecret: payments.WebhookSecretFromEnv(), Bus: platform.NewMemoryBus()},
 			idH.Require)
 		documentsvc.Routes(r, docSvc, idH.Require)
 		search.Routes(r, searcher, idH.Require)

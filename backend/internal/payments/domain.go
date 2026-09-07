@@ -108,6 +108,27 @@ func (ManualProvider) CreateIntent(amount int64, currency string) (string, error
 	return fmt.Sprintf("manual-%d-%s", time.Now().UTC().UnixNano(), strings.ToUpper(currency)), nil
 }
 
+// OnlineProvider is a config-driven placeholder for Stripe/PayPal: it mints
+// provider-side intent references without network calls. Live charge/confirm
+// calls are a follow-up once FERP_STRIPE_*/FERP_PAYPAL_* secrets are configured;
+// settlement always arrives via verified webhooks regardless.
+type OnlineProvider struct {
+	name string
+}
+
+// NewOnlineProvider builds a named online provider (stripe|paypal).
+func NewOnlineProvider(name string) OnlineProvider { return OnlineProvider{name: name} }
+
+// Name identifies the provider.
+func (p OnlineProvider) Name() string { return p.name }
+
+// CreateIntent mints a provider-side intent reference.
+func (p OnlineProvider) CreateIntent(amount int64, currency string) (string, error) {
+	if amount <= 0 || strings.TrimSpace(currency) == "" {
+		return "", errors.New("payments: bad intent")
+	}
+	return fmt.Sprintf("%s-pi-%d-%s", p.name, time.Now().UTC().UnixNano(), strings.ToUpper(currency)), nil
+}
 // Registry resolves providers by name.
 type Registry struct {
 	providers map[string]Provider

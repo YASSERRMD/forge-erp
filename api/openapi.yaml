@@ -520,3 +520,24 @@ paths:
       responses:
         '200': { description: Report }
         '400': { description: warehouse_id required }
+  /api/v1/payments/intents:
+    post:
+      operationId: createPaymentIntent
+      summary: Start a collection, manual settles at once (requires payments.attempt.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Unknown provider or invalid }
+  /api/v1/payments/attempts:
+    get:
+      operationId: listPaymentAttempts
+      summary: Page payment attempts (requires payments.attempt.read)
+      responses:
+        '200': { description: List }
+  /api/v1/payments/webhooks/stripe:
+    post:
+      operationId: stripeWebhook
+      summary: Verified provider event, idempotent (HMAC credential, no RBAC)
+      responses:
+        '200': { description: Applied or duplicate }
+        '401': { description: Bad signature }
+        '503': { description: Webhook not configured }
