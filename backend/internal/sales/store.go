@@ -33,6 +33,8 @@ type Store interface {
 	ListDocs(ctx context.Context, entityID int64, t documents.DocType, limit, offset int) ([]Document, error)
 	// SetStatus enforces the kernel transition table before persisting.
 	SetStatus(ctx context.Context, id int64, to int16) (Document, error)
+	// UpdateDocLines replaces a DRAFT document's lines and recomputed totals.
+	UpdateDocLines(ctx context.Context, id int64, lines []documents.Line) (Document, error)
 	RecordPayment(ctx context.Context, p *Payment, invoiceIDs []int64, yearMonth string) ([]int64, error)
 	InvoiceBalance(ctx context.Context, invoiceID int64) (int64, error)
 }
@@ -191,6 +193,53 @@ func (s *PGStore) SetStatus(ctx context.Context, id int64, to int16) (Document, 
 	d.Status = to
 	d.RowVersion++
 	return d, nil
+}
+
+// UpdateDocLines replaces a DRAFT document's lines with recomputed totals.
+// Non-draft documents are rejected (validated docs are API-immutable).
+func (s *PGStore) UpdateDocLines(ctx context.Context, id int64, lines []documents.Line) (Document, error) {
+	if len(lines) == 0 {
+		return Document{}, errors.New("sales: document requires at least one line")
+	}
+	tot, err := documents.Sum(lines)
+	if err != nil {
+		return Document{}, err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Document{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var status int16
+	if err := tx.QueryRow(ctx, `SELECT status FROM ferp_documents WHERE id=$1 FOR UPDATE`, id).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Document{}, identity.ErrNotFound
+		}
+		return Document{}, err
+	}
+	if status != 0 {
+		return Document{}, errors.New("sales: only draft documents can be edited")
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM ferp_doc_lines WHERE doc_id=$1`, id); err != nil {
+		return Document{}, err
+	}
+	for i, l := range lines {
+		if _, err := tx.Exec(ctx, `INSERT INTO ferp_doc_lines
+			(doc_id, pos, product_id, label, qty, unit_net, vat_rate_bps, discount_pc)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+			id, i, nullProduct(l.ProductID), l.Label, l.Qty, l.UnitNet, l.VATRateBps, l.DiscountPc); err != nil {
+			return Document{}, err
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE ferp_documents SET total_net=$1, total_vat=$2, total_gross=$3,
+		updated_at=now(), row_version=row_version+1 WHERE id=$4`,
+		tot.Net, tot.VAT, tot.Gross, id); err != nil {
+		return Document{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Document{}, err
+	}
+	return s.DocByID(ctx, id)
 }
 
 func (s *PGStore) RecordPayment(ctx context.Context, p *Payment, invoiceIDs []int64, yearMonth string) ([]int64, error) {
@@ -360,6 +409,31 @@ func (m *MemoryStore) SetStatus(_ context.Context, id int64, to int16) (Document
 		return Document{}, err
 	}
 	d.Status = to
+	d.RowVersion++
+	m.docs[id] = d
+	return d, nil
+}
+
+// UpdateDocLines replaces a DRAFT document's lines with recomputed totals.
+func (m *MemoryStore) UpdateDocLines(_ context.Context, id int64, lines []documents.Line) (Document, error) {
+	if len(lines) == 0 {
+		return Document{}, errors.New("sales: document requires at least one line")
+	}
+	tot, err := documents.Sum(lines)
+	if err != nil {
+		return Document{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.docs[id]
+	if !ok {
+		return Document{}, identity.ErrNotFound
+	}
+	if d.Status != 0 {
+		return Document{}, errors.New("sales: only draft documents can be edited")
+	}
+	d.Lines = lines
+	d.Totals = tot
 	d.RowVersion++
 	m.docs[id] = d
 	return d, nil

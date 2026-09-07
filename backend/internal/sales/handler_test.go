@@ -147,3 +147,31 @@ func TestQuoteToCashChain(t *testing.T) {
 		t.Fatalf("invoice status = %d want paid", gotInv.Status)
 	}
 }
+
+func TestUpdateDraftLines(t *testing.T) {
+	h, _, _ := testRouter()
+	d := createDoc(t, h, documents.TypeProposal, 7)
+	raw, _ := json.Marshal(map[string]any{
+		"lines": []map[string]any{
+			{"product_id": 1, "label": "Widget", "qty": 3, "unit_net": 500, "vat_rate_bps": 2000},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/sales/documents/"+itoa(d.ID), bytes.NewReader(raw))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update draft: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var upd Document
+	_ = json.NewDecoder(rec.Body).Decode(&upd)
+	if upd.Totals.Gross != 1800 || len(upd.Lines) != 1 || upd.Lines[0].Qty != 3 {
+		t.Fatalf("updated: %+v", upd)
+	}
+	setStatus(t, h, d.ID, ProposalValidated)
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/sales/documents/"+itoa(d.ID), bytes.NewReader(raw))
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("update validated: code=%d want 422", rec.Code)
+	}
+}
