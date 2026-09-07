@@ -33,6 +33,7 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("manufacturing", "bom", "write")).Post("/manufacturing/boms/{id}/lines", h.AddLine)
 	r.With(mw("manufacturing", "bom", "read")).Get("/manufacturing/boms/{id}/lines", h.ListLines)
 	r.With(mw("manufacturing", "mo", "write")).Post("/manufacturing/mos", h.CreateMO)
+	r.With(mw("manufacturing", "mo", "read")).Get("/manufacturing/mos", h.ListMOs)
 	r.With(mw("manufacturing", "mo", "read")).Get("/manufacturing/mos/{id}", h.GetMO)
 	r.With(mw("manufacturing", "mo", "validate")).Post("/manufacturing/mos/{id}/status", h.SetMOStatus)
 	r.With(mw("manufacturing", "mo", "produce")).Post("/manufacturing/mos/{id}/produce", h.Produce)
@@ -221,6 +222,21 @@ func (h *Handler) CreateMO(w http.ResponseWriter, r *http.Request) {
 	}
 	h.publish(r.Context(), "forgeerp.manufacturing.mo.created.v1", "mo", mo.ID)
 	writeJSON(w, http.StatusCreated, mo)
+}
+
+// ListMOs pages manufacturing orders within the caller's entity.
+func (h *Handler) ListMOs(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	list, err := h.deps.Store.ListMOs(r.Context(), entityOf(r), limit, offset)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
 }
 
 // GetMO fetches one MO.

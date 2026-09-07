@@ -133,3 +133,23 @@ func TestPostInvoiceConsumer(t *testing.T) {
 		t.Fatalf("trial: dr=%d cr=%d", dr, cr)
 	}
 }
+
+func TestListAccountsHTTP(t *testing.T) {
+	h, _ := testRouter()
+	rec := post(t, h, "/api/v1/finance/accounts",
+		map[string]any{"code": "707000", "label": "Sales", "type": "revenue"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/finance/accounts", nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list: code=%d", rec.Code)
+	}
+	var list []Account
+	_ = json.NewDecoder(rec.Body).Decode(&list)
+	if len(list) != 1 || list[0].Code != "707000" {
+		t.Fatalf("accounts=%+v", list)
+	}
+}

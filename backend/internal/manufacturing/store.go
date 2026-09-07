@@ -21,6 +21,7 @@ type Store interface {
 	LinesOf(ctx context.Context, bomID int64) ([]BOMLine, error)
 	CreateMO(ctx context.Context, m *ManufacturingOrder) error
 	MOByID(ctx context.Context, id int64) (ManufacturingOrder, error)
+	ListMOs(ctx context.Context, entityID int64, limit, offset int) ([]ManufacturingOrder, error)
 	SetMOStatus(ctx context.Context, id int64, to MOStatus, rowVersion int64) (ManufacturingOrder, error)
 	MarkProduced(ctx context.Context, id int64, rowVersion int64) (ManufacturingOrder, error)
 }
@@ -174,6 +175,24 @@ func (s *PGStore) CreateMO(ctx context.Context, m *ManufacturingOrder) error {
 
 func (s *PGStore) MOByID(ctx context.Context, id int64) (ManufacturingOrder, error) {
 	return scanMO(s.pool.QueryRow(ctx, `SELECT `+moCols+` FROM ferp_mos WHERE id=$1`, id))
+}
+
+func (s *PGStore) ListMOs(ctx context.Context, entityID int64, limit, offset int) ([]ManufacturingOrder, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+moCols+` FROM ferp_mos
+		WHERE entity_id=$1 ORDER BY id LIMIT $2 OFFSET $3`, entityID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ManufacturingOrder
+	for rows.Next() {
+		mo, err := scanMO(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, mo)
+	}
+	return out, rows.Err()
 }
 
 func (s *PGStore) SetMOStatus(ctx context.Context, id int64, to MOStatus, rowVersion int64) (ManufacturingOrder, error) {
@@ -385,6 +404,25 @@ func (m *MemoryStore) MOByID(_ context.Context, id int64) (ManufacturingOrder, e
 		return ManufacturingOrder{}, identity.ErrNotFound
 	}
 	return mo, nil
+}
+
+func (m *MemoryStore) ListMOs(_ context.Context, entityID int64, limit, offset int) ([]ManufacturingOrder, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []ManufacturingOrder
+	for _, mo := range m.mos {
+		if mo.EntityID == entityID {
+			out = append(out, mo)
+		}
+	}
+	if offset > len(out) {
+		return nil, nil
+	}
+	out = out[offset:]
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 func (m *MemoryStore) SetMOStatus(_ context.Context, id int64, to MOStatus, rowVersion int64) (ManufacturingOrder, error) {
