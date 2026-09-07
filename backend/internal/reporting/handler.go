@@ -26,6 +26,7 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("reporting", "pnl", "read")).Get("/reports/pnl", h.PNL)
 	r.With(mw("reporting", "receivables", "read")).Get("/reports/receivables", h.Receivables)
 	r.With(mw("reporting", "intraeu", "read")).Get("/reports/intra-eu", h.IntraEU)
+	r.With(mw("reporting", "monthly", "read")).Get("/reports/sales-monthly", h.Monthly)
 	r.With(mw("reporting", "valuation", "read")).Get("/reports/stock-valuation", h.Valuation)
 }
 
@@ -77,6 +78,16 @@ func (h *Handler) IntraEU(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, rows)
+}
+
+// Monthly serves the 12-month invoice revenue series.
+func (h *Handler) Monthly(w http.ResponseWriter, r *http.Request) {
+	points, err := SalesMonthly(r.Context(), entityOf(r), h.deps.Billing)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "report failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, points)
 }
 
 // Valuation serves PMP stock valuation for one warehouse.

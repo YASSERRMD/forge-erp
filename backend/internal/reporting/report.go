@@ -6,6 +6,7 @@ package reporting
 
 import (
 	"context"
+	"sort"
 
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
@@ -77,6 +78,51 @@ func BuildPNL(ctx context.Context, entityID int64, ledger Ledger) (ProfitAndLoss
 		}
 	}
 	out.Net = out.Revenue - out.Expense
+	return out, nil
+}
+
+// MonthlyPoint is one revenue bucket.
+type MonthlyPoint struct {
+	Month string `json:"month"` // YYYY-MM
+	Net   int64  `json:"net"`
+	Gross int64  `json:"gross"`
+	Count int64  `json:"count"`
+}
+
+// SalesMonthly buckets non-draft, non-cancelled invoices by creation month
+// (latest 12 months with activity, ascending).
+func SalesMonthly(ctx context.Context, entityID int64, billing Billing) ([]MonthlyPoint, error) {
+	docs, err := billing.ListDocs(ctx, entityID, documents.TypeInvoice, 500, 0)
+	if err != nil {
+		return nil, err
+	}
+	byMonth := map[string]*MonthlyPoint{}
+	for _, d := range docs {
+		if d.Status == sales.InvoiceDraft || d.Status == 9 {
+			continue
+		}
+		key := d.CreatedAt.UTC().Format("2006-01")
+		p, ok := byMonth[key]
+		if !ok {
+			p = &MonthlyPoint{Month: key}
+			byMonth[key] = p
+		}
+		p.Net += d.Totals.Net
+		p.Gross += d.Totals.Gross
+		p.Count++
+	}
+	keys := make([]string, 0, len(byMonth))
+	for k := range byMonth {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) > 12 {
+		keys = keys[len(keys)-12:]
+	}
+	out := make([]MonthlyPoint, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, *byMonth[k])
+	}
 	return out, nil
 }
 
