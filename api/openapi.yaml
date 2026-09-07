@@ -801,3 +801,56 @@ paths:
       responses:
         '200': { description: Updated }
         '422': { description: Illegal transition }
+  /api/v1/surveys:
+    get:
+      operationId: listSurveys
+      summary: List surveys (requires survey.survey.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createSurvey
+      summary: Open a draft survey (requires survey.survey.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/surveys/{id}/status:
+    post:
+      operationId: setSurveyStatus
+      summary: Open or close a survey (requires survey.survey.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/surveys/{id}/questions:
+    get:
+      operationId: listQuestions
+      summary: List a survey's questions (requires survey.question.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: addQuestion
+      summary: Append a question to a draft (requires survey.question.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Survey not editable }
+  /api/v1/questions/{id}/options:
+    get:
+      operationId: listOptions
+      summary: List a question's choices (requires survey.option.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: addOption
+      summary: Append a choice (requires survey.option.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/questions/{id}/votes:
+    post:
+      operationId: castVote
+      summary: Record or replace one ballot (requires survey.vote.write)
+      responses:
+        '201': { description: Recorded }
+        '422': { description: Closed survey or bad ballot }
+  /api/v1/questions/{id}/results:
+    get:
+      operationId: questionResults
+      summary: Vote tally for a question (requires survey.vote.read)
+      responses:
+        '200': { description: Tally }
