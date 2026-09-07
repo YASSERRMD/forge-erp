@@ -9,6 +9,7 @@ import {
   CalendarRange,
   ClipboardList,
   CreditCard,
+  Euro,
   FileText,
   FileUp,
   Factory,
@@ -45,6 +46,7 @@ import { Payments } from './pages/Payments';
 import { Knowledge } from './pages/Knowledge';
 import { Happenings } from './pages/Happenings';
 import { Admin } from './pages/Admin';
+import { Collections } from './pages/Collections';
 
 const COMMERCE = [
   { to: '/organizations', label: 'Organizations', icon: <Building2 size={17} /> },
@@ -72,6 +74,7 @@ const FINANCE = [
   { to: '/reports', label: 'Reports', icon: <Settings2 size={17} /> },
   { to: '/suppliers', label: 'Suppliers', icon: <Truck size={17} /> },
   { to: '/payments', label: 'Payments', icon: <CreditCard size={17} /> },
+  { to: '/collections', label: 'Collections', icon: <Euro size={17} /> },
   { to: '/admin', label: 'Administration', icon: <ShieldCheck size={17} /> },
 ];
 
@@ -142,6 +145,7 @@ function Shell() {
           <Route path="/knowledge" element={<Knowledge />} />
           <Route path="/suppliers" element={<Suppliers />} />
           <Route path="/payments" element={<Payments />} />
+          <Route path="/collections" element={<Collections />} />
           <Route path="/admin" element={<Admin />} />
         </Routes>
       </main>
