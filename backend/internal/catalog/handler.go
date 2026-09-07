@@ -78,6 +78,10 @@ func (h *Handler) CreateProduct(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
+	if h.deps.Bus != nil {
+		_ = h.deps.Bus.Publish(r.Context(), platform.Event{
+			Subject: "forgeerp.catalog.product.created.v1", Entity: "product", ID: p.ID})
+	}
 	writeJSON(w, http.StatusCreated, p)
 }
 

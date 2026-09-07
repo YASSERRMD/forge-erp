@@ -67,6 +67,14 @@ type doc struct {
 	Ref      string `json:"ref"`
 }
 
+// Document is the exported indexed shape (alias for cross-package indexing).
+type Document = doc
+
+// MakeDocument builds an indexable document.
+func MakeDocument(scope string, entityID, id int64, label, ref string) Document {
+	return Document{Scope: scope, EntityID: entityID, RefID: id, Label: label, Ref: ref}
+}
+
 // EnsureIndex creates the index with mappings (400 = already exists, fine).
 func (s *OpenSearcher) EnsureIndex(ctx context.Context) error {
 	body := `{"mappings":{"properties":{` +
