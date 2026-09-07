@@ -138,6 +138,21 @@ func run() error {
 		return errors.New("platform router is not a chi router")
 	}
 	identDeps := identity.Deps{Store: store, Issuer: issuer}
+	if kc := identity.LoadKeycloakConfig(func(k, d string) string {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+		return d
+	}); kc.Enabled {
+		if verifier, err := identity.NewKeycloakVerifier(kc, nil); err != nil {
+			log.Printf("forgeerp: OIDC discovery failed (%v); SSO login disabled", err)
+		} else {
+			identDeps.OIDC = verifier
+			log.Printf("forgeerp: OIDC SSO enabled (realm %s)", kc.Realm)
+		}
+	} else {
+		log.Print("forgeerp: FERP_OIDC_ISSUER unset; SSO login disabled (dev JWT only)")
+	}
 	idH := identity.NewHandler(identDeps)
 	mux.Use(metrics.Instrument)
 	// Abuse caps: 20 rps burst 40 per IP across the API (login endpoints additionally

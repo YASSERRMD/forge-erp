@@ -115,8 +115,8 @@ func sha256hex(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
-// The KeycloakVerifier (below) is a config carrier today; full signature
-// validation against the realm JWKS lands with the production identity wiring.
+// Verifier validates OIDC id tokens: JWKSVerifier (production, RS256 against
+// the realm JWKS) or StaticVerifier (tests/offline dev only).
 type Verifier interface {
 	VerifyOIDC(ctx context.Context, idToken string) (subject string, email string, err error)
 }

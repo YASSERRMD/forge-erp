@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 type Deps struct {
 	Store  Store
 	Issuer *Issuer
+	OIDC   Verifier // nil disables OIDC login (dev JWT only)
 	Now    func() time.Time
 }
 
@@ -29,6 +31,7 @@ func (d Deps) now() time.Time {
 func Routes(r chi.Router, d Deps) {
 	h := &Handler{deps: d}
 	r.Post("/auth/login", h.Login)
+	r.Post("/auth/oidc", h.OIDCLogin)
 	r.Post("/auth/refresh", h.Refresh)
 	r.Post("/auth/logout", h.Logout)
 	r.With(h.Require("identity", "user", "read")).Get("/auth/me", h.Me)
@@ -206,6 +209,72 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		TokenType: "Bearer", ExpiresIn: int(AccessTokenTTL.Seconds())})
 }
 
+// OIDCLogin exchanges a verified Keycloak id_token for a local session.
+// Unknown emails are JIT-provisioned as non-admin SSO accounts (empty
+// password hash = SSO-only). 503 when OIDC is not configured.
+func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
+	if h.deps.OIDC == nil {
+		writeErr(w, http.StatusServiceUnavailable, "identity: OIDC not configured")
+		return
+	}
+	var req struct {
+		IDToken  string `json:"id_token"`
+		EntityID int64  `json:"entity_id"`
+	}
+	if err := decode(r, &req); err != nil || req.IDToken == "" {
+		writeErr(w, http.StatusBadRequest, "id_token required")
+		return
+	}
+	if req.EntityID == 0 {
+		req.EntityID = 1
+	}
+	sub, email, err := h.deps.OIDC.VerifyOIDC(r.Context(), req.IDToken)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, "invalid SSO token")
+		return
+	}
+	now := h.deps.now()
+	u, err := h.deps.Store.UserByEmail(r.Context(), req.EntityID, email)
+	if err != nil {
+		if !errors.Is(err, ErrNotFound) || email == "" {
+			writeErr(w, http.StatusUnauthorized, "SSO account unknown")
+			return
+		}
+		u = User{EntityID: req.EntityID, Login: email, Email: email,
+			FirstName: "", LastName: "", Status: UserActive}
+		if err := h.deps.Store.CreateUser(r.Context(), &u); err != nil {
+			writeErr(w, http.StatusInternalServerError, "SSO provisioning failed")
+			return
+		}
+	}
+	_ = sub
+	if err := LoginAllowed(u, now); err != nil {
+		writeErr(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	updated, ok := RegisterSuccess(u, now)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "account unavailable")
+		return
+	}
+	_ = h.deps.Store.UpdateUser(r.Context(), &updated)
+	access, err := h.deps.Issuer.IssueAccess(updated)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "token issue failed")
+		return
+	}
+	refresh, hash, err := MintRefresh()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "token issue failed")
+		return
+	}
+	if err := h.deps.Store.CreateSession(r.Context(), updated.ID, hash, now.Add(RefreshTokenTTL)); err != nil {
+		writeErr(w, http.StatusInternalServerError, "session create failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, loginResponse{AccessToken: access, RefreshToken: refresh,
+		TokenType: "Bearer", ExpiresIn: int(AccessTokenTTL.Seconds())})
+}
 // Logout revokes the presented refresh token.
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	var req struct {

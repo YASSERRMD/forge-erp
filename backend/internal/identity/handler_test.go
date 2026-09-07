@@ -187,3 +187,44 @@ func TestGroupGrantFlow(t *testing.T) {
 		t.Fatalf("member inherited access: code=%d body=%s", recme.Code, recme.Body.String())
 	}
 }
+
+func TestOIDCLoginFlows(t *testing.T) {
+	d, st := testDeps()
+	seedUser(t, st, "sso-user", "irrelevant-pw-00", false)
+	d.OIDC = StaticVerifier{Users: map[string]User{
+		"tok-known": {ID: 0, Email: "sso-user@example.com"},
+		"tok-new":   {ID: 0, Email: "newcomer@example.com"},
+	}}
+	h := testRouter(d)
+	sso := func(token string) (int, map[string]any) {
+		body, _ := json.Marshal(map[string]string{"id_token": token})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oidc", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		var out map[string]any
+		_ = json.NewDecoder(rec.Body).Decode(&out)
+		return rec.Code, out
+	}
+	if code, out := sso("tok-known"); code != http.StatusOK || out["access_token"] == nil {
+		t.Fatalf("known SSO: code=%d out=%v", code, out)
+	}
+	if code, out := sso("tok-new"); code != http.StatusOK || out["access_token"] == nil {
+		t.Fatalf("JIT SSO: code=%d out=%v", code, out)
+	}
+	u, err := st.UserByEmail(context.Background(), 1, "newcomer@example.com")
+	if err != nil || u.IsAdmin || u.PasswordHash != "" {
+		t.Fatalf("provisioned: %+v err=%v", u, err)
+	}
+	if code, _ := sso("tok-bogus"); code != http.StatusUnauthorized {
+		t.Fatalf("bogus: code=%d want 401", code)
+	}
+	d2, _ := testDeps()
+	h2 := testRouter(d2)
+	body, _ := json.Marshal(map[string]string{"id_token": "tok-known"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oidc", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	h2.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("disabled: code=%d want 503", rec.Code)
+	}
+}
