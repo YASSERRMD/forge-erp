@@ -59,6 +59,9 @@ behavioral or structural deviation so auditors can distinguish design from drift
     POST /auth/oidc; OpenAPI now covers every registered route; web UI gained
     POS checkout plus invoice validate/pay actions (full CRUD UI per context
     remains follow-up).
+24. Object storage: FERP_STORAGE_BACKEND=s3 selects the stdlib SigV4 S3
+    adapter (MinIO path-style); bucket must exist (create `forgeerp` once via
+    MinIO console); default stays local dir.
 
 ## Deferred scope (post-Phase-12 candidates)
 

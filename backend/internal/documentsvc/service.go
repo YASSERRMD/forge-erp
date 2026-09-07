@@ -44,7 +44,8 @@ func (d Document) Validate() error {
 	return nil
 }
 
-// Storage is the byte backend contract (MinIO/S3 adapter implements this later).
+// Storage is the byte backend contract: DirStorage (local), S3Storage
+// (MinIO/S3 via SigV4), MemoryStorage (tests).
 type Storage interface {
 	Put(ctx context.Context, key string, r io.Reader, size int64, mime string) error
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
