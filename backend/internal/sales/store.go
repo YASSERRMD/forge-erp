@@ -37,6 +37,8 @@ type Store interface {
 	UpdateDocLines(ctx context.Context, id int64, lines []documents.Line) (Document, error)
 	RecordPayment(ctx context.Context, p *Payment, invoiceIDs []int64, yearMonth string) ([]int64, error)
 	InvoiceBalance(ctx context.Context, invoiceID int64) (int64, error)
+	// ApplyCredit allocates a validated credit note against an invoice.
+	ApplyCredit(ctx context.Context, invoiceID, creditID, amount int64) error
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -323,7 +325,44 @@ func (s *PGStore) InvoiceBalance(ctx context.Context, invoiceID int64) (int64, e
 		return 0, err
 	}
 	_ = s.pool.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0) FROM ferp_payment_allocations WHERE invoice_id=$1`, invoiceID).Scan(&paid)
-	return gross - paid, nil
+	var credited int64
+	_ = s.pool.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0) FROM ferp_credit_allocations WHERE invoice_id=$1`, invoiceID).Scan(&credited)
+	return gross - paid - credited, nil
+}
+
+// ApplyCredit allocates a validated credit note against an invoice balance.
+func (s *PGStore) ApplyCredit(ctx context.Context, invoiceID, creditID, amount int64) error {
+	if amount <= 0 {
+		return errors.New("sales: credit amount must be positive")
+	}
+	var ctype string
+	var cstatus int16
+	var ctotal int64
+	err := s.pool.QueryRow(ctx, `SELECT type, status, total_gross FROM ferp_documents WHERE id=$1`, creditID).Scan(&ctype, &cstatus, &ctotal)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return identity.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if ctype != string(documents.TypeCreditNote) || cstatus != 1 {
+		return errors.New("sales: credit note must be validated")
+	}
+	bal, err := s.InvoiceBalance(ctx, invoiceID)
+	if err != nil {
+		return err
+	}
+	if amount > bal {
+		return fmt.Errorf("sales: credit %d exceeds balance %d", amount, bal)
+	}
+	if amount > ctotal {
+		return fmt.Errorf("sales: credit %d exceeds note total %d", amount, ctotal)
+	}
+	_, err = s.pool.Exec(ctx, `INSERT INTO ferp_credit_allocations (invoice_id, credit_id, amount)
+		VALUES ($1,$2,$3) ON CONFLICT (invoice_id, credit_id)
+		DO UPDATE SET amount=ferp_credit_allocations.amount+EXCLUDED.amount`,
+		invoiceID, creditID, amount)
+	return err
 }
 
 // MemoryStore is the in-process fake for handler tests.
@@ -334,12 +373,13 @@ type MemoryStore struct {
 	counters map[string]int64
 	pays     map[int64]Payment
 	alloc    map[int64]int64 // invoiceID -> paid total
+	credited map[int64]int64 // invoiceID -> credited total
 }
 
 // NewMemoryStore builds an empty fake.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{docs: map[int64]Document{}, counters: map[string]int64{},
-		pays: map[int64]Payment{}, alloc: map[int64]int64{}}
+		pays: map[int64]Payment{}, alloc: map[int64]int64{}, credited: map[int64]int64{}}
 }
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
@@ -347,7 +387,7 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 func (m *MemoryStore) ref(entityID int64, kind, ym string) string {
 	k := fmt.Sprintf("%d/%s/%s", entityID, kind, ym)
 	m.counters[k]++
-	prefix := map[string]string{"proposal": "PROP", "order": "ORD", "shipment": "SHIP", "invoice": "INV", "payment": "PAY"}[kind]
+	prefix := map[string]string{"proposal": "PROP", "order": "ORD", "shipment": "SHIP", "invoice": "INV", "credit_note": "CN", "payment": "PAY"}[kind]
 	return fmt.Sprintf("%s-%s-%04d", prefix, ym, m.counters[k])
 }
 
@@ -451,7 +491,7 @@ func (m *MemoryStore) RecordPayment(_ context.Context, p *Payment, invoiceIDs []
 		if !ok || inv.Type != documents.TypeInvoice {
 			return nil, fmt.Errorf("sales: invoice %d not found", invID)
 		}
-		balances[i] = inv.Totals.Gross - m.alloc[invID]
+		balances[i] = inv.Totals.Gross - m.alloc[invID] - m.credited[invID]
 		if balances[i] <= 0 {
 			return nil, fmt.Errorf("sales: invoice %d already settled", invID)
 		}
@@ -489,5 +529,31 @@ func (m *MemoryStore) InvoiceBalance(_ context.Context, invoiceID int64) (int64,
 	if !ok || inv.Type != documents.TypeInvoice {
 		return 0, identity.ErrNotFound
 	}
-	return inv.Totals.Gross - m.alloc[invoiceID], nil
+	return inv.Totals.Gross - m.alloc[invoiceID] - m.credited[invoiceID], nil
+}
+
+// ApplyCredit allocates a validated credit note against an invoice balance.
+func (m *MemoryStore) ApplyCredit(_ context.Context, invoiceID, creditID, amount int64) error {
+	if amount <= 0 {
+		return errors.New("sales: credit amount must be positive")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cr, ok := m.docs[creditID]
+	if !ok || cr.Type != documents.TypeCreditNote || cr.Status != 1 {
+		return errors.New("sales: credit note must be validated")
+	}
+	inv, ok := m.docs[invoiceID]
+	if !ok || inv.Type != documents.TypeInvoice {
+		return identity.ErrNotFound
+	}
+	bal := inv.Totals.Gross - m.alloc[invoiceID] - m.credited[invoiceID]
+	if amount > bal {
+		return fmt.Errorf("sales: credit %d exceeds balance %d", amount, bal)
+	}
+	if amount > cr.Totals.Gross {
+		return fmt.Errorf("sales: credit %d exceeds note total %d", amount, cr.Totals.Gross)
+	}
+	m.credited[invoiceID] += amount
+	return nil
 }

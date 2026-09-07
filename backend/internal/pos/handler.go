@@ -27,8 +27,11 @@ type Catalog interface {
 // Sales abstracts the invoice/payment postings used at checkout.
 type Sales interface {
 	CreateDoc(ctx context.Context, d *sales.Document, yearMonth string) error
+	DocByID(ctx context.Context, id int64) (sales.Document, error)
 	SetStatus(ctx context.Context, id int64, to int16) (sales.Document, error)
 	RecordPayment(ctx context.Context, p *sales.Payment, invoiceIDs []int64, yearMonth string) ([]int64, error)
+	ApplyCredit(ctx context.Context, invoiceID, creditID, amount int64) error
+	InvoiceBalance(ctx context.Context, invoiceID int64) (int64, error)
 }
 
 // Deps wires handlers to persistence, the catalog/sales seams, and the bus.
@@ -54,6 +57,7 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("pos", "sale", "write")).Post("/pos/checkout", h.Checkout)
 	r.With(mw("pos", "sale", "read")).Get("/pos/sessions/{id}/sales", h.SalesOfSession)
 	r.With(mw("pos", "sale", "validate")).Post("/pos/sales/{id}/void", h.VoidSale)
+	r.With(mw("pos", "sale", "validate")).Post("/pos/returns", h.ReturnSale)
 }
 
 // Handler implements the pos HTTP surface.
@@ -402,4 +406,89 @@ func (h *Handler) VoidSale(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, sa)
+}
+
+// ReturnSale reverses a completed till sale in full: a validated credit note
+// against the invoice (applied up to the open balance), inbound restock of
+// tracked goods, and a returned marker on the sale. Cash refunds for settled
+// invoices happen out-of-band and are not modeled here.
+func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	var in struct {
+		SaleID int64 `json:"sale_id"`
+	}
+	if err := decode(r, &in); err != nil || in.SaleID <= 0 {
+		writeErr(w, http.StatusBadRequest, "sale_id required")
+		return
+	}
+	sa, err := h.deps.Store.SaleByID(ctx, in.SaleID)
+	if err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	if sa.Status != SaleCompleted {
+		writeErr(w, http.StatusUnprocessableEntity, "pos: only completed sales can be returned")
+		return
+	}
+	se, err := h.deps.Store.SessionByID(ctx, sa.SessionID)
+	if err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	term, err := h.deps.Store.TerminalByID(ctx, se.TerminalID)
+	if err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	inv, err := h.deps.Sales.DocByID(ctx, sa.InvoiceID)
+	if err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	ym := time.Now().UTC().Format("200601")
+	cn := &sales.Document{EntityID: sa.EntityID, Type: documents.TypeCreditNote,
+		OrgID: inv.OrgID, Currency: inv.Currency, RateToBase: inv.RateToBase,
+		SourceType: documents.TypeInvoice, SourceID: inv.ID, Lines: inv.Lines}
+	if err := h.deps.Sales.CreateDoc(ctx, cn, ym); err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	validated, err := h.deps.Sales.SetStatus(ctx, cn.ID, 1)
+	if err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	cn = &validated
+	if bal, err := h.deps.Sales.InvoiceBalance(ctx, inv.ID); err == nil && bal > 0 {
+		apply := cn.Totals.Gross
+		if apply > bal {
+			apply = bal
+		}
+		if err := h.deps.Sales.ApplyCredit(ctx, inv.ID, cn.ID, apply); err != nil {
+			writeErr(w, storeErrorCode(err), err.Error())
+			return
+		}
+	}
+	for _, l := range inv.Lines {
+		p, err := h.deps.Catalog.ProductByID(ctx, l.ProductID)
+		if err != nil {
+			continue // service/unknown lines simply have no stock effect
+		}
+		if p.Type != catalog.ProductGoods || !p.StockTracked {
+			continue
+		}
+		if _, err := h.deps.Catalog.AppendMovement(ctx, &catalog.StockMovement{
+			EntityID: sa.EntityID, ProductID: p.ID, WarehouseID: term.WarehouseID,
+			Qty: l.Qty, Reason: catalog.ReasonReceipt, Ref: cn.Ref}, false); err != nil {
+			writeErr(w, storeErrorCode(err), err.Error())
+			return
+		}
+	}
+	done, err := h.deps.Store.MarkReturned(ctx, sa.ID)
+	if err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	h.publish(ctx, "forgeerp.pos.sale.returned.v1", "sale", done.ID)
+	writeJSON(w, http.StatusOK, map[string]any{"sale": done, "credit_note": cn})
 }

@@ -175,3 +175,36 @@ func TestUpdateDraftLines(t *testing.T) {
 		t.Fatalf("update validated: code=%d want 422", rec.Code)
 	}
 }
+
+func TestCreditNoteApplyFlow(t *testing.T) {
+	h, _, _ := testRouter()
+	d := createDoc(t, h, documents.TypeInvoice, 7)
+	setStatus(t, h, d.ID, InvoiceValidated)
+	rec := post(t, h, "/api/v1/sales/credit-notes", map[string]any{"invoice_id": d.ID})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("credit: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var cn Document
+	_ = json.NewDecoder(rec.Body).Decode(&cn)
+	if cn.Totals.Gross != 1200 {
+		t.Fatalf("credit totals=%+v", cn.Totals)
+	}
+	setStatus(t, h, cn.ID, 1)
+	// Over-credit rejected.
+	rec = post(t, h, "/api/v1/sales/credit-notes/"+itoa(cn.ID)+"/apply",
+		map[string]any{"invoice_id": d.ID, "amount": 99999})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("over-credit: code=%d want 422", rec.Code)
+	}
+	// Partial then full.
+	rec = post(t, h, "/api/v1/sales/credit-notes/"+itoa(cn.ID)+"/apply",
+		map[string]any{"invoice_id": d.ID, "amount": 200})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var out map[string]int64
+	_ = json.NewDecoder(rec.Body).Decode(&out)
+	if out["balance"] != 1000 {
+		t.Fatalf("balance=%d want 1000", out["balance"])
+	}
+}

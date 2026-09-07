@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, type CheckoutLine, type POSSale } from '../api/client';
+import { api, apiExt, type CheckoutLine, type POSSale } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 
 export function POS() {
@@ -22,6 +22,18 @@ export function POS() {
       .then((s) => {
         setSales(s);
         setError('');
+      })
+      .catch((e: Error) => setError(e.message));
+  };
+
+  const returnSale = (id: number) => {
+    if (!token) return;
+    apiExt
+      .returnSale(token, id)
+      .then(() => {
+        setError('');
+        setResult('Returned with credit note');
+        load();
       })
       .catch((e: Error) => setError(e.message));
   };
@@ -66,6 +78,9 @@ export function POS() {
           <li key={s.id}>
             {s.ref} — {(s.total_gross / 100).toFixed(2)} — change{' '}
             {(s.change / 100).toFixed(2)}
+            {s.status === 1 && (
+              <button onClick={() => returnSale(s.id)}>Return</button>
+            )}
           </li>
         ))}
       </ul>

@@ -215,3 +215,52 @@ func TestMultiTenderCheckout(t *testing.T) {
 		t.Fatalf("bad leg: code=%d want 422", rec.Code)
 	}
 }
+
+func TestReturnSaleFlow(t *testing.T) {
+	h, ledger := testRouter()
+	seedGoods(t, ledger)
+	se := openTill(t, h)
+	// Checkout 2 units: 2400 gross, fully paid.
+	rec := doReq(t, h, http.MethodPost, "/api/v1/pos/checkout", map[string]any{
+		"session_id": se.ID, "org_id": 7, "method": "cash", "tendered": 5000,
+		"lines": []map[string]any{{"product_id": 1, "qty": 2}},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("checkout: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var sa Sale
+	_ = json.NewDecoder(rec.Body).Decode(&sa)
+	lvl, _ := ledger.Level(context.Background(), 1, 1)
+	if lvl.Qty != 8 {
+		t.Fatalf("after sale stock=%d want 8", lvl.Qty)
+	}
+	// Return in full: credit note + restock + returned marker.
+	rec = doReq(t, h, http.MethodPost, "/api/v1/pos/returns", map[string]any{"sale_id": sa.ID})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("return: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Sale       Sale `json:"sale"`
+		CreditNote struct {
+			Totals struct {
+				Gross int64 `json:"gross"`
+			} `json:"totals"`
+		} `json:"credit_note"`
+	}
+	_ = json.NewDecoder(rec.Body).Decode(&out)
+	if out.Sale.Status != SaleReturned {
+		t.Fatalf("sale status=%d want returned", out.Sale.Status)
+	}
+	if out.CreditNote.Totals.Gross != 2400 {
+		t.Fatalf("credit gross=%d want 2400", out.CreditNote.Totals.Gross)
+	}
+	lvl, _ = ledger.Level(context.Background(), 1, 1)
+	if lvl.Qty != 10 {
+		t.Fatalf("after return stock=%d want 10", lvl.Qty)
+	}
+	// Second return rejected.
+	rec = doReq(t, h, http.MethodPost, "/api/v1/pos/returns", map[string]any{"sale_id": sa.ID})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("double return: code=%d want 422", rec.Code)
+	}
+}

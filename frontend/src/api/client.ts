@@ -425,6 +425,8 @@ export const apiExt = {
   closeSession: (t: string, id: number, body: unknown) =>
     post<unknown>(t, `/api/v1/pos/sessions/${id}/close`, body),
   voidSale: (t: string, id: number) => post<unknown>(t, `/api/v1/pos/sales/${id}/void`, {}),
+  returnSale: (t: string, saleId: number) =>
+    post<{ sale: POSSale }>(t, '/api/v1/pos/returns', { sale_id: saleId }),
   // manufacturing
   createBOM: (t: string, body: unknown) => post<BOM>(t, '/api/v1/manufacturing/boms', body),
   bom: (t: string, id: number) => get<BOM>(t, `/api/v1/manufacturing/boms/${id}`),

@@ -25,6 +25,7 @@ type Store interface {
 	SaleByID(ctx context.Context, id int64) (Sale, error)
 	SalesOfSession(ctx context.Context, sessionID int64) ([]Sale, error)
 	VoidSale(ctx context.Context, id int64) (Sale, error)
+	MarkReturned(ctx context.Context, id int64) (Sale, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -205,6 +206,25 @@ func (s *PGStore) VoidSale(ctx context.Context, id int64) (Sale, error) {
 	return sa, nil
 }
 
+func (s *PGStore) MarkReturned(ctx context.Context, id int64) (Sale, error) {
+	sa, err := s.SaleByID(ctx, id)
+	if err != nil {
+		return Sale{}, err
+	}
+	if sa.Status != SaleCompleted {
+		return Sale{}, errors.New("pos: only completed sales can be returned")
+	}
+	tag, err := s.pool.Exec(ctx, `UPDATE ferp_pos_sales SET status=2 WHERE id=$1 AND status=1`, id)
+	if err != nil {
+		return Sale{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return Sale{}, identity.ErrVersionConflict
+	}
+	sa.Status = SaleReturned
+	return sa, nil
+}
+
 // MemoryStore is the in-process fake for handler tests.
 type MemoryStore struct {
 	mu        sync.Mutex
@@ -361,6 +381,21 @@ func (m *MemoryStore) VoidSale(_ context.Context, id int64) (Sale, error) {
 		return Sale{}, errors.New("pos: only completed sales can be voided")
 	}
 	sa.Status = SaleVoided
+	m.sales[id] = sa
+	return sa, nil
+}
+
+func (m *MemoryStore) MarkReturned(_ context.Context, id int64) (Sale, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sa, ok := m.sales[id]
+	if !ok {
+		return Sale{}, identity.ErrNotFound
+	}
+	if sa.Status != SaleCompleted {
+		return Sale{}, errors.New("pos: only completed sales can be returned")
+	}
+	sa.Status = SaleReturned
 	m.sales[id] = sa
 	return sa, nil
 }

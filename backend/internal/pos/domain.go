@@ -33,6 +33,7 @@ type SaleStatus int16
 
 const (
 	SaleCompleted SaleStatus = 1
+	SaleReturned  SaleStatus = 2
 	SaleVoided    SaleStatus = -1
 )
 
