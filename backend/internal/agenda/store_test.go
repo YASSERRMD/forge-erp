@@ -104,3 +104,22 @@ func TestAgendaAPI(t *testing.T) {
 		t.Fatalf("dispatch early: code=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestWorkerRunOnce(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemoryStore()
+	now := time.Now().UTC().Truncate(time.Second)
+	e := &Event{EntityID: 1, Title: "Standup", OwnerLogin: "ada",
+		StartAt: now.Add(5 * time.Minute), EndAt: now.Add(30 * time.Minute), ReminderMin: 15}
+	if err := m.CreateEvent(ctx, e); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	w := &Worker{Store: m, Now: func() time.Time { return now }}
+	n, err := w.RunOnce(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("run=%d err=%v", n, err)
+	}
+	if n, _ := w.RunOnce(ctx); n != 0 {
+		t.Fatalf("second run=%d want 0", n)
+	}
+}

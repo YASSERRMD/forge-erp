@@ -203,11 +203,12 @@ func (h *Handler) CloseSession(w http.ResponseWriter, r *http.Request) {
 }
 
 type checkoutIn struct {
-	SessionID int64      `json:"session_id"`
-	OrgID     int64      `json:"org_id"`
+	SessionID int64    `json:"session_id"`
+	OrgID     int64    `json:"org_id"`
 	Lines     []SaleLine `json:"lines"`
-	Method    string     `json:"method"`
-	Tendered  int64      `json:"tendered"`
+	Method    string   `json:"method"`
+	Tendered  int64    `json:"tendered"`
+	Payments  []Tender `json:"payments"` // optional multi-tender legs
 }
 
 // Checkout rings a sale: validates stock, posts a validated invoice + full
@@ -282,6 +283,27 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 	if method == "" {
 		method = PayCash
 	}
+	tendered := in.Tendered
+	legs := []Tender{{Method: method, Amount: tendered}}
+	if len(in.Payments) > 0 {
+		for _, tg := range in.Payments {
+			if err := tg.Validate(); err != nil {
+				writeErr(w, http.StatusUnprocessableEntity, err.Error())
+				return
+			}
+		}
+		tendered = 0
+		seen := map[string]bool{}
+		for _, tg := range in.Payments {
+			tendered += tg.Amount
+			seen[tg.Method] = true
+		}
+		legs = in.Payments
+		method = in.Payments[0].Method
+		if len(seen) > 1 {
+			method = "mixed"
+		}
+	}
 	orgID := in.OrgID
 	if orgID == 0 {
 		if h.deps.WalkinOrg == 0 {
@@ -291,12 +313,12 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 		orgID = h.deps.WalkinOrg
 	}
 	sale := Sale{EntityID: entity, SessionID: se.ID, OrgID: orgID,
-		Lines: in.Lines, Method: method, Tendered: in.Tendered}
+		Lines: in.Lines, Method: method, Tendered: tendered}
 	if err := sale.Validate(); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	if in.Tendered < tot.Gross {
+	if tendered < tot.Gross {
 		writeErr(w, http.StatusUnprocessableEntity, "pos: tendered below total")
 		return
 	}
@@ -313,11 +335,23 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	inv = &validated
-	pay := &sales.Payment{EntityID: entity, OrgID: orgID, Amount: tot.Gross,
-		Currency: "USD", Method: method, PaidAt: time.Now().UTC()}
-	if _, err := h.deps.Sales.RecordPayment(ctx, pay, []int64{inv.ID}, ym); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
+	// Split the gross across tender legs in order (change stays on the till).
+	remaining := tot.Gross
+	for _, leg := range legs {
+		alloc := leg.Amount
+		if alloc > remaining {
+			alloc = remaining
+		}
+		if alloc <= 0 {
+			continue
+		}
+		pay := &sales.Payment{EntityID: entity, OrgID: orgID, Amount: alloc,
+			Currency: "USD", Method: leg.Method, PaidAt: time.Now().UTC()}
+		if _, err := h.deps.Sales.RecordPayment(ctx, pay, []int64{inv.ID}, ym); err != nil {
+			writeErr(w, storeErrorCode(err), err.Error())
+			return
+		}
+		remaining -= alloc
 	}
 	for _, n := range needs {
 		qty := n.qty
@@ -329,8 +363,8 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	rec := &Sale{EntityID: entity, SessionID: se.ID, Ref: inv.Ref, OrgID: orgID,
-		Lines: in.Lines, TotalGross: tot.Gross, Method: method, Tendered: in.Tendered,
-		Change: in.Tendered - tot.Gross, Status: SaleCompleted, InvoiceID: inv.ID}
+		Lines: in.Lines, TotalGross: tot.Gross, Method: method, Tendered: tendered,
+		Change: tendered - tot.Gross, Status: SaleCompleted, InvoiceID: inv.ID}
 	if err := h.deps.Store.CreateSale(ctx, rec); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

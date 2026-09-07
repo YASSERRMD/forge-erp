@@ -8,8 +8,9 @@ export function POS() {
   const [sales, setSales] = useState<POSSale[]>([]);
   const [error, setError] = useState('');
   const [orgId, setOrgId] = useState('');
-  const [method, setMethod] = useState('cash');
-  const [tendered, setTendered] = useState('');
+  const [tenders, setTenders] = useState<Array<{ method: string; amount: string }>>([
+    { method: 'cash', amount: '' },
+  ]);
   const [lines, setLines] = useState<CheckoutLine[]>([{ product_id: 0, qty: 1 }]);
   const [result, setResult] = useState('');
 
@@ -35,8 +36,9 @@ export function POS() {
         session_id: Number(sessionId),
         org_id: Number(orgId),
         lines,
-        method,
-        tendered: Math.round(Number(tendered) * 100),
+        method: tenders.length === 1 ? tenders[0].method : 'mixed',
+        tendered: tenders.reduce((s, t) => s + Math.round(Number(t.amount) * 100), 0),
+        payments: tenders.map((t) => ({ method: t.method, amount: Math.round(Number(t.amount) * 100) })),
       })
       .then((r) => {
         setResult(`Sale ${r.ref}: gross ${(r.total_gross / 100).toFixed(2)}, change ${(r.change / 100).toFixed(2)}`);
@@ -71,19 +73,36 @@ export function POS() {
       <label>
         Customer org ID{' '}
         <input value={orgId} onChange={(e) => setOrgId(e.target.value)} />
-      </label>{' '}
-      <label>
-        Method{' '}
-        <select value={method} onChange={(e) => setMethod(e.target.value)}>
-          <option value="cash">cash</option>
-          <option value="card">card</option>
-          <option value="transfer">transfer</option>
-        </select>
-      </label>{' '}
-      <label>
-        Tendered{' '}
-        <input value={tendered} onChange={(e) => setTendered(e.target.value)} />
       </label>
+      {tenders.map((t, i) => (
+        <div key={i}>
+          <label>
+            Method{' '}
+            <select
+              value={t.method}
+              onChange={(e) =>
+                setTenders((ts) => ts.map((x, j) => (j === i ? { ...x, method: e.target.value } : x)))
+              }
+            >
+              <option value="cash">cash</option>
+              <option value="card">card</option>
+              <option value="transfer">transfer</option>
+            </select>
+          </label>{' '}
+          <label>
+            Amount{' '}
+            <input
+              value={t.amount}
+              onChange={(e) =>
+                setTenders((ts) => ts.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)))
+              }
+            />
+          </label>
+        </div>
+      ))}
+      <button onClick={() => setTenders((ts) => [...ts, { method: 'cash', amount: '' }])}>
+        Add tender
+      </button>
       {lines.map((l, i) => (
         <div key={i}>
           <label>

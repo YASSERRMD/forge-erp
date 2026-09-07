@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -252,6 +253,22 @@ func run() error {
 			idH.Require)
 		agenda.Routes(r, agenda.Deps{Store: agenda.NewPGStore(pool), Bus: platform.NewMemoryBus()},
 			idH.Require)
+		agstore := agenda.NewPGStore(pool)
+		reminderSecs := 300
+		if v := os.Getenv("FERP_REMINDER_INTERVAL_S"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				reminderSecs = n
+			}
+		}
+		if reminderSecs > 0 {
+			worker := &agenda.Worker{Store: agstore,
+				Interval: time.Duration(reminderSecs) * time.Second,
+				Logger:   log.Default()}
+			go worker.Run(ctx)
+			log.Printf("forgeerp: reminder daemon every %ds", reminderSecs)
+		} else {
+			log.Print("forgeerp: reminder daemon disabled (FERP_REMINDER_INTERVAL_S=0)")
+		}
 		documentsvc.Routes(r, docSvc, idH.Require)
 		search.Routes(r, searcher, idH.Require)
 	})

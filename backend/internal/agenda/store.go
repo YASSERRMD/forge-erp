@@ -19,6 +19,7 @@ type Store interface {
 	ListEvents(ctx context.Context, entityID int64, from, to time.Time, limit, offset int) ([]Event, error)
 	SetEventStatus(ctx context.Context, id int64, to EventStatus, rowVersion int64) (Event, error)
 	DueReminders(ctx context.Context, entityID int64, now time.Time, limit int) ([]Event, error)
+	DueRemindersAll(ctx context.Context, now time.Time, limit int) ([]Event, error)
 	MarkReminded(ctx context.Context, id int64) error
 }
 
@@ -131,6 +132,27 @@ func (s *PGStore) DueReminders(ctx context.Context, entityID int64, now time.Tim
 	return out, rows.Err()
 }
 
+// DueRemindersAll returns due reminders across entities (daemon path).
+func (s *PGStore) DueRemindersAll(ctx context.Context, now time.Time, limit int) ([]Event, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+eventCols+` FROM ferp_events
+		WHERE status=0 AND reminder_min > 0 AND reminded_at IS NULL
+		AND start_at - (reminder_min || ' minutes')::interval <= $1
+		ORDER BY start_at LIMIT $2`, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Event
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func (s *PGStore) MarkReminded(ctx context.Context, id int64) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_events SET reminded_at=now(), updated_at=now()
 		WHERE id=$1 AND reminded_at IS NULL`, id)
@@ -223,6 +245,18 @@ func (m *MemoryStore) DueReminders(_ context.Context, entityID int64, now time.T
 	var out []Event
 	for _, e := range m.events {
 		if e.EntityID == entityID && e.ReminderDue(now) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (m *MemoryStore) DueRemindersAll(_ context.Context, now time.Time, _ int) ([]Event, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Event
+	for _, e := range m.events {
+		if e.ReminderDue(now) {
 			out = append(out, e)
 		}
 	}

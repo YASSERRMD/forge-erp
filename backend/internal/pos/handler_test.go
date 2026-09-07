@@ -183,3 +183,35 @@ func openTillOn(t *testing.T, h http.Handler) Session {
 	_ = json.NewDecoder(rec.Body).Decode(&se)
 	return se
 }
+
+func TestMultiTenderCheckout(t *testing.T) {
+	h, ledger := testRouter()
+	seedGoods(t, ledger)
+	se := openTill(t, h)
+	// 1 x 1000 net + 20% = 1200 gross; cash 1000 + card 500 → change 300.
+	rec := doReq(t, h, http.MethodPost, "/api/v1/pos/checkout", map[string]any{
+		"session_id": se.ID, "org_id": 7,
+		"lines":      []map[string]any{{"product_id": 1, "qty": 1}},
+		"payments": []map[string]any{
+			{"method": "cash", "amount": 1000},
+			{"method": "card", "amount": 500},
+		},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("multi-tender: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var sa Sale
+	_ = json.NewDecoder(rec.Body).Decode(&sa)
+	if sa.TotalGross != 1200 || sa.Change != 300 || sa.Method != "mixed" {
+		t.Fatalf("sale=%+v", sa)
+	}
+	// Bad leg rejected.
+	rec = doReq(t, h, http.MethodPost, "/api/v1/pos/checkout", map[string]any{
+		"session_id": se.ID, "org_id": 7,
+		"lines":   []map[string]any{{"product_id": 1, "qty": 1}},
+		"payments": []map[string]any{{"method": "crypto", "amount": 5000}},
+	})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("bad leg: code=%d want 422", rec.Code)
+	}
+}
