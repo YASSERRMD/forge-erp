@@ -758,3 +758,35 @@ paths:
         '200': { description: Session }
         '401': { description: Invalid SSO token }
         '503': { description: OIDC not configured }
+  /api/v1/booking/resources:
+    get:
+      operationId: listResources
+      summary: List bookable resources (requires booking.resource.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createResource
+      summary: Register a resource (requires booking.resource.write)
+      responses:
+        '201': { description: Created }
+        '409': { description: Duplicate code }
+  /api/v1/bookings:
+    get:
+      operationId: listBookings
+      summary: List a resource's bookings in range (requires booking.booking.read)
+      responses:
+        '200': { description: List }
+        '400': { description: resource_id/from/to required }
+    post:
+      operationId: createBooking
+      summary: Reserve a window after capacity checks (requires booking.booking.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Overlap or invalid }
+  /api/v1/bookings/{id}/status:
+    post:
+      operationId: setBookingStatus
+      summary: Booking lifecycle transition (requires booking.booking.validate)
+      responses:
+        '200': { description: Updated }
+        '422': { description: Illegal transition }
