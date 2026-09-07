@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
+	"github.com/YASSERRMD/forge-erp/backend/internal/booking"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documentsvc"
 	"github.com/YASSERRMD/forge-erp/backend/internal/finance"
@@ -221,6 +222,8 @@ func run() error {
 			payments.NewOnlineProvider(payments.ProviderPayPal))
 		payments.Routes(r, payments.Deps{Store: paystore, Providers: payreg,
 			WebhookSecret: payments.WebhookSecretFromEnv(), Bus: platform.NewMemoryBus()},
+			idH.Require)
+		booking.Routes(r, booking.Deps{Store: booking.NewPGStore(pool), Bus: platform.NewMemoryBus()},
 			idH.Require)
 		documentsvc.Routes(r, docSvc, idH.Require)
 		search.Routes(r, searcher, idH.Require)
