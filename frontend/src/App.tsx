@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './auth/AuthContext';
 import { Login } from './pages/Login';
 import { Dashboard, Invoices, Organizations, Products } from './pages/Entities';
 import { Services } from './pages/Services';
+import { HR } from './pages/HR';
 
 function Shell() {
   const { token, login, signOut } = useAuth();
@@ -16,6 +17,7 @@ function Shell() {
         <Link to="/products">Products</Link>
         <Link to="/invoices">Invoices</Link>
         <Link to="/services">Services</Link>
+        <Link to="/hr">HR</Link>
         <span style={{ marginLeft: 'auto' }}>{login}</span>
         <button
           onClick={() => {
@@ -33,6 +35,7 @@ function Shell() {
           <Route path="/products" element={<Products />} />
           <Route path="/invoices" element={<Invoices />} />
           <Route path="/services" element={<Services />} />
+          <Route path="/hr" element={<HR />} />
         </Routes>
       </main>
     </>

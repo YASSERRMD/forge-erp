@@ -44,6 +44,9 @@ behavioral or structural deviation so auditors can distinguish design from drift
     fractional); produce pre-checks component availability then posts
     consume+produce moves (no cross-table transaction — concurrent producers
     can race, acceptable for lite scope); workstations/MRP scheduling not ported.
+20. HR: leave counts inclusive calendar days (Dolibarr: working days per
+    country calendar); expense payout is a status marker, not a finance
+    posting (wire to finance in a follow-up if needed).
 
 ## Deferred scope (post-Phase-12 candidates)
 

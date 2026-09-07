@@ -412,3 +412,54 @@ paths:
       responses:
         '200': { description: Produced with plan }
         '422': { description: Insufficient stock or wrong status }
+  /api/v1/hr/leaves:
+    get:
+      operationId: listLeaves
+      summary: Page leave requests, optionally by user (requires hr.leave.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createLeave
+      summary: File a draft leave request (requires hr.leave.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Validation failed }
+  /api/v1/hr/leaves/{id}/status:
+    post:
+      operationId: setLeaveStatus
+      summary: State-machine transition for a leave (requires hr.leave.validate)
+      responses:
+        '200': { description: Updated }
+        '422': { description: Illegal transition }
+  /api/v1/hr/expenses:
+    get:
+      operationId: listExpenses
+      summary: Page expense reports, optionally by user (requires hr.expense.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createExpense
+      summary: Open a draft expense report (requires hr.expense.write)
+      responses:
+        '201': { description: Created }
+        '409': { description: Duplicate ref }
+        '422': { description: Validation failed }
+  /api/v1/hr/expenses/{id}/lines:
+    post:
+      operationId: addExpenseLine
+      summary: Append a line to a draft report (requires hr.expense.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Report not editable }
+  /api/v1/hr/salaries:
+    get:
+      operationId: listSalaries
+      summary: List salary records, optionally by user (requires hr.salary.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createSalary
+      summary: Record a draft salary (requires hr.salary.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Unbalanced or invalid }
