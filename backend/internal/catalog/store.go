@@ -24,6 +24,9 @@ type Store interface {
 	AppendMovement(ctx context.Context, m *StockMovement, allowNegative bool) (StockLevel, error)
 	Level(ctx context.Context, productID, warehouseID int64) (StockLevel, error)
 	CreateLot(ctx context.Context, l *Lot) error
+	// Variants manage sellable product combinations.
+	CreateVariant(ctx context.Context, v *Variant) error
+	VariantsOf(ctx context.Context, productID int64) ([]Variant, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -174,6 +177,7 @@ type MemoryStore struct {
 	levels   map[[2]int64]StockLevel
 	moves    []StockMovement
 	lots     map[int64]Lot
+	variants map[int64]Variant
 }
 
 // NewMemoryStore builds an empty fake.
@@ -181,7 +185,7 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		products: map[int64]Product{}, bySKU: map[string]int64{},
 		houses: map[int64]Warehouse{}, levels: map[[2]int64]StockLevel{},
-		lots: map[int64]Lot{},
+		lots: map[int64]Lot{}, variants: map[int64]Variant{},
 	}
 }
 

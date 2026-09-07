@@ -917,6 +917,58 @@ paths:
       summary: Settle or cancel a donation (requires members.donation.validate)
       responses:
         '200': { description: Updated }
+  /api/v1/products/{id}/variants:
+    get:
+      operationId: listVariants
+      summary: List a product's combinations (requires catalog.variant.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createVariant
+      summary: Add a sellable combination with barcode (requires catalog.variant.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Bad SKU or barcode }
+  /api/v1/assets:
+    get:
+      operationId: listAssets
+      summary: Page assets (requires assets.asset.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createAsset
+      summary: Register an asset (requires assets.asset.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/assets/{id}/status:
+    post:
+      operationId: setAssetStatus
+      summary: Asset lifecycle transition (requires assets.asset.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/kb/articles:
+    get:
+      operationId: listArticles
+      summary: Page articles (requires kb.article.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createArticle
+      summary: Save a draft article (requires kb.article.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/kb/articles/{id}/status:
+    post:
+      operationId: setArticleStatus
+      summary: Publish or unpublish (requires kb.article.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/kb/search:
+    get:
+      operationId: searchArticles
+      summary: Search published articles (requires kb.article.read)
+      responses:
+        '200': { description: Hits }
   /api/v1/exports/organizations.csv:
     get:
       operationId: exportOrganizations

@@ -15,12 +15,14 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/agenda"
+	"github.com/YASSERRMD/forge-erp/backend/internal/assets"
 	"github.com/YASSERRMD/forge-erp/backend/internal/dataio"
 	"github.com/YASSERRMD/forge-erp/backend/internal/booking"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documentsvc"
 	"github.com/YASSERRMD/forge-erp/backend/internal/finance"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/kb"
 	"github.com/YASSERRMD/forge-erp/backend/internal/hr"
 	"github.com/YASSERRMD/forge-erp/backend/internal/manufacturing"
 	"github.com/YASSERRMD/forge-erp/backend/internal/members"
@@ -232,6 +234,10 @@ func run() error {
 		survey.Routes(r, survey.Deps{Store: survey.NewPGStore(pool), Bus: platform.NewMemoryBus()},
 			idH.Require)
 		members.Routes(r, members.Deps{Store: members.NewPGStore(pool), Bus: platform.NewMemoryBus()},
+			idH.Require)
+		assets.Routes(r, assets.Deps{Store: assets.NewPGStore(pool), Bus: platform.NewMemoryBus()},
+			idH.Require)
+		kb.Routes(r, kb.Deps{Store: kb.NewPGStore(pool), Bus: platform.NewMemoryBus()},
 			idH.Require)
 		dataio.Routes(r, dataio.Deps{Orgs: pstore, Products: cstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
