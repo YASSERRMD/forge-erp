@@ -880,3 +880,28 @@ paths:
       responses:
         '200': { description: Summary with per-row errors }
         '400': { description: Malformed CSV }
+  /api/v1/agenda/events:
+    get:
+      operationId: listEvents
+      summary: List events in range (requires agenda.event.read)
+      responses:
+        '200': { description: List }
+        '400': { description: from/to required }
+    post:
+      operationId: createEvent
+      summary: Schedule an event (requires agenda.event.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Validation failed }
+  /api/v1/agenda/events/{id}/status:
+    post:
+      operationId: setEventStatus
+      summary: Complete or cancel an event (requires agenda.event.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/agenda/reminders/dispatch:
+    post:
+      operationId: dispatchReminders
+      summary: Drain due reminders exactly once (requires agenda.reminder.write)
+      responses:
+        '200': { description: Dispatched count }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
+	"github.com/YASSERRMD/forge-erp/backend/internal/agenda"
 	"github.com/YASSERRMD/forge-erp/backend/internal/dataio"
 	"github.com/YASSERRMD/forge-erp/backend/internal/booking"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
@@ -230,6 +231,8 @@ func run() error {
 		survey.Routes(r, survey.Deps{Store: survey.NewPGStore(pool), Bus: platform.NewMemoryBus()},
 			idH.Require)
 		dataio.Routes(r, dataio.Deps{Orgs: pstore, Products: cstore, Bus: platform.NewMemoryBus()},
+			idH.Require)
+		agenda.Routes(r, agenda.Deps{Store: agenda.NewPGStore(pool), Bus: platform.NewMemoryBus()},
 			idH.Require)
 		documentsvc.Routes(r, docSvc, idH.Require)
 		search.Routes(r, searcher, idH.Require)
