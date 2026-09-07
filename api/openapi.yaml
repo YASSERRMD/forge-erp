@@ -854,3 +854,29 @@ paths:
       summary: Vote tally for a question (requires survey.vote.read)
       responses:
         '200': { description: Tally }
+  /api/v1/exports/organizations.csv:
+    get:
+      operationId: exportOrganizations
+      summary: Export organizations as CSV (requires dataio.export.read)
+      responses:
+        '200': { description: CSV }
+  /api/v1/exports/products.csv:
+    get:
+      operationId: exportProducts
+      summary: Export products as CSV (requires dataio.export.read)
+      responses:
+        '200': { description: CSV }
+  /api/v1/imports/organizations:
+    post:
+      operationId: importOrganizations
+      summary: Import organizations row by row (requires dataio.import.write)
+      responses:
+        '200': { description: Summary with per-row errors }
+        '400': { description: Malformed CSV }
+  /api/v1/imports/products:
+    post:
+      operationId: importProducts
+      summary: Import products row by row (requires dataio.import.write)
+      responses:
+        '200': { description: Summary with per-row errors }
+        '400': { description: Malformed CSV }
