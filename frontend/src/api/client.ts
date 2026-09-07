@@ -82,6 +82,19 @@ export interface ManufacturingOrder {
   row_version: number;
 }
 
+export interface Survey {
+  id: number;
+  title: string;
+  status: number;
+  row_version: number;
+}
+
+export interface Tally {
+  option_id: number;
+  label: string;
+  votes: number;
+}
+
 export interface FinAccount {
   id: number;
   code: string;
@@ -239,4 +252,14 @@ export const api = {
   accounts: (token: string) => request<FinAccount[]>(token, '/api/v1/finance/accounts'),
   createAccount: (token: string, body: { code: string; label: string; type: string }) =>
     request<FinAccount>(token, '/api/v1/finance/accounts', { method: 'POST', body: JSON.stringify(body) }),
+  surveys: (token: string) => request<Survey[]>(token, '/api/v1/surveys'),
+  createSurvey: (token: string, body: { title: string }) =>
+    request<Survey>(token, '/api/v1/surveys', { method: 'POST', body: JSON.stringify(body) }),
+  setSurveyStatus: (token: string, id: number, status: number, row_version: number) =>
+    request<Survey>(token, `/api/v1/surveys/${id}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status, row_version }),
+    }),
+  questionResults: (token: string, questionId: number) =>
+    request<Tally[]>(token, `/api/v1/questions/${questionId}/results`),
 };
