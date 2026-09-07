@@ -125,4 +125,11 @@ export const api = {
     request<ExpenseReport[]>(token, '/api/v1/hr/expenses?limit=50'),
   sessionSales: (token: string, sessionId: number) =>
     request<POSSale[]>(token, `/api/v1/pos/sessions/${sessionId}/sales`),
+  pnl: (token: string) =>
+    request<{ revenue: number; expense: number; net: number }>(
+      token,
+      '/api/v1/reports/pnl',
+    ),
+  receivables: (token: string) =>
+    request<{ rows: unknown[]; total: number }>(token, '/api/v1/reports/receivables'),
 };

@@ -45,6 +45,25 @@ func (s *PGStore) CreateAccount(ctx context.Context, a *Account) error {
 		a.EntityID, a.Code, a.Label, a.Type).Scan(&a.ID)
 }
 
+// Accounts lists an entity's chart of accounts (reporting P&L).
+func (s *PGStore) Accounts(ctx context.Context, entityID int64) ([]Account, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, code, label, type FROM ferp_accounts
+		WHERE entity_id=$1 ORDER BY code`, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Account
+	for rows.Next() {
+		var a Account
+		if err := rows.Scan(&a.ID, &a.EntityID, &a.Code, &a.Label, &a.Type); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 func (s *PGStore) CreateJournal(ctx context.Context, j *Journal) error {
 	return s.pool.QueryRow(ctx, `INSERT INTO ferp_journals (entity_id, code, label)
 		VALUES ($1,$2,$3) RETURNING id`, j.EntityID, j.Code, j.Label).Scan(&j.ID)
@@ -246,6 +265,19 @@ func (m *MemoryStore) CreateAccount(_ context.Context, a *Account) error {
 	a.ID = m.next()
 	m.accts[a.ID] = *a
 	return nil
+}
+
+// Accounts lists an entity's chart of accounts (reporting P&L).
+func (m *MemoryStore) Accounts(_ context.Context, entityID int64) ([]Account, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Account
+	for _, a := range m.accts {
+		if a.EntityID == entityID {
+			out = append(out, a)
+		}
+	}
+	return out, nil
 }
 
 func (m *MemoryStore) CreateJournal(_ context.Context, j *Journal) error {

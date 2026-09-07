@@ -501,3 +501,22 @@ paths:
       summary: List a session's till sales (requires pos.sale.read)
       responses:
         '200': { description: List }
+  /api/v1/reports/pnl:
+    get:
+      operationId: profitAndLoss
+      summary: P&L over posted entries (requires reporting.pnl.read)
+      responses:
+        '200': { description: Report }
+  /api/v1/reports/receivables:
+    get:
+      operationId: receivables
+      summary: Validated invoices with outstanding balances (requires reporting.receivables.read)
+      responses:
+        '200': { description: Report }
+  /api/v1/reports/stock-valuation:
+    get:
+      operationId: stockValuation
+      summary: PMP valuation for one warehouse (requires reporting.valuation.read)
+      responses:
+        '200': { description: Report }
+        '400': { description: warehouse_id required }
