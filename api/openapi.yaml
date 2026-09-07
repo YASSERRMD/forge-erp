@@ -451,6 +451,15 @@ paths:
       responses:
         '201': { description: Created }
         '422': { description: Report not editable }
+  /api/v1/hr/expenses/{id}/pay:
+    post:
+      operationId: payExpense
+      summary: Pay an approved report posting a balanced entry (requires hr.expense.pay)
+      responses:
+        '200': { description: Paid }
+        '422': { description: Not approved or bad accounts }
+        '502': { description: Ledger failed, reverted }
+        '503': { description: Finance not wired }
   /api/v1/hr/salaries:
     get:
       operationId: listSalaries

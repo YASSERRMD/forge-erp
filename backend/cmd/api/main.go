@@ -205,9 +205,13 @@ func run() error {
 			idH.Require)
 		manufacturing.Routes(r, manufacturing.Deps{Store: mfstore, Ledger: cstore, Bus: platform.NewMemoryBus()},
 			idH.Require)
-		hr.Routes(r, hr.Deps{Store: hrstore, Bus: platform.NewMemoryBus()}, idH.Require)
+		hr.Routes(r, hr.Deps{Store: hrstore, Finance: fstore, Bus: platform.NewMemoryBus()}, idH.Require)
 		posstore := pos.NewPGStore(pool)
-		pos.Routes(r, pos.Deps{Store: posstore, Catalog: cstore, Sales: sstore, Bus: platform.NewMemoryBus()},
+		var walkinOrg int64
+		if v := os.Getenv("FERP_POS_WALKIN_ORG"); v != "" {
+			_, _ = fmt.Sscanf(v, "%d", &walkinOrg)
+		}
+		pos.Routes(r, pos.Deps{Store: posstore, Catalog: cstore, Sales: sstore, WalkinOrg: walkinOrg, Bus: platform.NewMemoryBus()},
 			idH.Require)
 		reporting.Routes(r, reporting.Deps{Ledger: fstore, Billing: sstore, Stock: cstore},
 			idH.Require)

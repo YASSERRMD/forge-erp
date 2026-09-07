@@ -33,10 +33,11 @@ type Sales interface {
 
 // Deps wires handlers to persistence, the catalog/sales seams, and the bus.
 type Deps struct {
-	Store   Store
-	Catalog Catalog
-	Sales   Sales
-	Bus     platform.Bus
+	Store     Store
+	Catalog   Catalog
+	Sales     Sales
+	WalkinOrg int64 // FERP_POS_WALKIN_ORG: default customer for anonymous sales (0 = require org)
+	Bus       platform.Bus
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -281,7 +282,15 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 	if method == "" {
 		method = PayCash
 	}
-	sale := Sale{EntityID: entity, SessionID: se.ID, OrgID: in.OrgID,
+	orgID := in.OrgID
+	if orgID == 0 {
+		if h.deps.WalkinOrg == 0 {
+			writeErr(w, http.StatusUnprocessableEntity, "pos: customer org required (no anonymous sales in lite scope)")
+			return
+		}
+		orgID = h.deps.WalkinOrg
+	}
+	sale := Sale{EntityID: entity, SessionID: se.ID, OrgID: orgID,
 		Lines: in.Lines, Method: method, Tendered: in.Tendered}
 	if err := sale.Validate(); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
@@ -292,7 +301,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ym := time.Now().UTC().Format("200601")
-	inv := &sales.Document{EntityID: entity, Type: documents.TypeInvoice, OrgID: in.OrgID,
+	inv := &sales.Document{EntityID: entity, Type: documents.TypeInvoice, OrgID: orgID,
 		Currency: "USD", RateToBase: 1000000, Lines: dlines}
 	if err := h.deps.Sales.CreateDoc(ctx, inv, ym); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
@@ -304,7 +313,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	inv = &validated
-	pay := &sales.Payment{EntityID: entity, OrgID: in.OrgID, Amount: tot.Gross,
+	pay := &sales.Payment{EntityID: entity, OrgID: orgID, Amount: tot.Gross,
 		Currency: "USD", Method: method, PaidAt: time.Now().UTC()}
 	if _, err := h.deps.Sales.RecordPayment(ctx, pay, []int64{inv.ID}, ym); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
@@ -319,7 +328,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	rec := &Sale{EntityID: entity, SessionID: se.ID, Ref: inv.Ref, OrgID: in.OrgID,
+	rec := &Sale{EntityID: entity, SessionID: se.ID, Ref: inv.Ref, OrgID: orgID,
 		Lines: in.Lines, TotalGross: tot.Gross, Method: method, Tendered: in.Tendered,
 		Change: in.Tendered - tot.Gross, Status: SaleCompleted, InvoiceID: inv.ID}
 	if err := h.deps.Store.CreateSale(ctx, rec); err != nil {

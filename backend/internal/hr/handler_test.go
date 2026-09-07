@@ -2,12 +2,15 @@ package hr
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/finance"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -122,5 +125,60 @@ func TestSalaryAPI(t *testing.T) {
 		map[string]any{"status": 1, "row_version": s.RowVersion})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("validate: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPayExpensePostsLedger(t *testing.T) {
+	fstore := finance.NewMemoryStore()
+	r := chi.NewRouter()
+	r.Route("/api/v1", func(r chi.Router) {
+		Routes(r, Deps{Store: NewMemoryStore(), Finance: fstore}, passthrough)
+	})
+	ctx := context.Background()
+	for _, a := range []finance.Account{
+		{EntityID: 1, Code: "625000", Label: "Travel", Type: "expense"},
+		{EntityID: 1, Code: "512000", Label: "Bank", Type: "asset"},
+	} {
+		a := a
+		if err := fstore.CreateAccount(ctx, &a); err != nil {
+			t.Fatalf("account: %v", err)
+		}
+	}
+	j := &finance.Journal{EntityID: 1, Code: "ACH", Label: "Purchases"}
+	if err := fstore.CreateJournal(ctx, j); err != nil {
+		t.Fatalf("journal: %v", err)
+	}
+	rec := doReq(t, r, http.MethodPost, "/api/v1/hr/expenses",
+		map[string]any{"ref": "EXP-PAY", "user_login": "ada"})
+	var rep ExpenseReport
+	_ = json.NewDecoder(rec.Body).Decode(&rep)
+	now := time.Now().UTC().Truncate(time.Second)
+	rec = doReq(t, r, http.MethodPost, fmt.Sprintf("/api/v1/hr/expenses/%d/lines", rep.ID),
+		map[string]any{"date": now, "label": "hotel", "amount": 3000})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("line: code=%d", rec.Code)
+	}
+	for _, st := range []int16{1, 2} {
+		rec = doReq(t, r, http.MethodPost, fmt.Sprintf("/api/v1/hr/expenses/%d/status", rep.ID),
+			map[string]any{"status": st, "row_version": rep.RowVersion})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: code=%d", st, rec.Code)
+		}
+		_ = json.NewDecoder(rec.Body).Decode(&rep)
+	}
+	accts, _ := fstore.Accounts(ctx, 1)
+	byCode := map[string]int64{}
+	for _, a := range accts {
+		byCode[a.Code] = a.ID
+	}
+	rec = doReq(t, r, http.MethodPost, fmt.Sprintf("/api/v1/hr/expenses/%d/pay", rep.ID),
+		map[string]any{"journal_id": j.ID, "expense_account_id": byCode["625000"],
+			"bank_account_id": byCode["512000"], "row_version": rep.RowVersion})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("pay: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	tb, _ := fstore.TrialBalance(ctx, 1)
+	if tb[byCode["625000"]] != [2]int64{3000, 0} || tb[byCode["512000"]] != [2]int64{0, 3000} {
+		t.Fatalf("trial=%v", tb)
 	}
 }
