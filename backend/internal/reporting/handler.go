@@ -11,9 +11,10 @@ import (
 
 // Deps wires report handlers to the ledger, billing and stock seams.
 type Deps struct {
-	Ledger Ledger
+	Ledger  Ledger
 	Billing Billing
-	Stock  Stock
+	Stock   Stock
+	Orgs    Orgs
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -24,6 +25,7 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	h := &Handler{deps: d}
 	r.With(mw("reporting", "pnl", "read")).Get("/reports/pnl", h.PNL)
 	r.With(mw("reporting", "receivables", "read")).Get("/reports/receivables", h.Receivables)
+	r.With(mw("reporting", "intraeu", "read")).Get("/reports/intra-eu", h.IntraEU)
 	r.With(mw("reporting", "valuation", "read")).Get("/reports/stock-valuation", h.Valuation)
 }
 
@@ -65,6 +67,16 @@ func (h *Handler) Receivables(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "total": total})
+}
+
+// IntraEU serves intra-EU dispatches by destination country (?home=FR).
+func (h *Handler) IntraEU(w http.ResponseWriter, r *http.Request) {
+	rows, err := IntraEU(r.Context(), entityOf(r), r.URL.Query().Get("home"), h.deps.Billing, h.deps.Orgs)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "report failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
 }
 
 // Valuation serves PMP stock valuation for one warehouse.
