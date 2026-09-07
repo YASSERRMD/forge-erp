@@ -2,10 +2,15 @@ import { NavLink, Route, Routes, useNavigate } from 'react-router-dom';
 import {
   Anvil,
   Banknote,
+  BookOpen,
   BookOpenCheck,
   Building2,
   CalendarDays,
+  CalendarRange,
   ClipboardList,
+  CreditCard,
+  FileText,
+  FileUp,
   Factory,
   HeartHandshake,
   LayoutDashboard,
@@ -13,6 +18,7 @@ import {
   Package,
   Receipt,
   Settings2,
+  ShieldCheck,
   ShoppingCart,
   Truck,
   Users,
@@ -33,10 +39,17 @@ import { Surveys } from './pages/Surveys';
 import { Members } from './pages/Members';
 import { Agenda } from './pages/Agenda';
 import { Suppliers } from './pages/Suppliers';
+import { Documents } from './pages/Documents';
+import { Sales } from './pages/Sales';
+import { Payments } from './pages/Payments';
+import { Knowledge } from './pages/Knowledge';
+import { Happenings } from './pages/Happenings';
+import { Admin } from './pages/Admin';
 
 const COMMERCE = [
   { to: '/organizations', label: 'Organizations', icon: <Building2 size={17} /> },
   { to: '/products', label: 'Products', icon: <Package size={17} /> },
+  { to: '/sales', label: 'Sales', icon: <FileText size={17} /> },
   { to: '/invoices', label: 'Invoices', icon: <Receipt size={17} /> },
   { to: '/pos', label: 'Point of sale', icon: <ShoppingCart size={17} /> },
   { to: '/manufacturing', label: 'Manufacturing', icon: <Factory size={17} /> },
@@ -46,15 +59,20 @@ const OPERATIONS = [
   { to: '/services', label: 'Services', icon: <Wrench size={17} /> },
   { to: '/hr', label: 'HR', icon: <Users size={17} /> },
   { to: '/booking', label: 'Booking', icon: <CalendarDays size={17} /> },
+  { to: '/documents', label: 'Documents', icon: <FileUp size={17} /> },
   { to: '/agenda', label: 'Agenda', icon: <ClipboardList size={17} /> },
   { to: '/surveys', label: 'Surveys', icon: <BookOpenCheck size={17} /> },
   { to: '/members', label: 'Members', icon: <HeartHandshake size={17} /> },
+  { to: '/events', label: 'Events & hiring', icon: <CalendarRange size={17} /> },
+  { to: '/knowledge', label: 'Knowledge', icon: <BookOpen size={17} /> },
 ];
 
 const FINANCE = [
   { to: '/finance', label: 'Finance', icon: <Banknote size={17} /> },
   { to: '/reports', label: 'Reports', icon: <Settings2 size={17} /> },
   { to: '/suppliers', label: 'Suppliers', icon: <Truck size={17} /> },
+  { to: '/payments', label: 'Payments', icon: <CreditCard size={17} /> },
+  { to: '/admin', label: 'Administration', icon: <ShieldCheck size={17} /> },
 ];
 
 function Shell() {
@@ -107,6 +125,7 @@ function Shell() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/organizations" element={<Organizations />} />
           <Route path="/products" element={<Products />} />
+          <Route path="/sales" element={<Sales />} />
           <Route path="/invoices" element={<Invoices />} />
           <Route path="/services" element={<Services />} />
           <Route path="/hr" element={<HR />} />
@@ -115,10 +134,15 @@ function Shell() {
           <Route path="/manufacturing" element={<Manufacturing />} />
           <Route path="/finance" element={<Finance />} />
           <Route path="/booking" element={<Booking />} />
+          <Route path="/documents" element={<Documents />} />
           <Route path="/surveys" element={<Surveys />} />
           <Route path="/members" element={<Members />} />
           <Route path="/agenda" element={<Agenda />} />
+          <Route path="/events" element={<Happenings />} />
+          <Route path="/knowledge" element={<Knowledge />} />
           <Route path="/suppliers" element={<Suppliers />} />
+          <Route path="/payments" element={<Payments />} />
+          <Route path="/admin" element={<Admin />} />
         </Routes>
       </main>
     </div>

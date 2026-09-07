@@ -57,6 +57,7 @@ export interface LeaveRequest {
   type: string;
   days: number;
   status: number;
+  row_version: number;
 }
 
 export interface Resource {
@@ -149,6 +150,7 @@ export interface ExpenseReport {
   user_login: string;
   total: number;
   status: number;
+  row_version: number;
 }
 
 export interface POSSale {
@@ -337,9 +339,15 @@ function post<T>(token: string, path: string, body?: unknown): Promise<T> {
 }
 
 export const apiExt = {
-  // identity
-  users: (t: string) => get<unknown[]>(t, '/api/v1/users?limit=50'),
+  // identity admin
+  usersList: (t: string) => get<unknown[]>(t, '/api/v1/users?limit=50'),
+  createUser: (t: string, body: unknown) => post<unknown>(t, '/api/v1/users', body),
   groups: (t: string) => get<unknown[]>(t, '/api/v1/groups?limit=50'),
+  // sales workspace
+  salesDocs: (t: string, type: string) =>
+    get<SalesDocument[]>(t, `/api/v1/sales/documents?type=${type}&limit=50`),
+  createSalesDoc: (t: string, body: unknown) =>
+    post<SalesDocument>(t, '/api/v1/sales/documents', body),
   // catalog
   warehouses: (t: string) => get<Warehouse[]>(t, '/api/v1/warehouses?limit=50'),
   createWarehouse: (t: string, body: { code: string; label: string }) =>
@@ -352,9 +360,6 @@ export const apiExt = {
   createVariant: (t: string, productId: number, body: unknown) =>
     post<unknown>(t, `/api/v1/products/${productId}/variants`, body),
   // sales
-  salesDocs: (t: string, type: string) =>
-    get<SalesDocument[]>(t, `/api/v1/sales/documents?type=${type}&limit=50`),
-  createSalesDoc: (t: string, body: unknown) => post<SalesDocument>(t, '/api/v1/sales/documents', body),
   updateSalesDoc: (t: string, id: number, body: unknown) =>
     request<SalesDocument>(t, `/api/v1/sales/documents/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   convertDoc: (t: string, id: number, body: unknown) =>
@@ -500,6 +505,8 @@ export const apiExt = {
     post<unknown>(t, `/api/v1/events/${eventId}/registrations`, body),
   positions: (t: string) => get<unknown[]>(t, '/api/v1/positions'),
   createPosition: (t: string, body: unknown) => post<unknown>(t, '/api/v1/positions', body),
+  setPositionStatus: (t: string, id: number, body: unknown) =>
+    post<unknown>(t, `/api/v1/positions/${id}/status`, body),
   applyToPosition: (t: string, positionId: number, body: unknown) =>
     post<unknown>(t, `/api/v1/positions/${positionId}/applications`, body),
   setApplicationStatus: (t: string, id: number, body: unknown) =>
@@ -507,9 +514,29 @@ export const apiExt = {
   // services extras
   projectHours: (t: string, id: number) =>
     get<{ hours: number }>(t, `/api/v1/services/projects/${id}/hours`),
+  projectTasks: (t: string, projectId: number) =>
+    get<Array<{ id: number; label: string; status: number; row_version: number }>>(
+      t,
+      `/api/v1/services/projects/${projectId}/tasks`,
+    ),
+  createTask: (t: string, projectId: number, body: { label: string }) =>
+    post<unknown>(t, `/api/v1/services/projects/${projectId}/tasks`, body),
+  setTaskStatus: (t: string, id: number, body: { status: number; row_version: number }) =>
+    post<unknown>(t, `/api/v1/services/tasks/${id}/status`, body),
+  bookTime: (
+    t: string,
+    taskId: number,
+    body: { project_id: number; author: string; hours: number; entry_date: string },
+  ) => post<unknown>(t, `/api/v1/services/tasks/${taskId}/time`, body),
   createContract: (t: string, body: unknown) => post<unknown>(t, '/api/v1/services/contracts', body),
+  contractsOfOrg: (t: string, orgId: number) =>
+    get<unknown[]>(t, `/api/v1/services/organizations/${orgId}/contracts`),
+  setContractStatus: (t: string, id: number, body: { status: number; row_version: number }) =>
+    post<unknown>(t, `/api/v1/services/contracts/${id}/status`, body),
   createIntervention: (t: string, body: unknown) =>
     post<unknown>(t, '/api/v1/services/interventions', body),
+  setInterventionStatus: (t: string, id: number, body: { status: number; row_version: number }) =>
+    post<unknown>(t, `/api/v1/services/interventions/${id}/status`, body),
   ticketMessages: (t: string, id: number) =>
     get<unknown[]>(t, `/api/v1/services/tickets/${id}/messages`),
   addTicketMessage: (t: string, id: number, body: unknown) =>
@@ -520,4 +547,15 @@ export const apiExt = {
   // dataio exports (browser download links)
   exportOrgsUrl: () => apiUrl('/api/v1/exports/organizations.csv'),
   exportProductsUrl: () => apiUrl('/api/v1/exports/products.csv'),
+  // surveys depth
+  surveyQuestions: (t: string, surveyId: number) =>
+    get<Array<{ id: number; text: string; multi: boolean }>>(
+      t,
+      `/api/v1/surveys/${surveyId}/questions`,
+    ),
+  questionOptions: (t: string, questionId: number) =>
+    get<Array<{ id: number; label: string }>>(t, `/api/v1/questions/${questionId}/options`),
+  // manufacturing depth
+  bomLines: (t: string, bomId: number) =>
+    get<unknown[]>(t, `/api/v1/manufacturing/boms/${bomId}/lines`),
 };

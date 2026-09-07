@@ -11,6 +11,7 @@ export function Agenda() {
   const [title, setTitle] = useState('');
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
+  const [dispatched, setDispatched] = useState<number | null>(null);
 
   const reload = () => {
     if (!token) return;
@@ -43,6 +44,20 @@ export function Agenda() {
     <div>
       <PageHeader icon={<CalendarDays size={22} />} title="Agenda" sub="Calendar events and reminders" />
       {error && <Alert>{error}</Alert>}
+      <p>
+        <button
+          onClick={() =>
+            token &&
+            apiExt
+              .dispatchReminders(token)
+              .then((r) => setDispatched(r.dispatched))
+              .catch((e: Error) => setError(e.message))
+          }
+        >
+          Dispatch due reminders
+        </button>{' '}
+        {dispatched !== null && <span className="muted">dispatched: {dispatched}</span>}
+      </p>
       <Card title="Upcoming">
         <ul className="clean">
           {events.map((e) => (
