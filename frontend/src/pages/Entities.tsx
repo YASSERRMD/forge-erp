@@ -54,14 +54,47 @@ export function Products() {
 }
 
 export function Invoices() {
+  const { token } = useAuth();
   const invs = useFetch<SalesDocument[]>((t) => api.invoices(t), []);
+  const [notice, setNotice] = useState('');
+  const refresh = () => {
+    if (token) api.invoices(token).then(() => window.location.reload()).catch(() => undefined);
+  };
+  const validate = (id: number) => {
+    if (!token) return;
+    api
+      .setDocumentStatus(token, id, 1)
+      .then(() => refresh())
+      .catch((e: Error) => setNotice(e.message));
+  };
+  const payFull = async (id: number) => {
+    if (!token) return;
+    try {
+      const doc = await api.getDocument(token, id);
+      await api.payInvoice(token, {
+        org_id: doc.org_id,
+        amount: doc.totals.gross,
+        currency: 'USD',
+        method: 'transfer',
+        invoice_ids: [id],
+      });
+      refresh();
+    } catch (e) {
+      setNotice((e as Error).message);
+    }
+  };
   return (
     <section>
       <h2>Invoices</h2>
+      {notice && <p style={{ color: 'red' }}>{notice}</p>}
       <ul>
         {invs.map((d) => (
           <li key={d.id}>
-            {d.ref} — status {d.status} — {(d.totals.gross / 100).toFixed(2)}
+            {d.ref} — status {d.status} — {(d.totals.gross / 100).toFixed(2)}{' '}
+            {d.status === 0 && <button onClick={() => validate(d.id)}>Validate</button>}{' '}
+            {(d.status === 1 || d.status === 0) && (
+              <button onClick={() => payFull(d.id)}>Pay full</button>
+            )}
           </li>
         ))}
       </ul>

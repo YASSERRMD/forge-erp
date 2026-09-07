@@ -541,3 +541,211 @@ paths:
         '200': { description: Applied or duplicate }
         '401': { description: Bad signature }
         '503': { description: Webhook not configured }
+  # --- Audit backfill: routes that existed but were missing from the spec ---
+  /api/v1/users/{id}:
+    get:
+      operationId: getUser
+      summary: Fetch one user (requires identity.user.read)
+      responses:
+        '200': { description: User }
+        '404': { description: Not found }
+  /api/v1/groups/{id}/members:
+    post:
+      operationId: addGroupMember
+      summary: Add a user to a group (requires identity.group.write)
+      responses:
+        '200': { description: Added }
+  /api/v1/organizations/{id}/contacts:
+    get:
+      operationId: listOrgContacts
+      summary: List an organization's contacts (requires partners.contact.read)
+      responses:
+        '200': { description: List }
+  /api/v1/products/{id}:
+    get:
+      operationId: getProduct
+      summary: Fetch one product (requires catalog.product.read)
+      responses:
+        '200': { description: Product }
+        '404': { description: Not found }
+  /api/v1/sales/documents/{id}:
+    get:
+      operationId: getSalesDocument
+      summary: Fetch one commercial document (requires sales.document.read)
+      responses:
+        '200': { description: Document }
+        '404': { description: Not found }
+    put:
+      operationId: updateSalesDocument
+      summary: Replace a DRAFT document's lines (requires sales.document.write)
+      responses:
+        '200': { description: Updated }
+        '422': { description: Not a draft or invalid lines }
+  /api/v1/sales/documents/{id}/convert:
+    post:
+      operationId: convertSalesDocument
+      summary: Clone a document into the next family (requires sales.document.write)
+      responses:
+        '201': { description: Converted }
+  /api/v1/purchase/documents/{id}:
+    get:
+      operationId: getPurchaseDocument
+      summary: Fetch one supplier document (requires procurement.document.read)
+      responses:
+        '200': { description: Document }
+        '404': { description: Not found }
+  /api/v1/purchase/documents/{id}/status:
+    post:
+      operationId: setPurchaseStatus
+      summary: Supplier document transition (requires procurement.document.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/purchase/documents/{id}/convert:
+    post:
+      operationId: convertPurchaseDocument
+      summary: Clone a supplier document forward (requires procurement.document.write)
+      responses:
+        '201': { description: Converted }
+  /api/v1/finance/bank-accounts:
+    post:
+      operationId: createBankAccount
+      summary: Open a bank account (requires finance.bank.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/finance/journals:
+    post:
+      operationId: createJournal
+      summary: Create an accounting journal (requires finance.journal.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/finance/loans:
+    post:
+      operationId: createLoan
+      summary: Record a loan with schedule (requires finance.loan.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/finance/bank-transactions/{id}/reconcile:
+    post:
+      operationId: reconcileBankTransaction
+      summary: Mark a bank movement reconciled (requires finance.bank.validate)
+      responses:
+        '200': { description: Reconciled }
+  /api/v1/documents/{id}/download:
+    get:
+      operationId: downloadDocument
+      summary: Rights-gated file download (requires documents.file.read)
+      responses:
+        '200': { description: Bytes }
+        '404': { description: Not found }
+  /api/v1/services/projects/{id}:
+    get:
+      operationId: getProject
+      summary: Fetch one project (requires services.project.read)
+      responses:
+        '200': { description: Project }
+        '404': { description: Not found }
+  /api/v1/services/projects/{id}/hours:
+    get:
+      operationId: projectHours
+      summary: Booked hundredths for a project (requires services.time.read)
+      responses:
+        '200': { description: Hours }
+  /api/v1/services/tasks/{id}/status:
+    post:
+      operationId: setTaskStatus
+      summary: Task transition (requires services.task.validate)
+      responses:
+        '200': { description: Updated }
+        '422': { description: Illegal transition }
+  /api/v1/services/tasks/{id}/hours:
+    get:
+      operationId: taskHours
+      summary: Booked hundredths for a task (requires services.time.read)
+      responses:
+        '200': { description: Hours }
+  /api/v1/services/organizations/{orgID}/contracts:
+    get:
+      operationId: contractsOfOrg
+      summary: List an organization's contracts (requires services.contract.read)
+      responses:
+        '200': { description: List }
+  /api/v1/services/interventions/{id}/status:
+    post:
+      operationId: setInterventionStatus
+      summary: Intervention transition (requires services.intervention.validate)
+      responses:
+        '200': { description: Updated }
+        '422': { description: Illegal transition }
+  /api/v1/services/tickets/{id}:
+    get:
+      operationId: getTicket
+      summary: Fetch one ticket (requires services.ticket.read)
+      responses:
+        '200': { description: Ticket }
+        '404': { description: Not found }
+  /api/v1/manufacturing/boms/{id}:
+    get:
+      operationId: getBOM
+      summary: Fetch one BOM (requires manufacturing.bom.read)
+      responses:
+        '200': { description: BOM }
+        '404': { description: Not found }
+  /api/v1/manufacturing/boms/{id}/status:
+    post:
+      operationId: setBOMStatus
+      summary: BOM transition (requires manufacturing.bom.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/manufacturing/mos/{id}:
+    get:
+      operationId: getMO
+      summary: Fetch one manufacturing order (requires manufacturing.mo.read)
+      responses:
+        '200': { description: MO }
+        '404': { description: Not found }
+  /api/v1/manufacturing/mos/{id}/status:
+    post:
+      operationId: setMOStatus
+      summary: MO transition (requires manufacturing.mo.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/hr/expenses/{id}/status:
+    post:
+      operationId: setExpenseStatus
+      summary: Expense report transition (requires hr.expense.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/hr/salaries/{id}/status:
+    post:
+      operationId: setSalaryStatus
+      summary: Salary transition (requires hr.salary.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/payments/attempts/{id}/status:
+    post:
+      operationId: setAttemptStatus
+      summary: Settle or refund an attempt (requires payments.attempt.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/pos/sessions/{id}:
+    get:
+      operationId: getPOSSession
+      summary: Fetch one cashier session (requires pos.session.read)
+      responses:
+        '200': { description: Session }
+        '404': { description: Not found }
+  /api/v1/pos/sales/{id}/void:
+    post:
+      operationId: voidPOSSale
+      summary: Mark a completed sale void (requires pos.sale.validate)
+      responses:
+        '200': { description: Voided }
+        '422': { description: Not completable }
+  /api/v1/auth/oidc:
+    post:
+      operationId: oidcLogin
+      summary: Exchange a verified Keycloak id_token for a session (JIT provisioning)
+      responses:
+        '200': { description: Session }
+        '401': { description: Invalid SSO token }
+        '503': { description: OIDC not configured }

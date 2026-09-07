@@ -110,7 +110,7 @@ func (h *Handler) GetDoc(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, d)
 }
 
-// UpdateDoc edits a DRAFT document only (validated docs immutable — 422).
+// UpdateDoc replaces a DRAFT document's lines (validated docs immutable — 422).
 func (h *Handler) UpdateDoc(w http.ResponseWriter, r *http.Request) {
 	d, ok := h.load(w, r)
 	if !ok {
@@ -120,7 +120,19 @@ func (h *Handler) UpdateDoc(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "only draft documents can be edited")
 		return
 	}
-	writeErr(w, http.StatusNotImplemented, "line editing via re-create; use convert for next stage")
+	var body struct {
+		Lines []documents.Line `json:"lines"`
+	}
+	if err := decode(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	upd, err := h.deps.Store.UpdateDocLines(r.Context(), d.ID, body.Lines)
+	if err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, upd)
 }
 
 func (h *Handler) load(w http.ResponseWriter, r *http.Request) (Document, bool) {

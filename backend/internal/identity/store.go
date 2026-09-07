@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ type Store interface {
 	CreateUser(ctx context.Context, u *User) error
 	UserByID(ctx context.Context, id int64) (User, error)
 	UserByLogin(ctx context.Context, entityID int64, login string) (User, error)
+	UserByEmail(ctx context.Context, entityID int64, email string) (User, error)
 	UpdateUser(ctx context.Context, u *User) error
 	CreateGroup(ctx context.Context, g *Group) error
 	AddMember(ctx context.Context, groupID, userID int64) error
@@ -71,6 +73,11 @@ func (s *PGStore) UserByID(ctx context.Context, id int64) (User, error) {
 
 func (s *PGStore) UserByLogin(ctx context.Context, entityID int64, login string) (User, error) {
 	return scanUser(s.pool.QueryRow(ctx, `SELECT `+userCols+` FROM ferp_users WHERE entity_id=$1 AND login=$2`, entityID, login))
+}
+
+// UserByEmail finds an SSO-provisioned account by email (JIT provisioning key).
+func (s *PGStore) UserByEmail(ctx context.Context, entityID int64, email string) (User, error) {
+	return scanUser(s.pool.QueryRow(ctx, `SELECT `+userCols+` FROM ferp_users WHERE entity_id=$1 AND email=$2`, entityID, email))
 }
 
 func (s *PGStore) UpdateUser(ctx context.Context, u *User) error {
@@ -247,6 +254,18 @@ func (m *MemoryStore) UserByLogin(_ context.Context, entityID int64, login strin
 		return User{}, ErrNotFound
 	}
 	return m.users[id], nil
+}
+
+// UserByEmail scans for an SSO-provisioned account by email.
+func (m *MemoryStore) UserByEmail(_ context.Context, entityID int64, email string) (User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, u := range m.users {
+		if u.EntityID == entityID && strings.EqualFold(u.Email, email) {
+			return u, nil
+		}
+	}
+	return User{}, ErrNotFound
 }
 
 func (m *MemoryStore) UpdateUser(_ context.Context, u *User) error {
