@@ -969,6 +969,76 @@ paths:
       summary: Search published articles (requires kb.article.read)
       responses:
         '200': { description: Hits }
+  /api/v1/events:
+    get:
+      operationId: listOrgEvents
+      summary: List organized events (requires events.event.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createOrgEvent
+      summary: Open a draft event (requires events.event.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/events/{id}/status:
+    post:
+      operationId: setOrgEventStatus
+      summary: Publish/close/cancel an event (requires events.event.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/events/{id}/registrations:
+    get:
+      operationId: listRegistrations
+      summary: List an event's registrations (requires events.registration.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: registerAttendee
+      summary: Book a seat after capacity checks (requires events.registration.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Full or unpublished }
+  /api/v1/registrations/{id}/status:
+    post:
+      operationId: setRegistrationStatus
+      summary: Confirm/attend/cancel a registration (requires events.registration.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/positions:
+    get:
+      operationId: listPositions
+      summary: List job postings (requires events.position.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: createPosition
+      summary: Open a draft posting (requires events.position.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/positions/{id}/status:
+    post:
+      operationId: setPositionStatus
+      summary: Open or close a posting (requires events.position.validate)
+      responses:
+        '200': { description: Updated }
+  /api/v1/positions/{id}/applications:
+    get:
+      operationId: listApplications
+      summary: List a posting's candidates (requires events.application.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: submitApplication
+      summary: Apply to an open posting (requires events.application.write)
+      responses:
+        '201': { description: Created }
+        '422': { description: Posting not open }
+  /api/v1/applications/{id}/status:
+    post:
+      operationId: setApplicationStatus
+      summary: Move a candidate along the pipeline (requires events.application.validate)
+      responses:
+        '200': { description: Updated }
   /api/v1/exports/organizations.csv:
     get:
       operationId: exportOrganizations
