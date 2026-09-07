@@ -16,6 +16,8 @@ const (
 	TypeOrder    DocType = "order"    // llx_commande
 	TypeShipment DocType = "shipment" // llx_expedition
 	TypeInvoice  DocType = "invoice"  // llx_facture
+	// TypeCreditNote reverses invoiced amounts (Dolibarr avoir).
+	TypeCreditNote DocType = "credit_note"
 	// Supplier families (Dolibarr supplier_proposal / commande_fournisseur /
 	// reception / facture_fourn) share kernel semantics with own lifecycles.
 	TypeSupplierProposal DocType = "supplier_proposal"
@@ -35,6 +37,8 @@ func (t DocType) Prefix() string {
 		return "SHIP"
 	case TypeInvoice:
 		return "INV"
+	case TypeCreditNote:
+		return "CN"
 	case TypeSupplierProposal:
 		return "SPROP"
 	case TypeSupplierOrder:
@@ -58,6 +62,7 @@ func NextRef(t DocType, yearMonth string, seq int64) string {
 // Order: 0 draft,1 validated,2 shipped,3 billed,4 closed,9 cancelled.
 // Shipment: 0 draft,1 validated,2 closed,9 cancelled.
 // Invoice: 0 draft,1 validated,2 part_paid,3 paid,9 cancelled.
+// CreditNote: 0 draft,1 validated (applied),9 cancelled.
 var Transitions = map[DocType]map[int16][]int16{
 	TypeProposal: {
 		0: {1, 9},
@@ -79,6 +84,9 @@ var Transitions = map[DocType]map[int16][]int16{
 		0: {1, 9},
 		1: {2, 3, 9},
 		2: {3, 9},
+	},
+	TypeCreditNote: {
+		0: {1, 9},
 	},
 	// Supplier lifecycles mirror the sales ones.
 	TypeSupplierProposal: {

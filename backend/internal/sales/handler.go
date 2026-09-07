@@ -35,6 +35,8 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("sales", "document", "write")).Post("/sales/documents/{id}/convert", h.ConvertDoc)
 	r.With(mw("sales", "payment", "write")).Post("/sales/payments", h.RecordPayment)
 	r.With(mw("sales", "shipment", "write")).Post("/sales/shipments/{id}/fulfill", h.Fulfill)
+	r.With(mw("sales", "credit", "write")).Post("/sales/credit-notes", h.CreateCreditNote)
+	r.With(mw("sales", "credit", "write")).Post("/sales/credit-notes/{id}/apply", h.ApplyCredit)
 }
 
 // Handler implements the sales HTTP surface.
@@ -296,4 +298,59 @@ func storeErrorCode(err error) int {
 	default:
 		return http.StatusUnprocessableEntity
 	}
+}
+
+// CreateCreditNote clones an invoice's lines into a draft credit note.
+func (h *Handler) CreateCreditNote(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		InvoiceID int64 `json:"invoice_id"`
+	}
+	if err := decode(r, &req); err != nil || req.InvoiceID <= 0 {
+		writeErr(w, http.StatusBadRequest, "invoice_id required")
+		return
+	}
+	src, err := h.deps.Store.DocByID(r.Context(), req.InvoiceID)
+	if err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	if src.Type != documents.TypeInvoice {
+		writeErr(w, http.StatusUnprocessableEntity, "sales: source must be an invoice")
+		return
+	}
+	credit := &Document{EntityID: src.EntityID, Type: documents.TypeCreditNote,
+		OrgID: src.OrgID, Currency: src.Currency, RateToBase: src.RateToBase,
+		SourceType: documents.TypeInvoice, SourceID: src.ID, Lines: src.Lines}
+	if err := h.deps.Store.CreateDoc(r.Context(), credit, yearMonth()); err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, credit)
+}
+
+// ApplyCredit allocates a validated credit note against an invoice balance.
+func (h *Handler) ApplyCredit(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	var req struct {
+		InvoiceID int64 `json:"invoice_id"`
+		Amount    int64 `json:"amount"`
+	}
+	if err := decode(r, &req); err != nil || req.InvoiceID <= 0 {
+		writeErr(w, http.StatusBadRequest, "invoice_id and amount required")
+		return
+	}
+	if err := h.deps.Store.ApplyCredit(r.Context(), req.InvoiceID, id, req.Amount); err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	bal, err := h.deps.Store.InvoiceBalance(r.Context(), req.InvoiceID)
+	if err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int64{"invoice_id": req.InvoiceID, "balance": bal})
 }

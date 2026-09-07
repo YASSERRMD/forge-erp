@@ -62,7 +62,7 @@ type Document struct {
 // Validate header + lines (totals recomputed by the store/handler, never trusted).
 func (d Document) Validate() error {
 	switch d.Type {
-	case documents.TypeProposal, documents.TypeOrder, documents.TypeShipment, documents.TypeInvoice:
+	case documents.TypeProposal, documents.TypeOrder, documents.TypeShipment, documents.TypeInvoice, documents.TypeCreditNote:
 	default:
 		return fmt.Errorf("sales: unknown document type %q", d.Type)
 	}

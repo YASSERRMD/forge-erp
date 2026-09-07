@@ -656,6 +656,19 @@ paths:
       summary: Clone a document into the next family (requires sales.document.write)
       responses:
         '201': { description: Converted }
+  /api/v1/sales/credit-notes:
+    post:
+      operationId: createCreditNote
+      summary: Clone invoice lines into a draft credit note (requires sales.credit.write)
+      responses:
+        '201': { description: Created }
+  /api/v1/sales/credit-notes/{id}/apply:
+    post:
+      operationId: applyCredit
+      summary: Allocate a validated credit against an invoice (requires sales.credit.write)
+      responses:
+        '200': { description: New balance }
+        '422': { description: Exceeds balance }
   /api/v1/purchase/documents/{id}:
     get:
       operationId: getPurchaseDocument
@@ -816,6 +829,13 @@ paths:
       responses:
         '200': { description: Voided }
         '422': { description: Not completable }
+  /api/v1/pos/returns:
+    post:
+      operationId: returnPOSSale
+      summary: Full return with credit note and restock (requires pos.sale.validate)
+      responses:
+        '200': { description: Returned with credit }
+        '422': { description: Not returnable }
   /api/v1/auth/oidc:
     post:
       operationId: oidcLogin
