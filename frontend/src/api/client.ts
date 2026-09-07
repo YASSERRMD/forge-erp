@@ -57,6 +57,7 @@ export interface LeaveRequest {
   type: string;
   days: number;
   status: number;
+  row_version: number;
 }
 
 export interface Resource {
@@ -149,6 +150,7 @@ export interface ExpenseReport {
   user_login: string;
   total: number;
   status: number;
+  row_version: number;
 }
 
 export interface POSSale {
@@ -540,4 +542,15 @@ export const apiExt = {
   // dataio exports (browser download links)
   exportOrgsUrl: () => apiUrl('/api/v1/exports/organizations.csv'),
   exportProductsUrl: () => apiUrl('/api/v1/exports/products.csv'),
+  // surveys depth
+  surveyQuestions: (t: string, surveyId: number) =>
+    get<Array<{ id: number; text: string; multi: boolean }>>(
+      t,
+      `/api/v1/surveys/${surveyId}/questions`,
+    ),
+  questionOptions: (t: string, questionId: number) =>
+    get<Array<{ id: number; label: string }>>(t, `/api/v1/questions/${questionId}/options`),
+  // manufacturing depth
+  bomLines: (t: string, bomId: number) =>
+    get<unknown[]>(t, `/api/v1/manufacturing/boms/${bomId}/lines`),
 };

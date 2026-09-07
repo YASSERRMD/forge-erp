@@ -12,6 +12,9 @@ export function Members() {
   const [ref, setRef] = useState('');
   const [first, setFirst] = useState('');
   const [last, setLast] = useState('');
+  const [dref, setDref] = useState('');
+  const [ddonor, setDdonor] = useState('');
+  const [damount, setDamount] = useState('');
 
   const reload = () => {
     if (!token) return;
@@ -87,9 +90,45 @@ export function Members() {
                 <Badge tone={statusTone(d.status)}>
                   {d.status === 1 ? 'paid' : d.status === 0 ? 'promised' : 'canceled'}
                 </Badge>
+                {d.status === 0 && token && (
+                  <button
+                    onClick={() =>
+                      act(apiExt.setDonationStatus(token, d.id, { status: 1, row_version: d.row_version }))
+                    }
+                  >
+                    Mark paid
+                  </button>
+                )}
               </li>
             ))}
           </ul>
+          <h4>Record donation</h4>
+          <label className="field">
+            Ref <input value={dref} onChange={(e) => setDref(e.target.value)} />
+          </label>
+          <label className="field">
+            Donor <input value={ddonor} onChange={(e) => setDdonor(e.target.value)} />
+          </label>
+          <label className="field">
+            Amount <input value={damount} onChange={(e) => setDamount(e.target.value)} />
+          </label>
+          <button
+            className="primary"
+            onClick={() =>
+              token &&
+              act(
+                apiExt.createDonation(token, {
+                  ref: dref,
+                  donor_name: ddonor,
+                  amount: Math.round(Number(damount) * 100),
+                  donated_at: new Date().toISOString(),
+                  method: 'transfer',
+                }),
+              )
+            }
+          >
+            Record
+          </button>
         </Card>
       </div>
     </div>

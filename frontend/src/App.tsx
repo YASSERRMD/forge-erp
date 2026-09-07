@@ -6,6 +6,7 @@ import {
   Building2,
   CalendarDays,
   ClipboardList,
+  FileUp,
   Factory,
   HeartHandshake,
   LayoutDashboard,
@@ -33,6 +34,7 @@ import { Surveys } from './pages/Surveys';
 import { Members } from './pages/Members';
 import { Agenda } from './pages/Agenda';
 import { Suppliers } from './pages/Suppliers';
+import { Documents } from './pages/Documents';
 
 const COMMERCE = [
   { to: '/organizations', label: 'Organizations', icon: <Building2 size={17} /> },
@@ -46,6 +48,7 @@ const OPERATIONS = [
   { to: '/services', label: 'Services', icon: <Wrench size={17} /> },
   { to: '/hr', label: 'HR', icon: <Users size={17} /> },
   { to: '/booking', label: 'Booking', icon: <CalendarDays size={17} /> },
+  { to: '/documents', label: 'Documents', icon: <FileUp size={17} /> },
   { to: '/agenda', label: 'Agenda', icon: <ClipboardList size={17} /> },
   { to: '/surveys', label: 'Surveys', icon: <BookOpenCheck size={17} /> },
   { to: '/members', label: 'Members', icon: <HeartHandshake size={17} /> },
@@ -115,6 +118,7 @@ function Shell() {
           <Route path="/manufacturing" element={<Manufacturing />} />
           <Route path="/finance" element={<Finance />} />
           <Route path="/booking" element={<Booking />} />
+          <Route path="/documents" element={<Documents />} />
           <Route path="/surveys" element={<Surveys />} />
           <Route path="/members" element={<Members />} />
           <Route path="/agenda" element={<Agenda />} />
