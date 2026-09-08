@@ -9,6 +9,9 @@ export function Finance() {
   const { token } = useAuth();
   const { t } = useLang();
   const [accounts, setAccounts] = useState<FinAccount[]>([]);
+  const [journals, setJournals] = useState<Array<{ id: number; code: string; label: string }>>([]);
+  const [banks, setBanks] = useState<Array<{ id: number; code: string; label: string }>>([]);
+  const [loans, setLoans] = useState<Array<{ id: number; label: string; principal: number }>>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [code, setCode] = useState('');
@@ -25,7 +28,11 @@ export function Finance() {
   const [eRef, setERef] = useState('');
 
   const reload = () => {
-    if (token) api.accounts(token).then(setAccounts).catch(() => undefined);
+    if (!token) return;
+    api.accounts(token).then(setAccounts).catch(() => undefined);
+    apiExt.journals(token).then((j) => setJournals(j as Array<{ id: number; code: string; label: string }>)).catch(() => undefined);
+    apiExt.bankAccounts(token).then((b) => setBanks(b as Array<{ id: number; code: string; label: string }>)).catch(() => undefined);
+    apiExt.loans(token).then((l) => setLoans(l as Array<{ id: number; label: string; principal: number }>)).catch(() => undefined);
   };
   useEffect(reload, [token]);
 
@@ -134,6 +141,30 @@ export function Finance() {
           <button className="primary" onClick={postEntry}>
             {t('create')}
           </button>
+          <h4>{t('journal')} / Bank / Loans</h4>
+          <ul className="clean">
+            {journals.map((j) => (
+              <li key={j.id}>
+                <span>
+                  {j.code} — {j.label}
+                </span>
+              </li>
+            ))}
+            {banks.map((b) => (
+              <li key={b.id}>
+                <span>
+                  {b.code} — {b.label}
+                </span>
+              </li>
+            ))}
+            {loans.map((l) => (
+              <li key={l.id}>
+                <span>
+                  {l.label} — {(l.principal / 100).toFixed(2)}
+                </span>
+              </li>
+            ))}
+          </ul>
         </Card>
       </div>
     </div>

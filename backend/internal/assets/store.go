@@ -76,6 +76,7 @@ func (a Asset) CanTransition(to AssetStatus) bool {
 type Store interface {
 	CreateAsset(ctx context.Context, a *Asset) error
 	AssetByID(ctx context.Context, id int64) (Asset, error)
+	UpdateAsset(ctx context.Context, id int64, label, serial string, warehouseID *int64, rowVersion int64) (Asset, error)
 	ListAssets(ctx context.Context, entityID int64, limit, offset int) ([]Asset, error)
 	SetAssetStatus(ctx context.Context, id int64, to AssetStatus, rowVersion int64) (Asset, error)
 }
@@ -113,6 +114,37 @@ func (s *PGStore) CreateAsset(ctx context.Context, a *Asset) error {
 
 func (s *PGStore) AssetByID(ctx context.Context, id int64) (Asset, error) {
 	return scanAsset(s.pool.QueryRow(ctx, `SELECT `+assetCols+` FROM ferp_assets WHERE id=$1`, id))
+}
+
+// UpdateAsset edits a non-retired asset's label, serial and warehouse.
+func (s *PGStore) UpdateAsset(ctx context.Context, id int64, label, serial string, warehouseID *int64, rowVersion int64) (Asset, error) {
+	a, err := s.AssetByID(ctx, id)
+	if err != nil {
+		return Asset{}, err
+	}
+	if a.RowVersion != rowVersion {
+		return Asset{}, identity.ErrVersionConflict
+	}
+	if a.Status == AssetRetired {
+		return Asset{}, errors.New("assets: retired assets are frozen")
+	}
+	if strings.TrimSpace(label) == "" {
+		return Asset{}, errors.New("assets: label required")
+	}
+	tag, err := s.pool.Exec(ctx, `UPDATE ferp_assets SET label=$1, serial=$2, warehouse_id=$3,
+		updated_at=now(), row_version=row_version+1 WHERE id=$4 AND row_version=$5`,
+		label, serial, warehouseID, id, rowVersion)
+	if err != nil {
+		return Asset{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return Asset{}, identity.ErrVersionConflict
+	}
+	a.Label = label
+	a.Serial = serial
+	a.WarehouseID = warehouseID
+	a.RowVersion++
+	return a, nil
 }
 
 func (s *PGStore) ListAssets(ctx context.Context, entityID int64, limit, offset int) ([]Asset, error) {
@@ -195,6 +227,30 @@ func (m *MemoryStore) AssetByID(_ context.Context, id int64) (Asset, error) {
 	if !ok {
 		return Asset{}, identity.ErrNotFound
 	}
+	return a, nil
+}
+
+func (m *MemoryStore) UpdateAsset(_ context.Context, id int64, label, serial string, warehouseID *int64, rowVersion int64) (Asset, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.assets[id]
+	if !ok {
+		return Asset{}, identity.ErrNotFound
+	}
+	if a.RowVersion != rowVersion {
+		return Asset{}, identity.ErrVersionConflict
+	}
+	if a.Status == AssetRetired {
+		return Asset{}, errors.New("assets: retired assets are frozen")
+	}
+	if strings.TrimSpace(label) == "" {
+		return Asset{}, errors.New("assets: label required")
+	}
+	a.Label = label
+	a.Serial = serial
+	a.WarehouseID = warehouseID
+	a.RowVersion++
+	m.assets[id] = a
 	return a, nil
 }
 

@@ -27,6 +27,7 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	h := &Handler{deps: d}
 	r.With(mw("assets", "asset", "write")).Post("/assets", h.CreateAsset)
 	r.With(mw("assets", "asset", "read")).Get("/assets", h.ListAssets)
+	r.With(mw("assets", "asset", "write")).Put("/assets/{id}", h.UpdateAsset)
 	r.With(mw("assets", "asset", "validate")).Post("/assets/{id}/status", h.SetAssetStatus)
 }
 
@@ -104,6 +105,33 @@ func (h *Handler) CreateAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	h.publish(r.Context(), "forgeerp.assets.created.v1", "asset", a.ID)
 	writeJSON(w, http.StatusCreated, a)
+}
+
+type updateAssetIn struct {
+	Label       string `json:"label"`
+	Serial      string `json:"serial"`
+	WarehouseID *int64 `json:"warehouse_id"`
+	RowVersion  int64  `json:"row_version"`
+}
+
+// UpdateAsset edits a non-retired asset.
+func (h *Handler) UpdateAsset(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r, "id")
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	var in updateAssetIn
+	if err := decode(r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	a, err := h.deps.Store.UpdateAsset(r.Context(), id, in.Label, in.Serial, in.WarehouseID, in.RowVersion)
+	if err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
 }
 
 // ListAssets pages assets.

@@ -64,6 +64,7 @@ func (a Article) CanTransition(to ArticleStatus) bool {
 type Store interface {
 	CreateArticle(ctx context.Context, a *Article) error
 	ArticleByID(ctx context.Context, id int64) (Article, error)
+	UpdateArticle(ctx context.Context, id int64, title, body string, tags []string, rowVersion int64) (Article, error)
 	ListArticles(ctx context.Context, entityID int64, publishedOnly bool, limit, offset int) ([]Article, error)
 	SetArticleStatus(ctx context.Context, id int64, to ArticleStatus, rowVersion int64) (Article, error)
 	SearchArticles(ctx context.Context, entityID int64, q string, limit int) ([]Article, error)
@@ -109,6 +110,41 @@ func (s *PGStore) CreateArticle(ctx context.Context, a *Article) error {
 
 func (s *PGStore) ArticleByID(ctx context.Context, id int64) (Article, error) {
 	return scanArticle(s.pool.QueryRow(ctx, `SELECT `+articleCols+` FROM ferp_articles WHERE id=$1`, id))
+}
+
+// UpdateArticle edits a draft article (published must be unpublished first).
+func (s *PGStore) UpdateArticle(ctx context.Context, id int64, title, body string, tags []string, rowVersion int64) (Article, error) {
+	a, err := s.ArticleByID(ctx, id)
+	if err != nil {
+		return Article{}, err
+	}
+	if a.RowVersion != rowVersion {
+		return Article{}, identity.ErrVersionConflict
+	}
+	if a.Status != ArticleDraft {
+		return Article{}, errors.New("kb: only drafts are editable")
+	}
+	if strings.TrimSpace(title) == "" {
+		return Article{}, errors.New("kb: title required")
+	}
+	raw, _ := json.Marshal(tags)
+	if raw == nil {
+		raw = []byte("[]")
+	}
+	tag, err := s.pool.Exec(ctx, `UPDATE ferp_articles SET title=$1, body=$2, tags=$3,
+		updated_at=now(), row_version=row_version+1 WHERE id=$4 AND row_version=$5`,
+		title, body, raw, id, rowVersion)
+	if err != nil {
+		return Article{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return Article{}, identity.ErrVersionConflict
+	}
+	a.Title = title
+	a.Body = body
+	a.Tags = tags
+	a.RowVersion++
+	return a, nil
 }
 
 func (s *PGStore) ListArticles(ctx context.Context, entityID int64, publishedOnly bool, limit, offset int) ([]Article, error) {
@@ -216,6 +252,30 @@ func (m *MemoryStore) ArticleByID(_ context.Context, id int64) (Article, error) 
 	if !ok {
 		return Article{}, identity.ErrNotFound
 	}
+	return a, nil
+}
+
+func (m *MemoryStore) UpdateArticle(_ context.Context, id int64, title, body string, tags []string, rowVersion int64) (Article, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.articles[id]
+	if !ok {
+		return Article{}, identity.ErrNotFound
+	}
+	if a.RowVersion != rowVersion {
+		return Article{}, identity.ErrVersionConflict
+	}
+	if a.Status != ArticleDraft {
+		return Article{}, errors.New("kb: only drafts are editable")
+	}
+	if strings.TrimSpace(title) == "" {
+		return Article{}, errors.New("kb: title required")
+	}
+	a.Title = title
+	a.Body = body
+	a.Tags = tags
+	a.RowVersion++
+	m.articles[id] = a
 	return a, nil
 }
 

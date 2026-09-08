@@ -18,6 +18,9 @@ type Store interface {
 	CreateAccount(ctx context.Context, a *Account) error
 	// Accounts lists the chart of accounts (reporting + UI).
 	Accounts(ctx context.Context, entityID int64) ([]Account, error)
+	ListJournals(ctx context.Context, entityID int64) ([]Journal, error)
+	ListBankAccounts(ctx context.Context, entityID int64) ([]BankAccount, error)
+	ListLoans(ctx context.Context, entityID int64) ([]Loan, error)
 	CreateJournal(ctx context.Context, j *Journal) error
 	CreateFiscalYear(ctx context.Context, f *FiscalYear) error
 	// PostEntry validates balance + fiscal-year lock, chains the hash, and persists atomically.
@@ -62,6 +65,60 @@ func (s *PGStore) Accounts(ctx context.Context, entityID int64) ([]Account, erro
 			return nil, err
 		}
 		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (s *PGStore) ListJournals(ctx context.Context, entityID int64) ([]Journal, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, code, label FROM ferp_journals
+		WHERE entity_id=$1 ORDER BY code`, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Journal
+	for rows.Next() {
+		var j Journal
+		if err := rows.Scan(&j.ID, &j.EntityID, &j.Code, &j.Label); err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
+func (s *PGStore) ListBankAccounts(ctx context.Context, entityID int64) ([]BankAccount, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, code, label, iban FROM ferp_bank_accounts
+		WHERE entity_id=$1 ORDER BY code`, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BankAccount
+	for rows.Next() {
+		var b BankAccount
+		if err := rows.Scan(&b.ID, &b.EntityID, &b.Code, &b.Label, &b.IBAN); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+func (s *PGStore) ListLoans(ctx context.Context, entityID int64) ([]Loan, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, label, principal, rate_bps, start_date, periods
+		FROM ferp_loans WHERE entity_id=$1 ORDER BY id`, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Loan
+	for rows.Next() {
+		var l Loan
+		if err := rows.Scan(&l.ID, &l.EntityID, &l.Label, &l.Principal, &l.RateBps, &l.Start, &l.Periods); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
 	}
 	return out, rows.Err()
 }
@@ -277,6 +334,42 @@ func (m *MemoryStore) Accounts(_ context.Context, entityID int64) ([]Account, er
 	for _, a := range m.accts {
 		if a.EntityID == entityID {
 			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (m *MemoryStore) ListJournals(_ context.Context, entityID int64) ([]Journal, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Journal
+	for _, j := range m.jrns {
+		if j.EntityID == entityID {
+			out = append(out, j)
+		}
+	}
+	return out, nil
+}
+
+func (m *MemoryStore) ListBankAccounts(_ context.Context, entityID int64) ([]BankAccount, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []BankAccount
+	for _, b := range m.banks {
+		if b.EntityID == entityID {
+			out = append(out, b)
+		}
+	}
+	return out, nil
+}
+
+func (m *MemoryStore) ListLoans(_ context.Context, entityID int64) ([]Loan, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Loan
+	for _, l := range m.loans {
+		if l.EntityID == entityID {
+			out = append(out, l)
 		}
 	}
 	return out, nil

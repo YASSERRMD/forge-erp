@@ -344,6 +344,8 @@ export const apiExt = {
   // identity admin
   usersList: (t: string) => get<unknown[]>(t, '/api/v1/users?limit=50'),
   createUser: (t: string, body: unknown) => post<unknown>(t, '/api/v1/users', body),
+  updateUser: (t: string, id: number, body: unknown) =>
+    request<unknown>(t, `/api/v1/users/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   groups: (t: string) => get<unknown[]>(t, '/api/v1/groups?limit=50'),
   // sales workspace
   salesDocs: (t: string, type: string) =>
@@ -384,7 +386,10 @@ export const apiExt = {
   receiveReception: (t: string, id: number, body: unknown) =>
     post<unknown>(t, `/api/v1/purchase/receptions/${id}/receive`, body),
   // finance
+  journals: (t: string) => get<unknown[]>(t, '/api/v1/finance/journals'),
   createJournal: (t: string, body: unknown) => post<unknown>(t, '/api/v1/finance/journals', body),
+  bankAccounts: (t: string) => get<unknown[]>(t, '/api/v1/finance/bank-accounts'),
+  loans: (t: string) => get<unknown[]>(t, '/api/v1/finance/loans'),
   postEntry: (t: string, body: unknown) => post<unknown>(t, '/api/v1/finance/entries', body),
   trialBalance: (t: string) => get<unknown>(t, '/api/v1/finance/trial-balance'),
   chainVerify: (t: string) => get<unknown>(t, '/api/v1/finance/chain-verify'),
@@ -493,12 +498,16 @@ export const apiExt = {
   articles: (t: string, published: boolean) =>
     get<unknown[]>(t, `/api/v1/kb/articles?limit=50${published ? '&publishedOnly=1' : ''}`),
   createArticle: (t: string, body: unknown) => post<unknown>(t, '/api/v1/kb/articles', body),
+  updateArticle: (t: string, id: number, body: unknown) =>
+    request<unknown>(t, `/api/v1/kb/articles/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   setArticleStatus: (t: string, id: number, body: unknown) =>
     post<unknown>(t, `/api/v1/kb/articles/${id}/status`, body),
   kbSearch: (t: string, q: string) =>
     get<unknown[]>(t, `/api/v1/kb/search?q=${encodeURIComponent(q)}`),
   assets: (t: string) => get<unknown[]>(t, '/api/v1/assets?limit=50'),
   createAsset: (t: string, body: unknown) => post<unknown>(t, '/api/v1/assets', body),
+  updateAsset: (t: string, id: number, body: unknown) =>
+    request<unknown>(t, `/api/v1/assets/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   setAssetStatus: (t: string, id: number, body: unknown) =>
     post<unknown>(t, `/api/v1/assets/${id}/status`, body),
   // events org + hiring
@@ -533,7 +542,9 @@ export const apiExt = {
     taskId: number,
     body: { project_id: number; author: string; hours: number; entry_date: string },
   ) => post<unknown>(t, `/api/v1/services/tasks/${taskId}/time`, body),
+  contracts: (t: string) => get<unknown[]>(t, '/api/v1/services/contracts?limit=50'),
   createContract: (t: string, body: unknown) => post<unknown>(t, '/api/v1/services/contracts', body),
+  interventions: (t: string) => get<unknown[]>(t, '/api/v1/services/interventions?limit=50'),
   contractsOfOrg: (t: string, orgId: number) =>
     get<unknown[]>(t, `/api/v1/services/organizations/${orgId}/contracts`),
   setContractStatus: (t: string, id: number, body: { status: number; row_version: number }) =>

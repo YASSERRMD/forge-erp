@@ -19,6 +19,22 @@ interface TicketMsg {
   internal: boolean;
 }
 
+interface Contract {
+  id: number;
+  ref: string;
+  label: string;
+  status: number;
+  row_version: number;
+}
+
+interface Intervention {
+  id: number;
+  ref: string;
+  label: string;
+  status: number;
+  row_version: number;
+}
+
 const taskState = (s: number, t: (k: 'taskTodo' | 'taskDoing' | 'taskDone' | 'stCanceled') => string) =>
   s === 0 ? t('taskTodo') : s === 1 ? t('taskDoing') : s === 2 ? t('taskDone') : t('stCanceled');
 
@@ -45,6 +61,8 @@ export function Services() {
   const [iref, setIref] = useState('');
   const [iorg, setIorg] = useState('');
   const [ilabel, setIlabel] = useState('');
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [interventions, setInterventions] = useState<Intervention[]>([]);
 
   const projectStatus: Record<number, string> = {
     0: t('stDraft'),
@@ -59,6 +77,8 @@ export function Services() {
     if (!token) return;
     api.projects(token).then(setProjects).catch(() => undefined);
     api.tickets(token).then(setTickets).catch(() => undefined);
+    apiExt.contracts(token).then((c) => setContracts(c as Contract[])).catch(() => undefined);
+    apiExt.interventions(token).then((x) => setInterventions(x as Intervention[])).catch(() => undefined);
   };
   useEffect(reload, [token]);
 
@@ -264,6 +284,18 @@ export function Services() {
           )}
         </Card>
         <Card title={t('services')}>
+          <ul className="clean">
+            {contracts.map((c) => (
+              <li key={c.id}>
+                <span>
+                  {c.ref} — {c.label}{' '}
+                  <Badge tone={statusTone(c.status)}>
+                    {c.status === 1 ? t('stActive') : c.status === 0 ? t('stDraft') : c.status}
+                  </Badge>
+                </span>
+              </li>
+            ))}
+          </ul>
           <h4>{t('newContract')}</h4>
           <label className="field">
             {t('ref')} <input value={cref} onChange={(e) => setCref(e.target.value)} />
@@ -283,6 +315,18 @@ export function Services() {
           >
             {t('create')}
           </button>
+          <ul className="clean">
+            {interventions.map((x) => (
+              <li key={x.id}>
+                <span>
+                  {x.ref} — {x.label}{' '}
+                  <Badge tone={statusTone(x.status)}>
+                    {x.status === 0 ? t('stScheduled') : x.status === 1 ? t('stInProgress') : x.status === 2 ? t('stDone') : t('stCanceled')}
+                  </Badge>
+                </span>
+              </li>
+            ))}
+          </ul>
           <h4>{t('newIntervention')}</h4>
           <label className="field">
             {t('ref')} <input value={iref} onChange={(e) => setIref(e.target.value)} />

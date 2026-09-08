@@ -9,6 +9,7 @@ interface Article {
   id: number;
   slug: string;
   title: string;
+  body: string;
   status: number;
   row_version: number;
 }
@@ -18,6 +19,7 @@ interface Asset {
   code: string;
   label: string;
   kind: string;
+  serial: string;
   status: number;
   row_version: number;
 }
@@ -33,8 +35,11 @@ export function Knowledge() {
   const [slug, setSlug] = useState('');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [editId, setEditId] = useState<number | null>(null);
   const [acode, setAcode] = useState('');
   const [alabel, setAlabel] = useState('');
+  const [aserial, setAserial] = useState('');
+  const [editAsset, setEditAsset] = useState<number | null>(null);
 
   const reload = () => {
     if (!token) return;
@@ -43,10 +48,11 @@ export function Knowledge() {
   };
   useEffect(reload, [token]);
 
-  const act = (fn: Promise<unknown>) =>
+  const act = (fn: Promise<unknown>, after?: () => void) =>
     fn.then(() => {
       setError('');
       reload();
+      after?.();
     }).catch((e: Error) => setError(e.message));
 
   const search = () => {
@@ -72,6 +78,18 @@ export function Knowledge() {
                     {t('publish')}
                   </button>
                 )}
+                {a.status === 0 && (
+                  <button
+                    onClick={() => {
+                      setEditId(a.id);
+                      setSlug(a.slug);
+                      setTitle(a.title);
+                      setBody(a.body);
+                    }}
+                  >
+                    {t('edit')}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -88,10 +106,38 @@ export function Knowledge() {
           </label>
           <button
             className="primary"
-            onClick={() => token && act(apiExt.createArticle(token, { slug, title, body }))}
+            onClick={() => {
+              if (!token) return;
+              if (editId !== null) {
+                const row = articles.find((a) => a.id === editId);
+                act(
+                  apiExt.updateArticle(token, editId, {
+                    title,
+                    body,
+                    tags: [],
+                    row_version: row?.row_version ?? 0,
+                  }),
+                  () => setEditId(null),
+                );
+              } else {
+                act(apiExt.createArticle(token, { slug, title, body }));
+              }
+            }}
           >
-            {t('create')}
+            {editId !== null ? t('save') : t('create')}
           </button>
+          {editId !== null && (
+            <button
+              onClick={() => {
+                setEditId(null);
+                setSlug('');
+                setTitle('');
+                setBody('');
+              }}
+            >
+              {t('cancel')}
+            </button>
+          )}
           <h4>{t('search')}</h4>
           <label className="field">
             {t('search')} <input value={q} onChange={(e) => setQ(e.target.value)} />
@@ -117,6 +163,17 @@ export function Knowledge() {
                 <Badge tone={a.status === 1 ? 'ok' : a.status === 2 ? 'warn' : 'bad'}>
                   {a.status === 1 ? t('stInService') : a.status === 2 ? t('stMaintenance') : t('stRetired')}
                 </Badge>
+                {a.status !== 0 && (
+                  <button
+                    onClick={() => {
+                      setEditAsset(a.id);
+                      setAlabel(a.label);
+                      setAserial(a.serial);
+                    }}
+                  >
+                    {t('edit')}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -128,11 +185,29 @@ export function Knowledge() {
           <label className="field">
             {t('label')} <input value={alabel} onChange={(e) => setAlabel(e.target.value)} />
           </label>
+          <label className="field">
+            Serial <input value={aserial} onChange={(e) => setAserial(e.target.value)} />
+          </label>
           <button
             className="primary"
-            onClick={() => token && act(apiExt.createAsset(token, { code: acode, label: alabel, kind: 'equipment' }))}
+            onClick={() => {
+              if (!token) return;
+              if (editAsset !== null) {
+                const row = assets.find((a) => a.id === editAsset);
+                act(
+                  apiExt.updateAsset(token, editAsset, {
+                    label: alabel,
+                    serial: aserial,
+                    row_version: row?.row_version ?? 0,
+                  }),
+                  () => setEditAsset(null),
+                );
+              } else {
+                act(apiExt.createAsset(token, { code: acode, label: alabel, kind: 'equipment' }));
+              }
+            }}
           >
-            {t('create')}
+            {editAsset !== null ? t('save') : t('create')}
           </button>
         </Card>
       </div>

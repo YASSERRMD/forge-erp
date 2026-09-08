@@ -25,13 +25,16 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("finance", "account", "write")).Post("/finance/accounts", h.CreateAccount)
 	r.With(mw("finance", "account", "read")).Get("/finance/accounts", h.ListAccounts)
 	r.With(mw("finance", "journal", "write")).Post("/finance/journals", h.CreateJournal)
+	r.With(mw("finance", "journal", "read")).Get("/finance/journals", h.ListJournals)
 	r.With(mw("finance", "entry", "write")).Post("/finance/entries", h.PostEntry)
 	r.With(mw("finance", "entry", "read")).Get("/finance/trial-balance", h.TrialBalance)
 	r.With(mw("finance", "entry", "read")).Get("/finance/chain-verify", h.VerifyChain)
 	r.With(mw("finance", "bank", "write")).Post("/finance/bank-accounts", h.CreateBankAccount)
+	r.With(mw("finance", "bank", "read")).Get("/finance/bank-accounts", h.ListBankAccounts)
 	r.With(mw("finance", "bank", "write")).Post("/finance/bank-transactions", h.RecordTransaction)
 	r.With(mw("finance", "bank", "write")).Post("/finance/bank-transactions/{id}/reconcile", h.Reconcile)
 	r.With(mw("finance", "loan", "write")).Post("/finance/loans", h.CreateLoan)
+	r.With(mw("finance", "loan", "read")).Get("/finance/loans", h.ListLoans)
 }
 
 // Handler implements the finance HTTP surface.
@@ -120,6 +123,36 @@ func (h *Handler) PostEntry(w http.ResponseWriter, r *http.Request) {
 // ListAccounts lists the chart of accounts within the caller's entity.
 func (h *Handler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 	list, err := h.deps.Store.Accounts(r.Context(), entityOf(r))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// ListJournals lists journals.
+func (h *Handler) ListJournals(w http.ResponseWriter, r *http.Request) {
+	list, err := h.deps.Store.ListJournals(r.Context(), entityOf(r))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// ListBankAccounts lists bank accounts.
+func (h *Handler) ListBankAccounts(w http.ResponseWriter, r *http.Request) {
+	list, err := h.deps.Store.ListBankAccounts(r.Context(), entityOf(r))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// ListLoans lists loans.
+func (h *Handler) ListLoans(w http.ResponseWriter, r *http.Request) {
+	list, err := h.deps.Store.ListLoans(r.Context(), entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return

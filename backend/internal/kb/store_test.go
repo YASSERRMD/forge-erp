@@ -67,3 +67,22 @@ func TestArticlePublishSearch(t *testing.T) {
 		t.Fatalf("search=%d want 1", len(found))
 	}
 }
+
+func TestUpdateDraftOnly(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemoryStore()
+	a := &Article{EntityID: 1, Slug: "s1", Title: "T", Body: "b"}
+	if err := m.CreateArticle(ctx, a); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	upd, err := m.UpdateArticle(ctx, a.ID, "T2", "b2", []string{"x"}, a.RowVersion)
+	if err != nil || upd.Title != "T2" {
+		t.Fatalf("update: %+v %v", upd, err)
+	}
+	if _, err := m.SetArticleStatus(ctx, a.ID, ArticlePublished, upd.RowVersion); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if _, err := m.UpdateArticle(ctx, a.ID, "T3", "b", nil, upd.RowVersion+1); err == nil {
+		t.Error("published edit accepted")
+	}
+}

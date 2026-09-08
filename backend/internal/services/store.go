@@ -25,8 +25,10 @@ type Store interface {
 	CreateContract(ctx context.Context, c *ServiceContract) error
 	SetContractStatus(ctx context.Context, id int64, to ContractStatus, rowVersion int64) (ServiceContract, error)
 	ContractsOfOrg(ctx context.Context, orgID int64) ([]ServiceContract, error)
+	ListContracts(ctx context.Context, entityID int64, limit, offset int) ([]ServiceContract, error)
 	CreateIntervention(ctx context.Context, i *Intervention) error
 	SetInterventionStatus(ctx context.Context, id int64, to InterventionStatus, rowVersion int64) (Intervention, error)
+	ListInterventions(ctx context.Context, entityID int64, limit, offset int) ([]Intervention, error)
 	CreateTicket(ctx context.Context, t *Ticket) error
 	TicketByID(ctx context.Context, id int64) (Ticket, error)
 	ListTickets(ctx context.Context, entityID int64, limit, offset int) ([]Ticket, error)
@@ -299,6 +301,42 @@ func (s *PGStore) ContractsOfOrg(ctx context.Context, orgID int64) ([]ServiceCon
 			return nil, err
 		}
 		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *PGStore) ListContracts(ctx context.Context, entityID int64, limit, offset int) ([]ServiceContract, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+contractCols+` FROM ferp_service_contracts
+		WHERE entity_id=$1 ORDER BY ref LIMIT $2 OFFSET $3`, entityID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ServiceContract
+	for rows.Next() {
+		c, err := scanContract(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *PGStore) ListInterventions(ctx context.Context, entityID int64, limit, offset int) ([]Intervention, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+interventionCols+` FROM ferp_interventions
+		WHERE entity_id=$1 ORDER BY id LIMIT $2 OFFSET $3`, entityID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Intervention
+	for rows.Next() {
+		in, err := scanIntervention(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, in)
 	}
 	return out, rows.Err()
 }
@@ -687,6 +725,44 @@ func (m *MemoryStore) ContractsOfOrg(_ context.Context, orgID int64) ([]ServiceC
 		if c.OrgID == orgID {
 			out = append(out, c)
 		}
+	}
+	return out, nil
+}
+
+func (m *MemoryStore) ListContracts(_ context.Context, entityID int64, limit, offset int) ([]ServiceContract, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []ServiceContract
+	for _, c := range m.contracts {
+		if c.EntityID == entityID {
+			out = append(out, c)
+		}
+	}
+	if offset > len(out) {
+		return nil, nil
+	}
+	out = out[offset:]
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (m *MemoryStore) ListInterventions(_ context.Context, entityID int64, limit, offset int) ([]Intervention, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Intervention
+	for _, in := range m.intervs {
+		if in.EntityID == entityID {
+			out = append(out, in)
+		}
+	}
+	if offset > len(out) {
+		return nil, nil
+	}
+	out = out[offset:]
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
 	}
 	return out, nil
 }

@@ -37,8 +37,11 @@ func Routes(r chi.Router, d Deps) {
 	r.With(h.Require("identity", "user", "read")).Get("/auth/me", h.Me)
 
 	r.With(h.Require("identity", "user", "write")).Post("/users", h.CreateUser)
+	r.With(h.Require("identity", "user", "read")).Get("/users", h.ListUsers)
 	r.With(h.Require("identity", "user", "read")).Get("/users/{id}", h.GetUser)
+	r.With(h.Require("identity", "user", "write")).Put("/users/{id}", h.UpdateUser)
 	r.With(h.Require("identity", "group", "write")).Post("/groups", h.CreateGroup)
+	r.With(h.Require("identity", "group", "read")).Get("/groups", h.ListGroups)
 	r.With(h.Require("identity", "group", "write")).Post("/groups/{id}/members", h.AddMember)
 	r.With(h.Require("identity", "right", "write")).Post("/rights/grant", h.Grant)
 }
@@ -62,6 +65,25 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 func decode(r *http.Request, v any) error {
 	defer r.Body.Close()
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
+}
+
+func entityOf(r *http.Request) int64 {
+	if u, ok := AuthUser(r); ok && u.EntityID != 0 {
+		return u.EntityID
+	}
+	return 1
+}
+
+func pageParams(r *http.Request) (limit int, offset int) {
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
 }
 
 // ctxKey carries the authenticated user.
@@ -302,6 +324,84 @@ type createUserRequest struct {
 	LastName  string `json:"last_name"`
 	Password  string `json:"password"`
 	IsAdmin   bool   `json:"is_admin"`
+}
+
+// ListUsers pages users within the caller's entity (hashes stripped).
+func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
+	limit, offset := pageParams(r)
+	list, err := h.deps.Store.ListUsers(r.Context(), entityOf(r), limit, offset)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// ListGroups lists groups within the caller's entity.
+func (h *Handler) ListGroups(w http.ResponseWriter, r *http.Request) {
+	list, err := h.deps.Store.ListGroups(r.Context(), entityOf(r))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+type updateUserRequest struct {
+	Email     *string `json:"email"`
+	FirstName *string `json:"first_name"`
+	LastName  *string `json:"last_name"`
+	Status    *int16  `json:"status"`
+	IsAdmin   *bool   `json:"is_admin"`
+	RowVersion int64  `json:"row_version"`
+}
+
+// UpdateUser patches profile fields with optimistic locking (requires identity.user.write).
+func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	var req updateUserRequest
+	if err := decode(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	u, err := h.deps.Store.UserByID(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if u.RowVersion != req.RowVersion {
+		writeErr(w, http.StatusConflict, "stale row version")
+		return
+	}
+	if req.Email != nil {
+		u.Email = *req.Email
+	}
+	if req.FirstName != nil {
+		u.FirstName = *req.FirstName
+	}
+	if req.LastName != nil {
+		u.LastName = *req.LastName
+	}
+	if req.Status != nil {
+		u.Status = UserStatus(*req.Status)
+	}
+	if req.IsAdmin != nil {
+		u.IsAdmin = *req.IsAdmin
+	}
+	if err := h.deps.Store.UpdateUser(r.Context(), &u); err != nil {
+		if errors.Is(err, ErrVersionConflict) {
+			writeErr(w, http.StatusConflict, "stale row version")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "update failed")
+		return
+	}
+	u.PasswordHash = ""
+	writeJSON(w, http.StatusOK, u)
 }
 
 // CreateUser registers a native account (requires identity.user.write).
