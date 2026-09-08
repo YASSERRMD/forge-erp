@@ -320,6 +320,11 @@ paths:
         '201': { description: Booked }
         '422': { description: Task or project closed }
   /api/v1/services/contracts:
+    get:
+      operationId: listContracts
+      summary: Page contracts (requires services.contract.read)
+      responses:
+        '200': { description: List }
     post:
       operationId: createServiceContract
       summary: Open a draft service contract (requires services.contract.write)
@@ -334,6 +339,11 @@ paths:
         '200': { description: Updated }
         '422': { description: Illegal transition }
   /api/v1/services/interventions:
+    get:
+      operationId: listInterventions
+      summary: Page interventions (requires services.intervention.read)
+      responses:
+        '200': { description: List }
     post:
       operationId: createIntervention
       summary: Schedule a field intervention (requires services.intervention.write)
@@ -696,6 +706,11 @@ paths:
       responses:
         '201': { description: Converted }
   /api/v1/finance/bank-accounts:
+    get:
+      operationId: listBankAccounts
+      summary: List bank accounts (requires finance.bank.read)
+      responses:
+        '200': { description: List }
     post:
       operationId: createBankAccount
       summary: Open a bank account (requires finance.bank.write)
@@ -708,12 +723,22 @@ paths:
       responses:
         '200': { description: List }
   /api/v1/finance/journals:
+    get:
+      operationId: listJournals
+      summary: List accounting journals (requires finance.journal.read)
+      responses:
+        '200': { description: List }
     post:
       operationId: createJournal
       summary: Create an accounting journal (requires finance.journal.write)
       responses:
         '201': { description: Created }
   /api/v1/finance/loans:
+    get:
+      operationId: listLoans
+      summary: List loans (requires finance.loan.read)
+      responses:
+        '200': { description: List }
     post:
       operationId: createLoan
       summary: Record a loan with schedule (requires finance.loan.write)
@@ -851,6 +876,25 @@ paths:
         '200': { description: Session }
         '401': { description: Invalid SSO token }
         '503': { description: OIDC not configured }
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      summary: Page users, hashes stripped (requires identity.user.read)
+      responses:
+        '200': { description: List }
+  /api/v1/users/{id}:
+    put:
+      operationId: updateUser
+      summary: Patch profile fields with optimistic locking (requires identity.user.write)
+      responses:
+        '200': { description: Updated }
+        '409': { description: Stale row version }
+  /api/v1/groups:
+    get:
+      operationId: listGroups
+      summary: List rights groups (requires identity.group.read)
+      responses:
+        '200': { description: List }
   /api/v1/booking/resources:
     get:
       operationId: listResources
@@ -1028,6 +1072,13 @@ paths:
       summary: Asset lifecycle transition (requires assets.asset.validate)
       responses:
         '200': { description: Updated }
+  /api/v1/assets/{id}:
+    put:
+      operationId: updateAsset
+      summary: Edit a non-retired asset (requires assets.asset.write)
+      responses:
+        '200': { description: Updated }
+        '422': { description: Retired or invalid }
   /api/v1/kb/articles:
     get:
       operationId: listArticles
@@ -1045,6 +1096,13 @@ paths:
       summary: Publish or unpublish (requires kb.article.validate)
       responses:
         '200': { description: Updated }
+  /api/v1/kb/articles/{id}:
+    put:
+      operationId: updateArticle
+      summary: Edit a draft article (requires kb.article.write)
+      responses:
+        '200': { description: Updated }
+        '422': { description: Published or invalid }
   /api/v1/kb/search:
     get:
       operationId: searchArticles

@@ -25,6 +25,8 @@ type Store interface {
 	UserByID(ctx context.Context, id int64) (User, error)
 	UserByLogin(ctx context.Context, entityID int64, login string) (User, error)
 	UserByEmail(ctx context.Context, entityID int64, email string) (User, error)
+	ListUsers(ctx context.Context, entityID int64, limit, offset int) ([]User, error)
+	ListGroups(ctx context.Context, entityID int64) ([]Group, error)
 	UpdateUser(ctx context.Context, u *User) error
 	CreateGroup(ctx context.Context, g *Group) error
 	AddMember(ctx context.Context, groupID, userID int64) error
@@ -69,6 +71,43 @@ const userCols = `id, entity_id, login, email, first_name, last_name, status, pa
 
 func (s *PGStore) UserByID(ctx context.Context, id int64) (User, error) {
 	return scanUser(s.pool.QueryRow(ctx, `SELECT `+userCols+` FROM ferp_users WHERE id=$1`, id))
+}
+
+func (s *PGStore) ListUsers(ctx context.Context, entityID int64, limit, offset int) ([]User, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+userCols+` FROM ferp_users
+		WHERE entity_id=$1 ORDER BY login LIMIT $2 OFFSET $3`, entityID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		u.PasswordHash = ""
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+func (s *PGStore) ListGroups(ctx context.Context, entityID int64) ([]Group, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, code, label, created_at, updated_at
+		FROM ferp_groups WHERE entity_id=$1 ORDER BY code`, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Group
+	for rows.Next() {
+		var g Group
+		if err := rows.Scan(&g.ID, &g.EntityID, &g.Code, &g.Label, &g.CreatedAt, &g.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
 }
 
 func (s *PGStore) UserByLogin(ctx context.Context, entityID int64, login string) (User, error) {
@@ -244,6 +283,38 @@ func (m *MemoryStore) UserByID(_ context.Context, id int64) (User, error) {
 		return User{}, ErrNotFound
 	}
 	return u, nil
+}
+
+func (m *MemoryStore) ListUsers(_ context.Context, entityID int64, limit, offset int) ([]User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []User
+	for _, u := range m.users {
+		if u.EntityID == entityID {
+			u.PasswordHash = ""
+			out = append(out, u)
+		}
+	}
+	if offset > len(out) {
+		return nil, nil
+	}
+	out = out[offset:]
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (m *MemoryStore) ListGroups(_ context.Context, entityID int64) ([]Group, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Group
+	for _, g := range m.groups {
+		if g.EntityID == entityID {
+			out = append(out, g)
+		}
+	}
+	return out, nil
 }
 
 func (m *MemoryStore) UserByLogin(_ context.Context, entityID int64, login string) (User, error) {

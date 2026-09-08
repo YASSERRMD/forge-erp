@@ -153,3 +153,24 @@ func TestListAccountsHTTP(t *testing.T) {
 		t.Fatalf("accounts=%+v", list)
 	}
 }
+
+func TestListJournalsBanksLoans(t *testing.T) {
+	h, _ := testRouter()
+	if rec := post(t, h, "/api/v1/finance/journals", map[string]any{"code": "VEN", "label": "Sales"}); rec.Code != http.StatusCreated {
+		t.Fatalf("journal: code=%d", rec.Code)
+	}
+	if rec := post(t, h, "/api/v1/finance/bank-accounts", map[string]any{"code": "B1", "label": "Main"}); rec.Code != http.StatusCreated {
+		t.Fatalf("bank: code=%d", rec.Code)
+	}
+	if rec := post(t, h, "/api/v1/finance/loans", map[string]any{"label": "L1", "principal": 10000, "rate_bps": 500, "periods": 12}); rec.Code != http.StatusCreated {
+		t.Fatalf("loan: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, path := range []string{"/api/v1/finance/journals", "/api/v1/finance/bank-accounts", "/api/v1/finance/loans"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || rec.Body.String() == "null" || rec.Body.String() == "[]\n" {
+			t.Fatalf("list %s: code=%d body=%s", path, rec.Code, rec.Body.String())
+		}
+	}
+}

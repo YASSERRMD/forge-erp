@@ -55,3 +55,23 @@ func TestAssetLifecycle(t *testing.T) {
 		t.Fatalf("retire API: code=%d", rec.Code)
 	}
 }
+
+func TestUpdateFrozenRetired(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemoryStore()
+	a := &Asset{EntityID: 1, Code: "A1", Label: "L", Kind: "it", Status: AssetInService}
+	if err := m.CreateAsset(ctx, a); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	upd, err := m.UpdateAsset(ctx, a.ID, "L2", "SN-1", nil, a.RowVersion)
+	if err != nil || upd.Label != "L2" || upd.Serial != "SN-1" {
+		t.Fatalf("update: %+v %v", upd, err)
+	}
+	ret, err := m.SetAssetStatus(ctx, a.ID, AssetRetired, upd.RowVersion)
+	if err != nil {
+		t.Fatalf("retire: %v", err)
+	}
+	if _, err := m.UpdateAsset(ctx, a.ID, "L3", "", nil, ret.RowVersion); err == nil {
+		t.Error("retired edit accepted")
+	}
+}

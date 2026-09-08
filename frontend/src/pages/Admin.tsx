@@ -3,13 +3,15 @@ import { ShieldCheck } from 'lucide-react';
 import { apiExt } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useLang } from '../i18n/lang';
-import { Alert, Card, PageHeader } from '../components/ui';
+import { Alert, Badge, Card, PageHeader } from '../components/ui';
 
 interface UserRow {
   id: number;
   login: string;
   email: string;
   is_admin: boolean;
+  status: number;
+  row_version: number;
 }
 
 export function Admin() {
@@ -35,8 +37,21 @@ export function Admin() {
           {users.map((u) => (
             <li key={u.id}>
               <span>
-                {u.login} — {u.email} {u.is_admin && <strong>(admin)</strong>}
+                {u.login} — {u.email} {u.is_admin && <strong>(admin)</strong>}{' '}
+                <Badge tone={u.status === 1 ? 'ok' : 'bad'}>{u.status === 1 ? t('stActive') : t('stInactive')}</Badge>
               </span>
+              {u.status === 1 && (
+                <button
+                  onClick={() =>
+                    apiExt
+                      .updateUser(token ?? '', u.id, { status: 0, row_version: u.row_version })
+                      .then(() => reload())
+                      .catch((e: Error) => setError(e.message))
+                  }
+                >
+                  {t('close')}
+                </button>
+              )}
             </li>
           ))}
         </ul>

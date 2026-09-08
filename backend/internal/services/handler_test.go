@@ -160,3 +160,29 @@ func TestTicketAndContractFlow(t *testing.T) {
 		t.Fatalf("skip inprogress: code=%d want 422", rec.Code)
 	}
 }
+
+func TestContractInterventionLists(t *testing.T) {
+	h := testRouter()
+	rec := doReq(t, h, http.MethodPost, "/api/v1/services/contracts",
+		map[string]any{"ref": "CTR-L", "org_id": 3, "label": "Support"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("contract: code=%d", rec.Code)
+	}
+	rec = doReq(t, h, http.MethodGet, "/api/v1/services/contracts?limit=50", nil)
+	var contracts []ServiceContract
+	_ = json.NewDecoder(rec.Body).Decode(&contracts)
+	if len(contracts) != 1 {
+		t.Fatalf("contracts=%d", len(contracts))
+	}
+	rec = doReq(t, h, http.MethodPost, "/api/v1/services/interventions",
+		map[string]any{"ref": "INT-L", "org_id": 3, "label": "Onsite"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("intervention: code=%d", rec.Code)
+	}
+	rec = doReq(t, h, http.MethodGet, "/api/v1/services/interventions?limit=50", nil)
+	var intervs []Intervention
+	_ = json.NewDecoder(rec.Body).Decode(&intervs)
+	if len(intervs) != 1 {
+		t.Fatalf("interventions=%d", len(intervs))
+	}
+}

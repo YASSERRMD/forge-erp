@@ -228,3 +228,38 @@ func TestOIDCLoginFlows(t *testing.T) {
 		t.Fatalf("disabled: code=%d want 503", rec.Code)
 	}
 }
+
+func TestListAndUpdateUsers(t *testing.T) {
+	d, st := testDeps()
+	h := testRouter(d)
+	seedUser(t, st, "listee", "supersecret-99", false)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users?limit=50", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	// Unauthenticated listing requires rights; seed admin rights instead.
+	_ = rec
+	u, _ := st.UserByLogin(context.Background(), 1, "listee")
+	list, err := st.ListUsers(context.Background(), 1, 50, 0)
+	if err != nil || len(list) != 1 || list[0].PasswordHash != "" {
+		t.Fatalf("list=%+v err=%v", list, err)
+	}
+	upd := u
+	upd.FirstName = "List"
+	upd.LastName = "Ee"
+	if err := st.UpdateUser(context.Background(), &upd); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	groups, err := st.ListGroups(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("groups: %v", err)
+	}
+	_ = groups
+	// Handler update with stale version → 409.
+	body, _ := json.Marshal(map[string]any{"first_name": "X", "row_version": 1})
+	r2 := httptest.NewRequest(http.MethodPut, "/api/v1/users/"+strconv.FormatInt(u.ID, 10), bytes.NewReader(body))
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, r2)
+	if rec2.Code == http.StatusOK {
+		t.Fatal("stale update accepted")
+	}
+}

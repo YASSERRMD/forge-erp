@@ -36,9 +36,11 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("services", "time", "read")).Get("/services/tasks/{id}/hours", h.TaskHours)
 	r.With(mw("services", "time", "read")).Get("/services/projects/{id}/hours", h.ProjectHours)
 	r.With(mw("services", "contract", "write")).Post("/services/contracts", h.CreateContract)
+	r.With(mw("services", "contract", "read")).Get("/services/contracts", h.ListContracts)
 	r.With(mw("services", "contract", "validate")).Post("/services/contracts/{id}/status", h.SetContractStatus)
 	r.With(mw("services", "contract", "read")).Get("/services/organizations/{orgID}/contracts", h.ContractsOfOrg)
 	r.With(mw("services", "intervention", "write")).Post("/services/interventions", h.CreateIntervention)
+	r.With(mw("services", "intervention", "read")).Get("/services/interventions", h.ListInterventions)
 	r.With(mw("services", "intervention", "validate")).Post("/services/interventions/{id}/status", h.SetInterventionStatus)
 	r.With(mw("services", "ticket", "write")).Post("/services/tickets", h.CreateTicket)
 	r.With(mw("services", "ticket", "read")).Get("/services/tickets", h.ListTickets)
@@ -336,6 +338,17 @@ func (h *Handler) SetContractStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, c)
 }
 
+// ListContracts pages contracts within the caller's entity.
+func (h *Handler) ListContracts(w http.ResponseWriter, r *http.Request) {
+	limit, offset := page(r)
+	list, err := h.deps.Store.ListContracts(r.Context(), entityOf(r), limit, offset)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
 // ContractsOfOrg lists an organization's contracts.
 func (h *Handler) ContractsOfOrg(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := pathID(r, "orgID")
@@ -367,6 +380,17 @@ func (h *Handler) CreateIntervention(w http.ResponseWriter, r *http.Request) {
 	}
 	h.publish(r.Context(), "forgeerp.services.intervention.created.v1", "intervention", in.ID)
 	writeJSON(w, http.StatusCreated, in)
+}
+
+// ListInterventions pages interventions within the caller's entity.
+func (h *Handler) ListInterventions(w http.ResponseWriter, r *http.Request) {
+	limit, offset := page(r)
+	list, err := h.deps.Store.ListInterventions(r.Context(), entityOf(r), limit, offset)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
 }
 
 // SetInterventionStatus moves an intervention along its state machine.

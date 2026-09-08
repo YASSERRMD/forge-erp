@@ -27,6 +27,7 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	h := &Handler{deps: d}
 	r.With(mw("kb", "article", "write")).Post("/kb/articles", h.CreateArticle)
 	r.With(mw("kb", "article", "read")).Get("/kb/articles", h.ListArticles)
+	r.With(mw("kb", "article", "write")).Put("/kb/articles/{id}", h.UpdateArticle)
 	r.With(mw("kb", "article", "read")).Get("/kb/search", h.Search)
 	r.With(mw("kb", "article", "validate")).Post("/kb/articles/{id}/status", h.SetArticleStatus)
 }
@@ -128,6 +129,33 @@ func (h *Handler) ListArticles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+type updateArticleIn struct {
+	Title      string   `json:"title"`
+	Body       string   `json:"body"`
+	Tags       []string `json:"tags"`
+	RowVersion int64    `json:"row_version"`
+}
+
+// UpdateArticle edits a draft article.
+func (h *Handler) UpdateArticle(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r, "id")
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	var in updateArticleIn
+	if err := decode(r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	a, err := h.deps.Store.UpdateArticle(r.Context(), id, in.Title, in.Body, in.Tags, in.RowVersion)
+	if err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
 }
 
 // SetArticleStatus publishes or unpublishes an article.
