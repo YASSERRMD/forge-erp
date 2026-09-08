@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -370,6 +371,12 @@ func (m *MemoryStore) OptionsOf(_ context.Context, questionID int64) ([]Option, 
 			out = append(out, o)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Position != out[j].Position {
+			return out[i].Position < out[j].Position
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
 }
 
