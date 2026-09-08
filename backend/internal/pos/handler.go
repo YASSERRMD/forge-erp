@@ -28,6 +28,7 @@ type Catalog interface {
 type Sales interface {
 	CreateDoc(ctx context.Context, d *sales.Document, yearMonth string) error
 	DocByID(ctx context.Context, id int64) (sales.Document, error)
+	ListDocs(ctx context.Context, entityID int64, t documents.DocType, limit, offset int) ([]sales.Document, error)
 	SetStatus(ctx context.Context, id int64, to int16) (sales.Document, error)
 	RecordPayment(ctx context.Context, p *sales.Payment, invoiceIDs []int64, yearMonth string) ([]int64, error)
 	ApplyCredit(ctx context.Context, invoiceID, creditID, amount int64) error
@@ -57,6 +58,7 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("pos", "sale", "write")).Post("/pos/checkout", h.Checkout)
 	r.With(mw("pos", "sale", "read")).Get("/pos/sessions/{id}/sales", h.SalesOfSession)
 	r.With(mw("pos", "sale", "validate")).Post("/pos/sales/{id}/void", h.VoidSale)
+	r.With(mw("pos", "sale", "read")).Get("/pos/sales/{id}", h.GetSale)
 	r.With(mw("pos", "sale", "validate")).Post("/pos/returns", h.ReturnSale)
 }
 
@@ -408,14 +410,31 @@ func (h *Handler) VoidSale(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sa)
 }
 
-// ReturnSale reverses a completed till sale in full: a validated credit note
-// against the invoice (applied up to the open balance), inbound restock of
-// tracked goods, and a returned marker on the sale. Cash refunds for settled
-// invoices happen out-of-band and are not modeled here.
+// GetSale fetches one till sale with its lines.
+func (h *Handler) GetSale(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r, "id")
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	sa, err := h.deps.Store.SaleByID(r.Context(), id)
+	if err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, sa)
+}
+
+// ReturnSale reverses a completed till sale in full or in part: a validated
+// credit note against the invoice (applied up to the open balance), inbound
+// restock of tracked goods, and a returned marker once fully returned.
+// Partial returns repeat until every line is covered; cash refunds for
+// settled invoices happen out-of-band and are not modeled here.
 func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var in struct {
-		SaleID int64 `json:"sale_id"`
+		SaleID int64      `json:"sale_id"`
+		Lines  []SaleLine `json:"lines"` // empty = everything remaining
 	}
 	if err := decode(r, &in); err != nil || in.SaleID <= 0 {
 		writeErr(w, http.StatusBadRequest, "sale_id required")
@@ -445,10 +464,56 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
+	// Remaining quantities = sold minus prior validated return credits.
+	remaining := map[int64]int64{}
+	priceOf := map[int64]documents.Line{}
+	for _, l := range inv.Lines {
+		remaining[l.ProductID] += l.Qty
+		priceOf[l.ProductID] = l
+	}
+	credits, err := h.deps.Sales.ListDocs(ctx, sa.EntityID, documents.TypeCreditNote, 500, 0)
+	if err != nil {
+		writeErr(w, storeErrorCode(err), err.Error())
+		return
+	}
+	for _, c := range credits {
+		if c.SourceID != inv.ID || c.Status == 9 {
+			continue
+		}
+		full, err := h.deps.Sales.DocByID(ctx, c.ID)
+		if err != nil {
+			continue
+		}
+		for _, l := range full.Lines {
+			remaining[l.ProductID] -= l.Qty
+		}
+	}
+	requested := in.Lines
+	if len(requested) == 0 {
+		for pid, qty := range remaining {
+			if qty > 0 {
+				requested = append(requested, SaleLine{ProductID: pid, Qty: qty})
+			}
+		}
+	}
+	if len(requested) == 0 {
+		writeErr(w, http.StatusUnprocessableEntity, "pos: nothing left to return")
+		return
+	}
+	var creditLines []documents.Line
+	for _, q := range requested {
+		if q.Qty <= 0 || q.Qty > remaining[q.ProductID] {
+			writeErr(w, http.StatusUnprocessableEntity, "pos: return qty exceeds remaining")
+			return
+		}
+		src := priceOf[q.ProductID]
+		src.Qty = q.Qty
+		creditLines = append(creditLines, src)
+	}
 	ym := time.Now().UTC().Format("200601")
 	cn := &sales.Document{EntityID: sa.EntityID, Type: documents.TypeCreditNote,
 		OrgID: inv.OrgID, Currency: inv.Currency, RateToBase: inv.RateToBase,
-		SourceType: documents.TypeInvoice, SourceID: inv.ID, Lines: inv.Lines}
+		SourceType: documents.TypeInvoice, SourceID: inv.ID, Lines: creditLines}
 	if err := h.deps.Sales.CreateDoc(ctx, cn, ym); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -469,7 +534,7 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	for _, l := range inv.Lines {
+	for _, l := range creditLines {
 		p, err := h.deps.Catalog.ProductByID(ctx, l.ProductID)
 		if err != nil {
 			continue // service/unknown lines simply have no stock effect
@@ -484,11 +549,27 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	done, err := h.deps.Store.MarkReturned(ctx, sa.ID)
-	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
+	fully := true
+	// Coverage including this credit.
+	covered := map[int64]int64{}
+	for _, l := range creditLines {
+		covered[l.ProductID] += l.Qty
+	}
+	for pid, qty := range remaining {
+		if covered[pid] < qty {
+			fully = false
+			break
+		}
+	}
+	done := sa
+	if fully {
+		var err error
+		done, err = h.deps.Store.MarkReturned(ctx, sa.ID)
+		if err != nil {
+			writeErr(w, storeErrorCode(err), err.Error())
+			return
+		}
 	}
 	h.publish(ctx, "forgeerp.pos.sale.returned.v1", "sale", done.ID)
-	writeJSON(w, http.StatusOK, map[string]any{"sale": done, "credit_note": cn})
+	writeJSON(w, http.StatusOK, map[string]any{"sale": done, "credit_note": cn, "fully_returned": fully})
 }

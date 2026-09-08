@@ -159,6 +159,7 @@ export interface POSSale {
   total_gross: number;
   change: number;
   status: number;
+  lines: CheckoutLine[];
 }
 
 export interface SalesDocumentDetail extends SalesDocument {
@@ -425,6 +426,7 @@ export const apiExt = {
   closeSession: (t: string, id: number, body: unknown) =>
     post<unknown>(t, `/api/v1/pos/sessions/${id}/close`, body),
   voidSale: (t: string, id: number) => post<unknown>(t, `/api/v1/pos/sales/${id}/void`, {}),
+  posSale: (t: string, id: number) => get<POSSale>(t, `/api/v1/pos/sales/${id}`),
   returnSale: (t: string, saleId: number) =>
     post<{ sale: POSSale }>(t, '/api/v1/pos/returns', { sale_id: saleId }),
   // manufacturing

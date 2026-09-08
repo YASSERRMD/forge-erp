@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ShoppingCart } from 'lucide-react';
-import { api, apiExt, type CheckoutLine, type POSSale } from '../api/client';
+import { api, apiExt, authHeaders, apiUrl, type CheckoutLine, type POSSale } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useLang } from '../i18n/lang';
 import { Alert, Badge, Card, PageHeader, money, statusTone } from '../components/ui';
@@ -17,6 +17,8 @@ export function POS() {
   ]);
   const [lines, setLines] = useState<CheckoutLine[]>([{ product_id: 0, qty: 1 }]);
   const [result, setResult] = useState('');
+  const [detail, setDetail] = useState<POSSale | null>(null);
+  const [retQty, setRetQty] = useState<Record<number, string>>({});
 
   const load = () => {
     const id = Number(sessionId);
@@ -37,6 +39,41 @@ export function POS() {
       .then(() => {
         setError('');
         setResult('Returned with credit note');
+        load();
+      })
+      .catch((e: Error) => setError(e.message));
+  };
+
+  const openDetail = (id: number) => {
+    if (!token) return;
+    apiExt
+      .posSale(token, id)
+      .then((s) => {
+        setDetail(s);
+        setError('');
+      })
+      .catch((e: Error) => setError(e.message));
+  };
+
+  const returnSelected = () => {
+    if (!token || !detail) return;
+    const ret = detail.lines
+      .map((l) => ({ product_id: l.product_id, qty: Number(retQty[l.product_id] ?? 0) }))
+      .filter((l) => l.qty > 0);
+    if (ret.length === 0) {
+      setError('Enter a quantity to return');
+      return;
+    }
+    fetch(apiUrl('/api/v1/pos/returns'), {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify({ sale_id: detail.id, lines: ret }),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(await res.text());
+        setError('');
+        setResult('Partial return posted');
+        setDetail(null);
         load();
       })
       .catch((e: Error) => setError(e.message));
@@ -79,8 +116,11 @@ export function POS() {
         <ul className="clean">
           {sales.map((s) => (
             <li key={s.id}>
+              <button onClick={() => openDetail(s.id)} title={t('details')}>
+                {s.ref}
+              </button>
               <span>
-                {s.ref} — {money(s.total_gross)} — {t('balance')} {money(s.change)}{' '}
+                {money(s.total_gross)} — {t('balance')} {money(s.change)}{' '}
                 <Badge tone={statusTone(s.status)}>
                   {s.status === 1 ? t('stPaid') : s.status === 2 ? t('stDone') : t('stCanceled')}
                 </Badge>
@@ -89,6 +129,30 @@ export function POS() {
             </li>
           ))}
         </ul>
+        {detail && detail.status === 1 && (
+          <>
+            <h4>
+              Return lines — {detail.ref}
+            </h4>
+            {detail.lines.map((l) => (
+              <div key={l.product_id}>
+                <label className="field">
+                  Product {l.product_id} (sold {l.qty}){' '}
+                  <input
+                    type="number"
+                    value={retQty[l.product_id] ?? ''}
+                    onChange={(e) =>
+                      setRetQty((q) => ({ ...q, [l.product_id]: e.target.value }))
+                    }
+                  />
+                </label>
+              </div>
+            ))}
+            <button className="primary" onClick={returnSelected}>
+              Return selected
+            </button>
+          </>
+        )}
       </Card>
       <Card title={t('checkout')}>
         <label className="field">

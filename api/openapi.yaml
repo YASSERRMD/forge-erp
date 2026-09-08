@@ -515,6 +515,13 @@ paths:
       summary: List a session's till sales (requires pos.sale.read)
       responses:
         '200': { description: List }
+  /api/v1/pos/sales/{id}:
+    get:
+      operationId: getPOSSale
+      summary: Fetch one till sale with lines (requires pos.sale.read)
+      responses:
+        '200': { description: Sale }
+        '404': { description: Not found }
   /api/v1/reports/pnl:
     get:
       operationId: profitAndLoss

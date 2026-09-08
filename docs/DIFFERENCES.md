@@ -49,10 +49,10 @@ behavioral or structural deviation so auditors can distinguish design from drift
     POST /hr/expenses/{id}/pay with explicit journal/expense/bank accounts
     (flip-first with best-effort revert bounds double-posting).
 21. POS lite: anonymous sales fall back to FERP_POS_WALKIN_ORG when configured
-    (else 422); voids are markers; full returns issue a validated credit note
-    (applied up to the open balance) and restock tracked goods — cash refunds
-    for settled invoices stay out-of-band; multi-tender splits the gross across
-    legs in order; partial returns are follow-up.
+    (else 422); voids are markers; full and partial returns issue validated
+    credit notes (applied up to the open balance) and restock tracked goods —
+    cash refunds for settled invoices stay out-of-band; multi-tender splits the
+    gross across legs in order.
 22. Payments: online providers mint intent references without network calls
     until live secrets are configured; settlement is webhook-driven and
     idempotent on terminal status; manual provider settles at intent time.
