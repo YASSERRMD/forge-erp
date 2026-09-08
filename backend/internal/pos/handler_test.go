@@ -264,3 +264,59 @@ func TestReturnSaleFlow(t *testing.T) {
 		t.Fatalf("double return: code=%d want 422", rec.Code)
 	}
 }
+
+func TestPartialReturnFlow(t *testing.T) {
+	h, ledger := testRouter()
+	seedGoods(t, ledger)
+	se := openTill(t, h)
+	rec := doReq(t, h, http.MethodPost, "/api/v1/pos/checkout", map[string]any{
+		"session_id": se.ID, "org_id": 7, "method": "cash", "tendered": 20000,
+		"lines": []map[string]any{{"product_id": 1, "qty": 4}},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("checkout: code=%d", rec.Code)
+	}
+	var sa Sale
+	_ = json.NewDecoder(rec.Body).Decode(&sa)
+	// Partial: 1 of 4.
+	rec = doReq(t, h, http.MethodPost, "/api/v1/pos/returns", map[string]any{
+		"sale_id": sa.ID, "lines": []map[string]any{{"product_id": 1, "qty": 1}},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("partial: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var part struct {
+		Sale         Sale `json:"sale"`
+		FullyReturned bool `json:"fully_returned"`
+	}
+	_ = json.NewDecoder(rec.Body).Decode(&part)
+	if part.FullyReturned || part.Sale.Status != SaleCompleted {
+		t.Fatalf("partial=%+v", part)
+	}
+	lvl, _ := ledger.Level(context.Background(), 1, 1)
+	if lvl.Qty != 7 {
+		t.Fatalf("stock=%d want 7", lvl.Qty)
+	}
+	// Over-return rejected.
+	rec = doReq(t, h, http.MethodPost, "/api/v1/pos/returns", map[string]any{
+		"sale_id": sa.ID, "lines": []map[string]any{{"product_id": 1, "qty": 4}},
+	})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("over-return: code=%d want 422", rec.Code)
+	}
+	// Remaining 3 → fully returned, stock back to 10.
+	rec = doReq(t, h, http.MethodPost, "/api/v1/pos/returns", map[string]any{
+		"sale_id": sa.ID, "lines": []map[string]any{{"product_id": 1, "qty": 3}},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("final: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	_ = json.NewDecoder(rec.Body).Decode(&part)
+	if !part.FullyReturned || part.Sale.Status != SaleReturned {
+		t.Fatalf("final=%+v", part)
+	}
+	lvl, _ = ledger.Level(context.Background(), 1, 1)
+	if lvl.Qty != 10 {
+		t.Fatalf("stock=%d want 10", lvl.Qty)
+	}
+}
