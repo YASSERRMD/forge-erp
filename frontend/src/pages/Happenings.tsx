@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CalendarRange } from 'lucide-react';
 import { apiExt } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 import { Alert, Badge, Card, PageHeader, statusTone } from '../components/ui';
 
 interface OrgEvent {
@@ -22,6 +23,7 @@ interface Position {
 
 export function Happenings() {
   const { token } = useAuth();
+  const { t } = useLang();
   const [events, setEvents] = useState<OrgEvent[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [error, setError] = useState('');
@@ -49,28 +51,29 @@ export function Happenings() {
 
   return (
     <div>
-      <PageHeader icon={<CalendarRange size={22} />} title="Events & hiring" sub="Organized events and open positions" />
+      <PageHeader icon={<CalendarRange size={22} />} title={t('events')} />
       {error && <Alert>{error}</Alert>}
       <div className="grid two">
-        <Card title="Events">
+        <Card title={t('events')}>
           <ul className="clean">
             {events.map((e) => (
               <li key={e.id}>
                 <span>
-                  {e.title} (cap {e.capacity})
+                  {e.title} ({t('capacity')} {e.capacity})
                 </span>
-                <Badge tone={statusTone(e.status)}>{e.status === 1 ? 'published' : e.status === 0 ? 'draft' : 'done'}</Badge>
+                <Badge tone={statusTone(e.status)}>{e.status === 1 ? t('stPublished') : e.status === 0 ? t('stDraft') : t('stDone')}</Badge>
                 {e.status === 0 && token && (
                   <button onClick={() => act(apiExt.setOrgEventStatus(token, e.id, { status: 1, row_version: e.row_version }))}>
-                    Publish
+                    {t('publish')}
                   </button>
                 )}
               </li>
             ))}
           </ul>
-          <h4>New event (tomorrow, cap 50)</h4>
+          {events.length === 0 && <p className="muted">{t('noData')}</p>}
+          <h4>{t('newEvent')}</h4>
           <label className="field">
-            Title <input value={etitle} onChange={(e) => setEtitle(e.target.value)} />
+            {t('title')} <input value={etitle} onChange={(e) => setEtitle(e.target.value)} />
           </label>
           <button
             className="primary"
@@ -86,51 +89,52 @@ export function Happenings() {
               )
             }
           >
-            Create
+            {t('create')}
           </button>
         </Card>
-        <Card title="Hiring">
+        <Card title={t('events')}>
           <ul className="clean">
             {positions.map((p) => (
               <li key={p.id}>
                 <span>
                   {p.code} — {p.title}
                 </span>
-                <Badge tone={statusTone(p.status)}>{p.status === 1 ? 'open' : p.status === 0 ? 'draft' : 'closed'}</Badge>
+                <Badge tone={statusTone(p.status)}>{p.status === 1 ? t('stOpen') : p.status === 0 ? t('stDraft') : t('stClosed')}</Badge>
                 {p.status === 0 && token && (
                   <button onClick={() => act(apiExt.setPositionStatus(token, p.id, { status: 1, row_version: p.row_version }))}>
-                    Open
+                    {t('open')}
                   </button>
                 )}
               </li>
             ))}
           </ul>
-          <h4>New position</h4>
+          {positions.length === 0 && <p className="muted">{t('noData')}</p>}
+          <h4>{t('newPosition')}</h4>
           <label className="field">
-            Code <input value={pcode} onChange={(e) => setPcode(e.target.value)} />
+            {t('code')} <input value={pcode} onChange={(e) => setPcode(e.target.value)} />
           </label>
           <label className="field">
-            Title <input value={ptitle} onChange={(e) => setPtitle(e.target.value)} />
+            {t('title')} <input value={ptitle} onChange={(e) => setPtitle(e.target.value)} />
           </label>
           <button
             className="primary"
             onClick={() => token && act(apiExt.createPosition(token, { code: pcode, title: ptitle }))}
           >
-            Create
+            {t('create')}
           </button>
-          <h4>Apply</h4>
+          <h4>{t('newPosition')}</h4>
           <label className="field">
             Position ID <input value={apos} onChange={(e) => setApos(e.target.value)} />
           </label>
           <label className="field">
-            Name <input value={aname} onChange={(e) => setAname(e.target.value)} />
+            {t('name')} <input value={aname} onChange={(e) => setAname(e.target.value)} />
           </label>
           <button
             onClick={() =>
               token && act(apiExt.applyToPosition(token, Number(apos), { name: aname }))
             }
           >
-            Submit application
+            {t('submit')}
           </button>
         </Card>
       </div>

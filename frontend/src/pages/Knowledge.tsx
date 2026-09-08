@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { BookOpen } from 'lucide-react';
 import { apiExt } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 import { Alert, Badge, Card, PageHeader } from '../components/ui';
 
 interface Article {
@@ -23,6 +24,7 @@ interface Asset {
 
 export function Knowledge() {
   const { token } = useAuth();
+  const { t } = useLang();
   const [articles, setArticles] = useState<Article[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [error, setError] = useState('');
@@ -54,46 +56,47 @@ export function Knowledge() {
 
   return (
     <div>
-      <PageHeader icon={<BookOpen size={22} />} title="Knowledge & assets" sub="Articles, search and tracked equipment" />
+      <PageHeader icon={<BookOpen size={22} />} title={t('knowledge')} />
       {error && <Alert>{error}</Alert>}
       <div className="grid two">
-        <Card title="Articles">
+        <Card title={t('knowledge')}>
           <ul className="clean">
             {articles.map((a) => (
               <li key={a.id}>
                 <span>
                   {a.slug} — {a.title}
                 </span>
-                <Badge tone={a.status === 1 ? 'ok' : 'warn'}>{a.status === 1 ? 'published' : 'draft'}</Badge>
+                <Badge tone={a.status === 1 ? 'ok' : 'warn'}>{a.status === 1 ? t('stPublished') : t('stDraft')}</Badge>
                 {a.status === 0 && token && (
                   <button onClick={() => act(apiExt.setArticleStatus(token, a.id, { status: 1, row_version: a.row_version }))}>
-                    Publish
+                    {t('publish')}
                   </button>
                 )}
               </li>
             ))}
           </ul>
-          <h4>New article</h4>
+          {articles.length === 0 && <p className="muted">{t('noData')}</p>}
+          <h4>{t('newArticle')}</h4>
           <label className="field">
-            Slug <input value={slug} onChange={(e) => setSlug(e.target.value)} />
+            {t('slug')} <input value={slug} onChange={(e) => setSlug(e.target.value)} />
           </label>
           <label className="field">
-            Title <input value={title} onChange={(e) => setTitle(e.target.value)} />
+            {t('title')} <input value={title} onChange={(e) => setTitle(e.target.value)} />
           </label>
           <label className="field">
-            Body <input value={body} onChange={(e) => setBody(e.target.value)} />
+            {t('body')} <input value={body} onChange={(e) => setBody(e.target.value)} />
           </label>
           <button
             className="primary"
             onClick={() => token && act(apiExt.createArticle(token, { slug, title, body }))}
           >
-            Save draft
+            {t('create')}
           </button>
-          <h4>Search published</h4>
+          <h4>{t('search')}</h4>
           <label className="field">
-            Query <input value={q} onChange={(e) => setQ(e.target.value)} />
+            {t('search')} <input value={q} onChange={(e) => setQ(e.target.value)} />
           </label>
-          <button onClick={search}>Search</button>
+          <button onClick={search}>{t('search')}</button>
           <ul className="clean">
             {hits.map((h) => (
               <li key={h.id}>
@@ -104,7 +107,7 @@ export function Knowledge() {
             ))}
           </ul>
         </Card>
-        <Card title="Assets">
+        <Card title={t('knowledge')}>
           <ul className="clean">
             {assets.map((a) => (
               <li key={a.id}>
@@ -112,23 +115,24 @@ export function Knowledge() {
                   {a.code} — {a.label} [{a.kind}]
                 </span>
                 <Badge tone={a.status === 1 ? 'ok' : a.status === 2 ? 'warn' : 'bad'}>
-                  {a.status === 1 ? 'in service' : a.status === 2 ? 'maintenance' : 'retired'}
+                  {a.status === 1 ? t('stInService') : a.status === 2 ? t('stMaintenance') : t('stRetired')}
                 </Badge>
               </li>
             ))}
           </ul>
-          <h4>Register asset</h4>
+          {assets.length === 0 && <p className="muted">{t('noData')}</p>}
+          <h4>{t('newAsset')}</h4>
           <label className="field">
-            Code <input value={acode} onChange={(e) => setAcode(e.target.value)} />
+            {t('code')} <input value={acode} onChange={(e) => setAcode(e.target.value)} />
           </label>
           <label className="field">
-            Label <input value={alabel} onChange={(e) => setAlabel(e.target.value)} />
+            {t('label')} <input value={alabel} onChange={(e) => setAlabel(e.target.value)} />
           </label>
           <button
             className="primary"
             onClick={() => token && act(apiExt.createAsset(token, { code: acode, label: alabel, kind: 'equipment' }))}
           >
-            Register
+            {t('create')}
           </button>
         </Card>
       </div>

@@ -1,17 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api, apiExt, type Project, type Ticket } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 import { Alert, Badge, Card, PageHeader, statusTone } from '../components/ui';
 import { Wrench } from 'lucide-react';
-
-const projectStatus: Record<number, string> = {
-  0: 'Draft',
-  1: 'Active',
-  2: 'On hold',
-  3: 'Closed',
-  [-1]: 'Canceled',
-};
-const ticketStatus = ['Open', 'Pending', 'Resolved', 'Closed'];
 
 interface Task {
   id: number;
@@ -27,8 +19,12 @@ interface TicketMsg {
   internal: boolean;
 }
 
+const taskState = (s: number, t: (k: 'taskTodo' | 'taskDoing' | 'taskDone' | 'stCanceled') => string) =>
+  s === 0 ? t('taskTodo') : s === 1 ? t('taskDoing') : s === 2 ? t('taskDone') : t('stCanceled');
+
 export function Services() {
   const { token, login } = useAuth();
+  const { t } = useLang();
   const [projects, setProjects] = useState<Project[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [error, setError] = useState('');
@@ -49,6 +45,15 @@ export function Services() {
   const [iref, setIref] = useState('');
   const [iorg, setIorg] = useState('');
   const [ilabel, setIlabel] = useState('');
+
+  const projectStatus: Record<number, string> = {
+    0: t('stDraft'),
+    1: t('stActive'),
+    2: t('stOnHold'),
+    3: t('stClosed'),
+    [-1]: t('stCanceled'),
+  };
+  const ticketStatus = [t('stOpen'), t('stPending'), t('stResolved'), t('stClosed')];
 
   const reload = () => {
     if (!token) return;
@@ -79,14 +84,14 @@ export function Services() {
 
   return (
     <div>
-      <PageHeader icon={<Wrench size={22} />} title="Services" sub="Projects, tasks, time, contracts, interventions, tickets" />
+      <PageHeader icon={<Wrench size={22} />} title={t('services')} />
       {error && <Alert>{error}</Alert>}
       <div className="grid two">
-        <Card title="Projects">
+        <Card title={t('services')}>
           <ul className="clean">
             {projects.map((p) => (
               <li key={p.id}>
-                <button onClick={() => loadTasks(p.id)} title="Open tasks">
+                <button onClick={() => loadTasks(p.id)} title={t('details')}>
                   {p.ref}
                 </button>
                 <span>
@@ -94,59 +99,62 @@ export function Services() {
                 </span>
                 {p.status === 0 && token && (
                   <button onClick={() => act(api.setProjectStatus(token, p.id, 1, p.row_version))}>
-                    Activate
+                    {t('activate')}
                   </button>
                 )}
                 {(p.status === 1 || p.status === 2) && token && (
                   <button onClick={() => act(api.setProjectStatus(token, p.id, 3, p.row_version))}>
-                    Close
+                    {t('close')}
                   </button>
                 )}
               </li>
             ))}
           </ul>
-          <h4>New project</h4>
+          <h4>{t('newProject')}</h4>
           <label className="field">
-            Ref <input value={pref} onChange={(e) => setPref(e.target.value)} />
+            {t('ref')} <input value={pref} onChange={(e) => setPref(e.target.value)} />
           </label>
           <label className="field">
-            Label <input value={plabel} onChange={(e) => setPlabel(e.target.value)} />
+            {t('label')} <input value={plabel} onChange={(e) => setPlabel(e.target.value)} />
           </label>
-          <button className="primary" onClick={() => token && act(api.createProject(token, { ref: pref, label: plabel }))}>
-            Create
+          <button
+            className="primary"
+            onClick={() => token && act(api.createProject(token, { ref: pref, label: plabel }))}
+          >
+            {t('create')}
           </button>
         </Card>
-        <Card title={selProject ? `Tasks & time (project ${selProject})` : 'Tasks & time'}>
-          {!selProject && <p className="muted">Select a project ref above.</p>}
+        <Card title={selProject ? `${t('tasks')} — ${t('project')} ${selProject}` : t('details')}>
+          {!selProject && <p className="muted">{t('noData')}</p>}
           {selProject !== null && (
             <>
               <p className="muted">
-                Booked: {projHours !== null ? `${(projHours / 100).toFixed(2)}h` : '—'}
+                {t('hours')}: {projHours !== null ? `${(projHours / 100).toFixed(2)}h` : '—'}
               </p>
               <ul className="clean">
-                {tasks.map((t) => (
-                  <li key={t.id}>
+                {tasks.map((x) => (
+                  <li key={x.id}>
                     <span>
-                      {t.label} <Badge tone={statusTone(t.status)}>{t.status === 2 ? 'done' : t.status === 1 ? 'doing' : t.status === 0 ? 'todo' : 'canceled'}</Badge>
+                      {x.label} <Badge tone={statusTone(x.status)}>{taskState(x.status, t)}</Badge>
                     </span>
-                    {t.status === 0 && token && selProject !== null && (
+                    {x.status === 0 && token && selProject !== null && (
                       <button
                         onClick={() =>
-                          act(apiExt.setTaskStatus(token, t.id, { status: 2, row_version: t.row_version }), () =>
+                          act(apiExt.setTaskStatus(token, x.id, { status: 2, row_version: x.row_version }), () =>
                             loadTasks(selProject),
                           )
                         }
                       >
-                        Finish
+                        {t('close')}
                       </button>
                     )}
                     {token && selProject !== null && (
                       <button
                         onClick={() => {
-                          const h = prompt('Hours (decimal):', '1');
+                          const h = prompt(`${t('hours')} (decimal):`, '1');
                           if (!h) return;
                           act(
-                            apiExt.bookTime(token, t.id, {
+                            apiExt.bookTime(token, x.id, {
                               project_id: selProject,
                               author: login ?? 'me',
                               hours: Math.round(Number(h) * 100),
@@ -156,14 +164,15 @@ export function Services() {
                           );
                         }}
                       >
-                        Book time
+                        {t('hours')}
                       </button>
                     )}
                   </li>
                 ))}
               </ul>
               <label className="field">
-                New task <input value={taskLabel} onChange={(e) => setTaskLabel(e.target.value)} />
+                {t('newTask')}{' '}
+                <input value={taskLabel} onChange={(e) => setTaskLabel(e.target.value)} />
               </label>
               <button
                 className="primary"
@@ -175,58 +184,58 @@ export function Services() {
                   )
                 }
               >
-                Add
+                {t('add')}
               </button>
             </>
           )}
         </Card>
       </div>
       <div className="grid two" style={{ marginTop: '1rem' }}>
-        <Card title="Tickets">
+        <Card title={t('services')}>
           <ul className="clean">
-            {tickets.map((t) => (
-              <li key={t.id}>
-                <button onClick={() => loadMessages(t.id)} title="Open thread">
-                  {t.ref}
+            {tickets.map((x) => (
+              <li key={x.id}>
+                <button onClick={() => loadMessages(x.id)} title={t('details')}>
+                  {x.ref}
                 </button>
                 <span>
-                  {t.subject} [P{t.priority}]{' '}
-                  <Badge tone={statusTone(t.status)}>{ticketStatus[t.status] ?? t.status}</Badge>
+                  {x.subject} [P{x.priority}]{' '}
+                  <Badge tone={statusTone(x.status)}>{ticketStatus[x.status] ?? x.status}</Badge>
                 </span>
-                {(t.status === 0 || t.status === 1) && token && (
-                  <button onClick={() => act(api.setTicketStatus(token, t.id, 2, t.row_version))}>
-                    Resolve
+                {(x.status === 0 || x.status === 1) && token && (
+                  <button onClick={() => act(api.setTicketStatus(token, x.id, 2, x.row_version))}>
+                    {t('resolve')}
                   </button>
                 )}
-                {t.status === 2 && token && (
-                  <button onClick={() => act(api.setTicketStatus(token, t.id, 3, t.row_version))}>
-                    Close
+                {x.status === 2 && token && (
+                  <button onClick={() => act(api.setTicketStatus(token, x.id, 3, x.row_version))}>
+                    {t('close')}
                   </button>
                 )}
-                {t.status === 3 && token && (
-                  <button onClick={() => act(api.setTicketStatus(token, t.id, 0, t.row_version))}>
-                    Reopen
+                {x.status === 3 && token && (
+                  <button onClick={() => act(api.setTicketStatus(token, x.id, 0, x.row_version))}>
+                    {t('reopen')}
                   </button>
                 )}
               </li>
             ))}
           </ul>
-          <h4>New ticket</h4>
+          <h4>{t('newTicket')}</h4>
           <label className="field">
-            Ref <input value={tref} onChange={(e) => setTref(e.target.value)} />
+            {t('ref')} <input value={tref} onChange={(e) => setTref(e.target.value)} />
           </label>
           <label className="field">
-            Subject <input value={tsubject} onChange={(e) => setTsubject(e.target.value)} />
+            {t('subject')} <input value={tsubject} onChange={(e) => setTsubject(e.target.value)} />
           </label>
           <button
             className="primary"
             onClick={() => token && act(api.createTicket(token, { ref: tref, subject: tsubject, priority: 2 }))}
           >
-            Create
+            {t('create')}
           </button>
           {selTicket !== null && (
             <>
-              <h4>Thread</h4>
+              <h4>{t('thread')}</h4>
               <ul className="clean">
                 {messages.map((m) => (
                   <li key={m.id}>
@@ -237,7 +246,7 @@ export function Services() {
                 ))}
               </ul>
               <label className="field">
-                Reply <input value={msgBody} onChange={(e) => setMsgBody(e.target.value)} />
+                {t('message')} <input value={msgBody} onChange={(e) => setMsgBody(e.target.value)} />
               </label>
               <button
                 onClick={() =>
@@ -249,21 +258,21 @@ export function Services() {
                   )
                 }
               >
-                Send
+                {t('send')}
               </button>
             </>
           )}
         </Card>
-        <Card title="Contracts & interventions">
-          <h4>New contract</h4>
+        <Card title={t('services')}>
+          <h4>{t('newContract')}</h4>
           <label className="field">
-            Ref <input value={cref} onChange={(e) => setCref(e.target.value)} />
+            {t('ref')} <input value={cref} onChange={(e) => setCref(e.target.value)} />
           </label>
           <label className="field">
-            Org ID <input value={corg} onChange={(e) => setCorg(e.target.value)} />
+            {t('orgId')} <input value={corg} onChange={(e) => setCorg(e.target.value)} />
           </label>
           <label className="field">
-            Label <input value={clabel} onChange={(e) => setClabel(e.target.value)} />
+            {t('label')} <input value={clabel} onChange={(e) => setClabel(e.target.value)} />
           </label>
           <button
             className="primary"
@@ -272,17 +281,17 @@ export function Services() {
               act(apiExt.createContract(token, { ref: cref, org_id: Number(corg), label: clabel }))
             }
           >
-            Create
+            {t('create')}
           </button>
-          <h4>New intervention</h4>
+          <h4>{t('newIntervention')}</h4>
           <label className="field">
-            Ref <input value={iref} onChange={(e) => setIref(e.target.value)} />
+            {t('ref')} <input value={iref} onChange={(e) => setIref(e.target.value)} />
           </label>
           <label className="field">
-            Org ID <input value={iorg} onChange={(e) => setIorg(e.target.value)} />
+            {t('orgId')} <input value={iorg} onChange={(e) => setIorg(e.target.value)} />
           </label>
           <label className="field">
-            Label <input value={ilabel} onChange={(e) => setIlabel(e.target.value)} />
+            {t('label')} <input value={ilabel} onChange={(e) => setIlabel(e.target.value)} />
           </label>
           <button
             className="primary"
@@ -291,7 +300,7 @@ export function Services() {
               act(apiExt.createIntervention(token, { ref: iref, org_id: Number(iorg), label: ilabel }))
             }
           >
-            Schedule
+            {t('create')}
           </button>
         </Card>
       </div>

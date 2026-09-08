@@ -2,18 +2,12 @@ import { useEffect, useState } from 'react';
 import { Factory } from 'lucide-react';
 import { api, apiExt, type BOM, type ManufacturingOrder } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 import { Alert, Badge, Card, PageHeader, statusTone } from '../components/ui';
-
-const moStatus: Record<number, string> = {
-  0: 'Draft',
-  1: 'Validated',
-  2: 'In progress',
-  3: 'Produced',
-  [-1]: 'Canceled',
-};
 
 export function Manufacturing() {
   const { token } = useAuth();
+  const { t } = useLang();
   const [boms, setBoms] = useState<BOM[]>([]);
   const [mos, setMos] = useState<ManufacturingOrder[]>([]);
   const [error, setError] = useState('');
@@ -25,6 +19,9 @@ export function Manufacturing() {
   const [mproduct, setMproduct] = useState('');
   const [mwh, setMwh] = useState('');
   const [mqty, setMqty] = useState('');
+
+  const moName = (s: number) =>
+    s === 0 ? t('stDraft') : s === 1 ? t('stValidated') : s === 2 ? t('stInProgress') : s === 3 ? t('stProduced') : t('stCanceled');
 
   const reload = () => {
     if (!token) return;
@@ -48,10 +45,10 @@ export function Manufacturing() {
 
   return (
     <div>
-      <PageHeader icon={<Factory size={22} />} title="Manufacturing" sub="Bills of materials and production runs" />
+      <PageHeader icon={<Factory size={22} />} title={t('manufacturing')} />
       {error && <Alert>{error}</Alert>}
       <div className="grid two">
-        <Card title="Bills of materials">
+        <Card title="BOM">
           <ul className="clean">
             {boms.map((b) => (
               <li key={b.id}>
@@ -61,65 +58,61 @@ export function Manufacturing() {
               </li>
             ))}
           </ul>
-          <h4>New BOM</h4>
+          {boms.length === 0 && <p className="muted">{t('noData')}</p>}
+          <h4>{t('newBOM')}</h4>
           <label className="field">
-            Ref <input value={bref} onChange={(e) => setBref(e.target.value)} />
+            {t('ref')} <input value={bref} onChange={(e) => setBref(e.target.value)} />
           </label>
           <label className="field">
-            Product ID <input value={bproduct} onChange={(e) => setBproduct(e.target.value)} />
+            {t('productId')} <input value={bproduct} onChange={(e) => setBproduct(e.target.value)} />
           </label>
           <label className="field">
-            Label <input value={blabel} onChange={(e) => setBlabel(e.target.value)} />
+            {t('label')} <input value={blabel} onChange={(e) => setBlabel(e.target.value)} />
           </label>
           <button
             className="primary"
             onClick={() =>
               token &&
-              act(
-                apiExt.createBOM(token, {
-                  ref: bref,
-                  product_id: Number(bproduct),
-                  label: blabel,
-                }),
-              )
+              act(apiExt.createBOM(token, { ref: bref, product_id: Number(bproduct), label: blabel }))
             }
           >
-            Create
+            {t('create')}
           </button>
         </Card>
-        <Card title="Manufacturing orders">
+        <Card title="MO">
           <ul className="clean">
             {mos.map((m) => (
               <li key={m.id}>
                 <span>
-                  {m.ref} — qty {m.qty} <Badge tone={statusTone(m.status)}>{moStatus[m.status] ?? m.status}</Badge>
+                  {m.ref} — {t('qty')} {m.qty} <Badge tone={statusTone(m.status)}>{moName(m.status)}</Badge>
                 </span>
                 {(m.status === 0 || m.status === 1) && (
-                  <button onClick={() => advance(m)}>{m.status === 0 ? 'Validate' : 'Start'}</button>
+                  <button onClick={() => advance(m)}>{m.status === 0 ? t('validate') : t('open')}</button>
                 )}
                 {m.status === 2 && token && (
                   <button className="primary" onClick={() => act(api.produceMO(token, m.id))}>
-                    Produce
+                    {t('produce')}
                   </button>
                 )}
               </li>
             ))}
           </ul>
-          <h4>New MO</h4>
+          {mos.length === 0 && <p className="muted">{t('noData')}</p>}
+          <h4>{t('newMO')}</h4>
           <label className="field">
-            Ref <input value={mref} onChange={(e) => setMref(e.target.value)} />
+            {t('ref')} <input value={mref} onChange={(e) => setMref(e.target.value)} />
           </label>
           <label className="field">
             BOM ID <input value={mbom} onChange={(e) => setMbom(e.target.value)} />
           </label>
           <label className="field">
-            Product ID <input value={mproduct} onChange={(e) => setMproduct(e.target.value)} />
+            {t('productId')} <input value={mproduct} onChange={(e) => setMproduct(e.target.value)} />
           </label>
           <label className="field">
-            Warehouse ID <input value={mwh} onChange={(e) => setMwh(e.target.value)} />
+            {t('warehouse')} ID <input value={mwh} onChange={(e) => setMwh(e.target.value)} />
           </label>
           <label className="field">
-            Qty <input value={mqty} onChange={(e) => setMqty(e.target.value)} />
+            {t('qty')} <input value={mqty} onChange={(e) => setMqty(e.target.value)} />
           </label>
           <button
             className="primary"
@@ -136,7 +129,7 @@ export function Manufacturing() {
               )
             }
           >
-            Create
+            {t('create')}
           </button>
         </Card>
       </div>

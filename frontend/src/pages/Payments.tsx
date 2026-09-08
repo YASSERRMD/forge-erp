@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { CreditCard } from 'lucide-react';
 import { apiExt } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
-import { Alert, Badge, Card, PageHeader, statusTone } from '../components/ui';
+import { useLang } from '../i18n/lang';
+import { Alert, Badge, Card, PageHeader, money, statusTone } from '../components/ui';
 
 interface Attempt {
   id: number;
@@ -16,6 +17,7 @@ interface Attempt {
 
 export function Payments() {
   const { token } = useAuth();
+  const { t } = useLang();
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [error, setError] = useState('');
   const [org, setOrg] = useState('');
@@ -45,40 +47,41 @@ export function Payments() {
 
   return (
     <div>
-      <PageHeader icon={<CreditCard size={22} />} title="Payments" sub="Provider intents and attempts" />
+      <PageHeader icon={<CreditCard size={22} />} title={t('payments')} />
       {error && <Alert>{error}</Alert>}
       <div className="grid two">
-        <Card title="Attempts">
+        <Card title={t('attempts')}>
           <ul className="clean">
             {attempts.map((a) => (
               <li key={a.id}>
                 <span>
-                  {a.ref} — {(a.amount / 100).toFixed(2)} {a.currency} [{a.provider}]
+                  {a.ref} — {money(a.amount)} {a.currency} [{a.provider}]
                 </span>
                 <Badge tone={statusTone(a.status)}>
-                  {a.status === 1 ? 'succeeded' : a.status === 0 ? 'pending' : a.status === -1 ? 'failed' : 'refunded'}
+                  {a.status === 1 ? t('stSucceeded') : a.status === 0 ? t('stPending') : a.status === -1 ? t('stFailed') : t('stRefunded')}
                 </Badge>
               </li>
             ))}
           </ul>
+          {attempts.length === 0 && <p className="muted">{t('noData')}</p>}
         </Card>
-        <Card title="New intent">
+        <Card title={t('newIntent')}>
           <label className="field">
-            Org ID <input value={org} onChange={(e) => setOrg(e.target.value)} />
+            {t('orgId')} <input value={org} onChange={(e) => setOrg(e.target.value)} />
           </label>
           <label className="field">
-            Amount <input value={amount} onChange={(e) => setAmount(e.target.value)} />
+            {t('amount')} <input value={amount} onChange={(e) => setAmount(e.target.value)} />
           </label>
           <label className="field">
             Provider{' '}
             <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-              <option value="manual">manual (settles at once)</option>
+              <option value="manual">manual</option>
               <option value="stripe">stripe</option>
               <option value="paypal">paypal</option>
             </select>
           </label>
           <button className="primary" onClick={intent}>
-            Start collection
+            {t('create')}
           </button>
         </Card>
       </div>

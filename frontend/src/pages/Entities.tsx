@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
+import { Building2, Package, Receipt } from 'lucide-react';
 import { api, type Organization, type Product, type SalesDocument } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
+import { Alert, Badge, Card, PageHeader, money, statusTone } from '../components/ui';
 
 function useFetch<T>(fn: (token: string) => Promise<T>, fallback: T): T {
   const { token } = useAuth();
@@ -11,19 +14,10 @@ function useFetch<T>(fn: (token: string) => Promise<T>, fallback: T): T {
   return data;
 }
 
-export function Dashboard() {
-  const { login } = useAuth();
-  return (
-    <section>
-      <h2>Dashboard</h2>
-      <p>Signed in as {login}. KPIs stream from reporting endpoints (Phase 10).</p>
-    </section>
-  );
-}
-
 export function Organizations() {
   const { token } = useAuth();
-  const orgs = useFetch<Organization[]>((t) => api.organizations(t), []);
+  const { t } = useLang();
+  const orgs = useFetch<Organization[]>((x) => api.organizations(x), []);
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
@@ -35,31 +29,39 @@ export function Organizations() {
       .catch((e: Error) => setError(e.message));
   };
   return (
-    <section>
-      <h2>Organizations</h2>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-      <ul>
-        {orgs.map((o) => (
-          <li key={o.id}>
-            {o.name} {o.customer_code && `(${o.customer_code})`}
-          </li>
-        ))}
-      </ul>
-      <h4>New customer</h4>
-      <label>
-        Name <input value={name} onChange={(e) => setName(e.target.value)} />
-      </label>{' '}
-      <label>
-        Code <input value={code} onChange={(e) => setCode(e.target.value)} />
-      </label>{' '}
-      <button onClick={create}>Create</button>
-    </section>
+    <div>
+      <PageHeader icon={<Building2 size={22} />} title={t('organizations')} />
+      {error && <Alert>{error}</Alert>}
+      <Card title={t('customer')}>
+        <ul className="clean">
+          {orgs.map((o) => (
+            <li key={o.id}>
+              <span>
+                {o.name} {o.customer_code && `(${o.customer_code})`}
+              </span>
+            </li>
+          ))}
+        </ul>
+        {orgs.length === 0 && <p className="muted">{t('noData')}</p>}
+        <h4>{t('newCustomer')}</h4>
+        <label className="field">
+          {t('name')} <input value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label className="field">
+          {t('code')} <input value={code} onChange={(e) => setCode(e.target.value)} />
+        </label>
+        <button className="primary" onClick={create}>
+          {t('create')}
+        </button>
+      </Card>
+    </div>
   );
 }
 
 export function Products() {
   const { token } = useAuth();
-  const prods = useFetch<Product[]>((t) => api.products(t), []);
+  const { t } = useLang();
+  const prods = useFetch<Product[]>((x) => api.products(x), []);
   const [sku, setSku] = useState('');
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
@@ -80,34 +82,45 @@ export function Products() {
       .catch((e: Error) => setError(e.message));
   };
   return (
-    <section>
-      <h2>Products</h2>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-      <ul>
-        {prods.map((p) => (
-          <li key={p.id}>
-            {p.sku} — {p.name} ({(p.net_price / 100).toFixed(2)})
-          </li>
-        ))}
-      </ul>
-      <h4>New product</h4>
-      <label>
-        SKU <input value={sku} onChange={(e) => setSku(e.target.value)} />
-      </label>{' '}
-      <label>
-        Name <input value={name} onChange={(e) => setName(e.target.value)} />
-      </label>{' '}
-      <label>
-        Net price <input value={price} onChange={(e) => setPrice(e.target.value)} />
-      </label>{' '}
-      <button onClick={create}>Create</button>
-    </section>
+    <div>
+      <PageHeader icon={<Package size={22} />} title={t('products')} />
+      {error && <Alert>{error}</Alert>}
+      <Card title={t('products')}>
+        <ul className="clean">
+          {prods.map((p) => (
+            <li key={p.id}>
+              <span>
+                {p.sku} — {p.name} ({money(p.net_price)})
+              </span>
+            </li>
+          ))}
+        </ul>
+        {prods.length === 0 && <p className="muted">{t('noData')}</p>}
+        <h4>{t('newProduct')}</h4>
+        <label className="field">
+          {t('sku')} <input value={sku} onChange={(e) => setSku(e.target.value)} />
+        </label>
+        <label className="field">
+          {t('name')} <input value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label className="field">
+          {t('price')} <input value={price} onChange={(e) => setPrice(e.target.value)} />
+        </label>
+        <button className="primary" onClick={create}>
+          {t('create')}
+        </button>
+      </Card>
+    </div>
   );
 }
 
+const invStatus = (s: number, t: (k: 'stDraft' | 'stValidated' | 'stPartiallyPaid' | 'stPaid') => string) =>
+  s === 0 ? t('stDraft') : s === 1 ? t('stValidated') : s === 2 ? t('stPartiallyPaid') : t('stPaid');
+
 export function Invoices() {
   const { token } = useAuth();
-  const invs = useFetch<SalesDocument[]>((t) => api.invoices(t), []);
+  const { t } = useLang();
+  const invs = useFetch<SalesDocument[]>((x) => api.invoices(x), []);
   const [notice, setNotice] = useState('');
   const refresh = () => {
     if (token) api.invoices(token).then(() => window.location.reload()).catch(() => undefined);
@@ -136,20 +149,27 @@ export function Invoices() {
     }
   };
   return (
-    <section>
-      <h2>Invoices</h2>
-      {notice && <p style={{ color: 'red' }}>{notice}</p>}
-      <ul>
-        {invs.map((d) => (
-          <li key={d.id}>
-            {d.ref} — status {d.status} — {(d.totals.gross / 100).toFixed(2)}{' '}
-            {d.status === 0 && <button onClick={() => validate(d.id)}>Validate</button>}{' '}
-            {(d.status === 1 || d.status === 0) && (
-              <button onClick={() => payFull(d.id)}>Pay full</button>
-            )}
-          </li>
-        ))}
-      </ul>
-    </section>
+    <div>
+      <PageHeader icon={<Receipt size={22} />} title={t('invoices')} />
+      {notice && <Alert>{notice}</Alert>}
+      <Card title={t('invoices')}>
+        <ul className="clean">
+          {invs.map((d) => (
+            <li key={d.id}>
+              <span>
+                {d.ref} <Badge tone={statusTone(d.status)}>{invStatus(d.status, t)}</Badge> {money(d.totals.gross)}
+              </span>
+              {d.status === 0 && <button onClick={() => validate(d.id)}>{t('validate')}</button>}
+              {(d.status === 1 || d.status === 0) && (
+                <button className="primary" onClick={() => payFull(d.id)}>
+                  {t('pay')}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+        {invs.length === 0 && <p className="muted">{t('noData')}</p>}
+      </Card>
+    </div>
   );
 }

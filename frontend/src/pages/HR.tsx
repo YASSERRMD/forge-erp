@@ -2,27 +2,12 @@ import { useEffect, useState } from 'react';
 import { Users } from 'lucide-react';
 import { api, apiExt, type ExpenseReport, type LeaveRequest } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 import { Alert, Badge, Card, PageHeader, money, statusTone } from '../components/ui';
-
-const leaveStatus: Record<number, string> = {
-  0: 'Draft',
-  1: 'Submitted',
-  2: 'Approved',
-  [-1]: 'Rejected',
-  [-2]: 'Canceled',
-};
-
-const expenseStatus: Record<number, string> = {
-  0: 'Draft',
-  1: 'Submitted',
-  2: 'Approved',
-  3: 'Paid',
-  [-1]: 'Rejected',
-  [-2]: 'Canceled',
-};
 
 export function HR() {
   const { token, login } = useAuth();
+  const { t } = useLang();
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [expenses, setExpenses] = useState<ExpenseReport[]>([]);
   const [error, setError] = useState('');
@@ -36,6 +21,11 @@ export function HR() {
   const [speriod, setSperiod] = useState('');
   const [sgross, setSgross] = useState('');
   const [scharges, setScharges] = useState('');
+
+  const leaveName = (s: number) =>
+    s === 0 ? t('stDraft') : s === 1 ? t('stPending') : s === 2 ? t('stApproved') : s === -1 ? t('stRejected') : t('stCanceled');
+  const expenseName = (s: number) =>
+    s === 0 ? t('stDraft') : s === 1 ? t('stPending') : s === 2 ? t('stValidated') : s === 3 ? t('stPaid') : s === -1 ? t('stRejected') : t('stCanceled');
 
   const reload = () => {
     if (!token) return;
@@ -52,36 +42,35 @@ export function HR() {
 
   return (
     <div>
-      <PageHeader icon={<Users size={22} />} title="HR" sub="Leave, expenses, payroll" />
+      <PageHeader icon={<Users size={22} />} title={t('hr')} sub="Leave, expenses, payroll" />
       {error && <Alert>{error}</Alert>}
       <div className="grid two">
-        <Card title="Leave requests">
+        <Card title={t('newLeave')}>
           <ul className="clean">
             {leaves.map((l) => (
               <li key={l.id}>
                 <span>
-                  {l.user_login} — {l.type} — {l.days}d{' '}
-                  <Badge tone={statusTone(l.status)}>{leaveStatus[l.status] ?? l.status}</Badge>
+                  {l.user_login} — {l.type} — {l.days}{t('days')} <Badge tone={statusTone(l.status)}>{leaveName(l.status)}</Badge>
                 </span>
                 {l.status === 0 && token && (
                   <button onClick={() => act(apiExt.setLeaveStatus(token, l.id, { status: 1, row_version: l.row_version }))}>
-                    Submit
+                    {t('submit')}
                   </button>
                 )}
                 {l.status === 1 && token && (
                   <button onClick={() => act(apiExt.setLeaveStatus(token, l.id, { status: 2, row_version: l.row_version }))}>
-                    Approve
+                    {t('approve')}
                   </button>
                 )}
               </li>
             ))}
           </ul>
-          <h4>Request leave</h4>
+          <h4>{t('newLeave')}</h4>
           <label className="field">
-            User <input value={luser} placeholder={login ?? ''} onChange={(e) => setLuser(e.target.value)} />
+            {t('user')} <input value={luser} placeholder={login ?? ''} onChange={(e) => setLuser(e.target.value)} />
           </label>
           <label className="field">
-            Type{' '}
+            {t('type')}{' '}
             <select value={ltype} onChange={(e) => setLtype(e.target.value)}>
               <option value="paid">paid</option>
               <option value="sick">sick</option>
@@ -89,10 +78,10 @@ export function HR() {
             </select>
           </label>
           <label className="field">
-            Start <input type="date" value={lstart} onChange={(e) => setLstart(e.target.value)} />
+            {t('start')} <input type="date" value={lstart} onChange={(e) => setLstart(e.target.value)} />
           </label>
           <label className="field">
-            End <input type="date" value={lend} onChange={(e) => setLend(e.target.value)} />
+            {t('end')} <input type="date" value={lend} onChange={(e) => setLend(e.target.value)} />
           </label>
           <button
             className="primary"
@@ -108,57 +97,57 @@ export function HR() {
               )
             }
           >
-            File
+            {t('create')}
           </button>
         </Card>
-        <Card title="Expense reports">
+        <Card title={t('newReport')}>
           <ul className="clean">
             {expenses.map((e) => (
               <li key={e.id}>
                 <span>
                   {e.ref} — {e.user_login} — {money(e.total)}{' '}
-                  <Badge tone={statusTone(e.status)}>{expenseStatus[e.status] ?? e.status}</Badge>
+                  <Badge tone={statusTone(e.status)}>{expenseName(e.status)}</Badge>
                 </span>
                 {e.status === 0 && token && (
                   <button onClick={() => act(apiExt.setExpenseStatus(token, e.id, { status: 1, row_version: e.row_version }))}>
-                    Submit
+                    {t('submit')}
                   </button>
                 )}
                 {e.status === 1 && token && (
                   <button onClick={() => act(apiExt.setExpenseStatus(token, e.id, { status: 2, row_version: e.row_version }))}>
-                    Approve
+                    {t('approve')}
                   </button>
                 )}
               </li>
             ))}
           </ul>
-          <h4>New report</h4>
+          <h4>{t('newReport')}</h4>
           <label className="field">
-            Ref <input value={eref} onChange={(e) => setEref(e.target.value)} />
+            {t('ref')} <input value={eref} onChange={(e) => setEref(e.target.value)} />
           </label>
           <label className="field">
-            User <input value={euser} placeholder={login ?? ''} onChange={(e) => setEuser(e.target.value)} />
+            {t('user')} <input value={euser} placeholder={login ?? ''} onChange={(e) => setEuser(e.target.value)} />
           </label>
           <button
             className="primary"
             onClick={() => token && act(apiExt.createExpense(token, { ref: eref, user_login: euser || (login ?? '') }))}
           >
-            Create
+            {t('create')}
           </button>
         </Card>
       </div>
-      <Card title="Record salary">
+      <Card title={t('newSalary')}>
         <label className="field">
-          User <input value={suser} placeholder={login ?? ''} onChange={(e) => setSuser(e.target.value)} />
+          {t('user')} <input value={suser} placeholder={login ?? ''} onChange={(e) => setSuser(e.target.value)} />
         </label>
         <label className="field">
-          Period <input placeholder="2026-09" value={speriod} onChange={(e) => setSperiod(e.target.value)} />
+          {t('period')} <input placeholder="2026-09" value={speriod} onChange={(e) => setSperiod(e.target.value)} />
         </label>
         <label className="field">
-          Gross <input value={sgross} onChange={(e) => setSgross(e.target.value)} />
+          {t('gross')} <input value={sgross} onChange={(e) => setSgross(e.target.value)} />
         </label>
         <label className="field">
-          Charges <input value={scharges} onChange={(e) => setScharges(e.target.value)} />
+          {t('charges')} <input value={scharges} onChange={(e) => setScharges(e.target.value)} />
         </label>
         <button
           className="primary"
@@ -177,7 +166,7 @@ export function HR() {
             );
           }}
         >
-          Record
+          {t('create')}
         </button>
       </Card>
     </div>

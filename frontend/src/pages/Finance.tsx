@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { Banknote } from 'lucide-react';
 import { api, apiExt, type FinAccount } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 import { Alert, Card, PageHeader } from '../components/ui';
 
 export function Finance() {
   const { token } = useAuth();
+  const { t } = useLang();
   const [accounts, setAccounts] = useState<FinAccount[]>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -55,11 +57,11 @@ export function Finance() {
 
   return (
     <div>
-      <PageHeader icon={<Banknote size={22} />} title="Finance" sub="Chart, journals, entries, banking" />
+      <PageHeader icon={<Banknote size={22} />} title={t('financeNav')} sub={t('subtitle')} />
       {error && <Alert>{error}</Alert>}
       {notice && <p className="alert-ok">{notice}</p>}
       <div className="grid two">
-        <Card title="Chart of accounts">
+        <Card title={t('account')}>
           <ul className="clean">
             {accounts.map((a) => (
               <li key={a.id}>
@@ -69,15 +71,16 @@ export function Finance() {
               </li>
             ))}
           </ul>
-          <h4>New account</h4>
+          {accounts.length === 0 && <p className="muted">{t('noData')}</p>}
+          <h4>{t('newAccount')}</h4>
           <label className="field">
-            Code <input value={code} onChange={(e) => setCode(e.target.value)} />
+            {t('code')} <input value={code} onChange={(e) => setCode(e.target.value)} />
           </label>
           <label className="field">
-            Label <input value={label} onChange={(e) => setLabel(e.target.value)} />
+            {t('label')} <input value={label} onChange={(e) => setLabel(e.target.value)} />
           </label>
           <label className="field">
-            Type{' '}
+            {t('type')}{' '}
             <select value={type} onChange={(e) => setType(e.target.value)}>
               <option value="asset">asset</option>
               <option value="liability">liability</option>
@@ -85,55 +88,52 @@ export function Finance() {
               <option value="revenue">revenue</option>
               <option value="expense">expense</option>
             </select>
-          </label>
-          <button className="primary" onClick={() => token && act(api.createAccount(token, { code, label, type }), 'Account created')}>
-            Create
+          </label>{' '}
+          <button className="primary" onClick={() => token && act(api.createAccount(token, { code, label, type }), t('create'))}>
+            {t('create')}
           </button>
-          <h4>New journal</h4>
+          <h4>{t('newJournal')}</h4>
           <label className="field">
-            Code <input value={jcode} onChange={(e) => setJcode(e.target.value)} />
+            {t('code')} <input value={jcode} onChange={(e) => setJcode(e.target.value)} />
           </label>
           <label className="field">
-            Label <input value={jlabel} onChange={(e) => setJlabel(e.target.value)} />
-          </label>
-          <button
-            onClick={() => token && act(apiExt.createJournal(token, { code: jcode, label: jlabel }), 'Journal created')}
-          >
-            Create
+            {t('label')} <input value={jlabel} onChange={(e) => setJlabel(e.target.value)} />
+          </label>{' '}
+          <button onClick={() => token && act(apiExt.createJournal(token, { code: jcode, label: jlabel }), t('create'))}>
+            {t('create')}
           </button>
-          <h4>New bank account</h4>
+          <h4>{t('newBankAccount')}</h4>
           <label className="field">
-            Code <input value={bcode} onChange={(e) => setBcode(e.target.value)} />
+            {t('code')} <input value={bcode} onChange={(e) => setBcode(e.target.value)} />
           </label>
           <label className="field">
-            Label <input value={blabel} onChange={(e) => setBlabel(e.target.value)} />
-          </label>
+            {t('label')} <input value={blabel} onChange={(e) => setBlabel(e.target.value)} />
+          </label>{' '}
           <button
-            onClick={() => token && act(apiExt.createBankAccount(token, { code: bcode, label: blabel }), 'Bank account created')}
+            onClick={() => token && act(apiExt.createBankAccount(token, { code: bcode, label: blabel }), t('create'))}
           >
-            Create
+            {t('create')}
           </button>
         </Card>
-        <Card title="Post journal entry">
+        <Card title={t('journal')}>
           <label className="field">
-            Ref <input value={eRef} onChange={(e) => setERef(e.target.value)} />
+            {t('ref')} <input value={eRef} onChange={(e) => setERef(e.target.value)} />
           </label>
           <label className="field">
-            Journal ID <input value={eJournal} onChange={(e) => setEJournal(e.target.value)} />
+            {t('journal')} ID <input value={eJournal} onChange={(e) => setEJournal(e.target.value)} />
           </label>
           <label className="field">
-            Debit acct <input value={eDebit} onChange={(e) => setEDebit(e.target.value)} />
+            {t('debit')} acct <input value={eDebit} onChange={(e) => setEDebit(e.target.value)} />
           </label>
           <label className="field">
-            Credit acct <input value={eCredit} onChange={(e) => setECredit(e.target.value)} />
+            {t('credit')} acct <input value={eCredit} onChange={(e) => setECredit(e.target.value)} />
           </label>
           <label className="field">
-            Amount <input value={eAmount} onChange={(e) => setEAmount(e.target.value)} />
-          </label>
+            {t('amount')} <input value={eAmount} onChange={(e) => setEAmount(e.target.value)} />
+          </label>{' '}
           <button className="primary" onClick={postEntry}>
-            Post balanced entry
+            {t('create')}
           </button>
-          <p className="muted">Debit and credit legs must balance to the cent.</p>
         </Card>
       </div>
     </div>

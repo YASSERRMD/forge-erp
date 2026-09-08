@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { CalendarDays } from 'lucide-react';
 import { api, apiExt, type AgendaEvent } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 import { Alert, Badge, Card, PageHeader, statusTone } from '../components/ui';
 
 export function Agenda() {
   const { token } = useAuth();
+  const { t } = useLang();
   const [events, setEvents] = useState<AgendaEvent[]>([]);
   const [error, setError] = useState('');
   const [title, setTitle] = useState('');
@@ -42,7 +44,7 @@ export function Agenda() {
 
   return (
     <div>
-      <PageHeader icon={<CalendarDays size={22} />} title="Agenda" sub="Calendar events and reminders" />
+      <PageHeader icon={<CalendarDays size={22} />} title={t('agenda')} />
       {error && <Alert>{error}</Alert>}
       <p>
         <button
@@ -54,11 +56,11 @@ export function Agenda() {
               .catch((e: Error) => setError(e.message))
           }
         >
-          Dispatch due reminders
+          {t('dispatch')}
         </button>{' '}
-        {dispatched !== null && <span className="muted">dispatched: {dispatched}</span>}
+        {dispatched !== null && <span className="muted">{t('dispatched')}: {dispatched}</span>}
       </p>
-      <Card title="Upcoming">
+      <Card title={t('upcoming')}>
         <ul className="clean">
           {events.map((e) => (
             <li key={e.id}>
@@ -66,25 +68,25 @@ export function Agenda() {
                 {e.title} — {new Date(e.start_at).toLocaleString()}
               </span>
               <Badge tone={statusTone(e.status)}>
-                {e.status === 0 ? 'scheduled' : e.status === 1 ? 'done' : 'canceled'}
+                {e.status === 0 ? t('stScheduled') : e.status === 1 ? t('stDone') : t('stCanceled')}
               </Badge>
             </li>
           ))}
         </ul>
-        {events.length === 0 && <p className="muted">Nothing scheduled.</p>}
+        {events.length === 0 && <p className="muted">{t('noneScheduled')}</p>}
       </Card>
-      <Card title="New event">
+      <Card title={t('newEvent')}>
         <label className="field">
-          Title <input value={title} onChange={(e) => setTitle(e.target.value)} />
+          {t('title')} <input value={title} onChange={(e) => setTitle(e.target.value)} />
         </label>
         <label className="field">
-          Start <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
+          {t('start')} <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
         </label>
         <label className="field">
-          End <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} />
+          {t('end')} <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} />
         </label>
         <button className="primary" onClick={create}>
-          Schedule
+          {t('schedule')}
         </button>
       </Card>
     </div>

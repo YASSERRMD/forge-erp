@@ -70,8 +70,12 @@ func TestBallotRulesAndTally(t *testing.T) {
 	if err != nil {
 		t.Fatalf("results: %v", err)
 	}
-	if len(tally) != 2 || tally[0].Votes != 0 || tally[1].Votes != 2 {
-		t.Fatalf("tally=%+v want 0/2", tally)
+	byLabel := map[string]int64{}
+	for _, tly := range tally {
+		byLabel[tly.Label] = tly.Votes
+	}
+	if len(tally) != 2 || byLabel["Tacos"] != 0 || byLabel["Sushi"] != 2 {
+		t.Fatalf("tally=%+v want Tacos 0 / Sushi 2", tally)
 	}
 	// Closed survey rejects votes.
 	upd, _ = m.SetSurveyStatus(ctx, sv.ID, SurveyClosed, upd.RowVersion)

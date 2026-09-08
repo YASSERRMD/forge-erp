@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Euro, Inbox } from 'lucide-react';
 import { apiExt } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 import { Alert, Badge, Card, PageHeader, statusTone } from '../components/ui';
 
 interface SepaBatch {
@@ -20,6 +21,7 @@ interface Mailbox {
 
 export function Collections() {
   const { token } = useAuth();
+  const { t } = useLang();
   const [batches, setBatches] = useState<SepaBatch[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [error, setError] = useState('');
@@ -49,21 +51,21 @@ export function Collections() {
 
   return (
     <div>
-      <PageHeader icon={<Euro size={22} />} title="Collections & inbound" sub="SEPA batches and email-to-ticket gateway" />
+      <PageHeader icon={<Euro size={22} />} title={t('collections')} />
       {error && <Alert>{error}</Alert>}
       {notice && <p className="alert-ok">{notice}</p>}
       <div className="grid two">
-        <Card title="SEPA batches">
+        <Card title="SEPA">
           <ul className="clean">
             {batches.map((b) => (
               <li key={b.id}>
                 <span>{b.ref}</span>
                 <Badge tone={statusTone(b.status)}>
-                  {b.status === 1 ? 'validated' : b.status === 0 ? 'draft' : b.status === 2 ? 'sent' : 'canceled'}
+                  {b.status === 1 ? t('stValidated') : b.status === 0 ? t('stDraft') : b.status === 2 ? t('stSent') : t('stCanceled')}
                 </Badge>
                 {b.status === 0 && token && (
-                  <button onClick={() => act(apiExt.setSepaStatus(token, b.id, { status: 1, row_version: b.row_version }), 'Validated')}>
-                    Validate
+                  <button onClick={() => act(apiExt.setSepaStatus(token, b.id, { status: 1, row_version: b.row_version }), t('stValidated'))}>
+                    {t('validate')}
                   </button>
                 )}
                 {b.status === 1 && (
@@ -74,44 +76,44 @@ export function Collections() {
               </li>
             ))}
           </ul>
-          <p className="muted">Create batches via API with creditor + transaction lines (IBAN-checked).</p>
+          {batches.length === 0 && <p className="muted">{t('noData')}</p>}
         </Card>
-        <Card title="Inbound mail">
+        <Card title={t('mailbox')}>
           <ul className="clean">
             {mailboxes.map((m) => (
               <li key={m.code}>
                 <span>
-                  {m.code} — {m.host} {m.active ? '' : '(inactive)'}
+                  {m.code} — {m.host} {m.active ? '' : `(${t('stInactive')})`}
                 </span>
                 {m.last_error && <Badge tone="bad">{m.last_error}</Badge>}
               </li>
             ))}
           </ul>
-          <h4>Register mailbox</h4>
+          <h4>{t('newMailbox')}</h4>
           <label className="field">
-            Code <input value={mcode} onChange={(e) => setMcode(e.target.value)} />
+            {t('code')} <input value={mcode} onChange={(e) => setMcode(e.target.value)} />
           </label>
           <label className="field">
-            Host <input value={mhost} onChange={(e) => setMhost(e.target.value)} />
+            {t('host')} <input value={mhost} onChange={(e) => setMhost(e.target.value)} />
           </label>
           <button
             className="primary"
             onClick={() =>
               token &&
-              act(apiExt.upsertMailbox(token, { code: mcode, host: mhost, port: 993, active: true }), 'Mailbox saved')
+              act(apiExt.upsertMailbox(token, { code: mcode, host: mhost, port: 993, active: true }), t('save'))
             }
           >
-            Save
+            {t('save')}
           </button>
-          <h4>File a fetched message</h4>
+          <h4>{t('fileAsTicket')}</h4>
           <label className="field">
-            From <input value={mfrom} onChange={(e) => setMfrom(e.target.value)} />
+            {t('user')} <input value={mfrom} onChange={(e) => setMfrom(e.target.value)} />
           </label>
           <label className="field">
-            Subject <input value={msubject} onChange={(e) => setMsubject(e.target.value)} />
+            {t('subject')} <input value={msubject} onChange={(e) => setMsubject(e.target.value)} />
           </label>
           <label className="field">
-            Body <input value={mbody} onChange={(e) => setMbody(e.target.value)} />
+            {t('body')} <input value={mbody} onChange={(e) => setMbody(e.target.value)} />
           </label>
           <button
             onClick={() =>
@@ -123,11 +125,11 @@ export function Collections() {
                   subject: msubject,
                   body: mbody,
                 }),
-                'Ticket filed',
+                t('create'),
               )
             }
           >
-            <Inbox size={14} style={{ verticalAlign: '-2px' }} /> File as ticket
+            <Inbox size={14} style={{ verticalAlign: '-2px' }} /> {t('fileAsTicket')}
           </button>
         </Card>
       </div>
