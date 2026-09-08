@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { Users } from 'lucide-react';
 import { apiExt, type Donation, type Member } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 import { Alert, Badge, Card, PageHeader, money, statusTone } from '../components/ui';
 
 export function Members() {
   const { token } = useAuth();
+  const { t } = useLang();
   const [members, setMembers] = useState<Member[]>([]);
   const [donations, setDonations] = useState<Donation[]>([]);
   const [error, setError] = useState('');
@@ -29,38 +31,42 @@ export function Members() {
       reload();
     }).catch((e: Error) => setError(e.message));
 
+  const memberName = (s: number) =>
+    s === 1 ? t('stActive') : s === 0 ? t('stDraft') : s === -1 ? t('stResigned') : t('stExcluded');
+  const donationName = (s: number) =>
+    s === 1 ? t('stPaid') : s === 0 ? t('stPromised') : t('stCanceled');
+
   return (
     <div>
-      <PageHeader icon={<Users size={22} />} title="Members & donations" sub="Association membership and gift tracking" />
+      <PageHeader icon={<Users size={22} />} title={t('members')} />
       {error && <Alert>{error}</Alert>}
       <div className="grid two">
-        <Card title="Members">
+        <Card title={t('members')}>
           <ul className="clean">
             {members.map((m) => (
               <li key={m.id}>
                 <span>
                   {m.ref} — {m.first_name} {m.last_name} {m.company}
                 </span>
-                <Badge tone={statusTone(m.status)}>
-                  {m.status === 1 ? 'active' : m.status === 0 ? 'draft' : 'left'}
-                </Badge>
+                <Badge tone={statusTone(m.status)}>{memberName(m.status)}</Badge>
                 {m.status === 0 && token && (
                   <button onClick={() => act(apiExt.setMemberStatus(token, m.id, { status: 1, row_version: m.row_version }))}>
-                    Validate
+                    {t('validate')}
                   </button>
                 )}
               </li>
             ))}
           </ul>
-          <h4>New member</h4>
+          {members.length === 0 && <p className="muted">{t('noData')}</p>}
+          <h4>{t('newMember')}</h4>
           <label className="field">
-            Ref <input value={ref} onChange={(e) => setRef(e.target.value)} />
+            {t('ref')} <input value={ref} onChange={(e) => setRef(e.target.value)} />
           </label>
           <label className="field">
-            First <input value={first} onChange={(e) => setFirst(e.target.value)} />
+            {t('firstName')} <input value={first} onChange={(e) => setFirst(e.target.value)} />
           </label>
           <label className="field">
-            Last <input value={last} onChange={(e) => setLast(e.target.value)} />
+            {t('lastName')} <input value={last} onChange={(e) => setLast(e.target.value)} />
           </label>
           <button
             className="primary"
@@ -76,41 +82,39 @@ export function Members() {
               )
             }
           >
-            Create
+            {t('create')}
           </button>
-          <p className="muted">Type defaults to ID 1 — manage classes via member-types API.</p>
         </Card>
-        <Card title="Donations">
+        <Card title={t('donations')}>
           <ul className="clean">
             {donations.map((d) => (
               <li key={d.id}>
                 <span>
                   {d.ref} — {d.donor_name} — {money(d.amount)}
                 </span>
-                <Badge tone={statusTone(d.status)}>
-                  {d.status === 1 ? 'paid' : d.status === 0 ? 'promised' : 'canceled'}
-                </Badge>
+                <Badge tone={statusTone(d.status)}>{donationName(d.status)}</Badge>
                 {d.status === 0 && token && (
                   <button
                     onClick={() =>
                       act(apiExt.setDonationStatus(token, d.id, { status: 1, row_version: d.row_version }))
                     }
                   >
-                    Mark paid
+                    {t('stPaid')}
                   </button>
                 )}
               </li>
             ))}
           </ul>
-          <h4>Record donation</h4>
+          {donations.length === 0 && <p className="muted">{t('noData')}</p>}
+          <h4>{t('newDonation')}</h4>
           <label className="field">
-            Ref <input value={dref} onChange={(e) => setDref(e.target.value)} />
+            {t('ref')} <input value={dref} onChange={(e) => setDref(e.target.value)} />
           </label>
           <label className="field">
-            Donor <input value={ddonor} onChange={(e) => setDdonor(e.target.value)} />
+            {t('user')} <input value={ddonor} onChange={(e) => setDdonor(e.target.value)} />
           </label>
           <label className="field">
-            Amount <input value={damount} onChange={(e) => setDamount(e.target.value)} />
+            {t('amount')} <input value={damount} onChange={(e) => setDamount(e.target.value)} />
           </label>
           <button
             className="primary"
@@ -127,7 +131,7 @@ export function Members() {
               )
             }
           >
-            Record
+            {t('create')}
           </button>
         </Card>
       </div>

@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 
 export function Login() {
   const { signIn } = useAuth();
+  const { t } = useLang();
   const nav = useNavigate();
   const [login, setLogin] = useState('admin');
   const [password, setPassword] = useState('');
@@ -27,11 +29,11 @@ export function Login() {
         <p className="muted">Modern open-source ERP</p>
         <form onSubmit={submit}>
           <label className="field">
-            Login
+            {t('login')}
             <input value={login} onChange={(e) => setLogin(e.target.value)} autoComplete="username" />
           </label>
           <label className="field">
-            Password
+            {t('password')}
             <input
               type="password"
               value={password}
@@ -40,7 +42,7 @@ export function Login() {
             />
           </label>
           <button type="submit" className="primary">
-            Sign in
+            {t('signIn')}
           </button>
         </form>
         {error && (

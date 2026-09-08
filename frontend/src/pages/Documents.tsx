@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { FileUp } from 'lucide-react';
 import { apiExt } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 import { Alert, Card, PageHeader } from '../components/ui';
 
 interface DocMeta {
@@ -14,6 +15,7 @@ interface DocMeta {
 
 export function Documents() {
   const { token } = useAuth();
+  const { t } = useLang();
   const [docs, setDocs] = useState<DocMeta[]>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -45,11 +47,11 @@ export function Documents() {
 
   return (
     <div>
-      <PageHeader icon={<FileUp size={22} />} title="Documents" sub="Object-store files with metadata" />
+      <PageHeader icon={<FileUp size={22} />} title={t('documents')} />
       {error && <Alert>{error}</Alert>}
       {notice && <p className="alert-ok">{notice}</p>}
       <div className="grid two">
-        <Card title="Stored files">
+        <Card title={t('documents')}>
           <ul className="clean">
             {docs.map((d) => (
               <li key={d.id}>
@@ -59,17 +61,17 @@ export function Documents() {
               </li>
             ))}
           </ul>
-          {docs.length === 0 && <p className="muted">No files yet.</p>}
+          {docs.length === 0 && <p className="muted">{t('noData')}</p>}
         </Card>
-        <Card title="Upload">
+        <Card title={t('upload')}>
           <label className="field">
-            Scope <input value={scope} onChange={(e) => setScope(e.target.value)} />
+            {t('scope')} <input value={scope} onChange={(e) => setScope(e.target.value)} />
           </label>
           <label className="field">
-            File <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+            {t('file')} <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
           </label>
           <button className="primary" onClick={upload} disabled={!file}>
-            Upload
+            {t('upload')}
           </button>
         </Card>
       </div>

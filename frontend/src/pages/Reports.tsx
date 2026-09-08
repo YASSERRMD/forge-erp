@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react';
+import { BarChart3 } from 'lucide-react';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
+import { Card, PageHeader } from '../components/ui';
+import { money } from '../components/ui';
 
 export function Reports() {
   const { token } = useAuth();
+  const { t } = useLang();
   const [pnl, setPnl] = useState({ revenue: 0, expense: 0, net: 0 });
   const [receivable, setReceivable] = useState(0);
   useEffect(() => {
@@ -15,17 +20,22 @@ export function Reports() {
         .catch(() => undefined);
     }
   }, [token]);
-  const money = (v: number) => (v / 100).toFixed(2);
   return (
-    <section>
-      <h2>Reports</h2>
-      <h3>Profit &amp; loss (posted entries)</h3>
-      <p>
-        Revenue {money(pnl.revenue)} — Expense {money(pnl.expense)} — Net{' '}
-        {money(pnl.net)}
-      </p>
-      <h3>Receivables</h3>
-      <p>Outstanding {money(receivable)}</p>
-    </section>
+    <div>
+      <PageHeader icon={<BarChart3 size={22} />} title={t('reports')} sub={t('subtitle')} />
+      <div className="grid two">
+        <Card title={t('pnlMix')}>
+          <p>
+            {t('revenue')} {money(pnl.revenue)} — {t('expenseWord')} {money(pnl.expense)} — {t('net')}{' '}
+            {money(pnl.net)}
+          </p>
+        </Card>
+        <Card title={t('receivables')}>
+          <p>
+            {t('balance')} {money(receivable)}
+          </p>
+        </Card>
+      </div>
+    </div>
   );
 }

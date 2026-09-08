@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { apiExt } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 import { Alert, Card, PageHeader } from '../components/ui';
 
 interface UserRow {
@@ -13,6 +14,7 @@ interface UserRow {
 
 export function Admin() {
   const { token } = useAuth();
+  const { t } = useLang();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [error, setError] = useState('');
   const [login, setLogin] = useState('');
@@ -26,9 +28,9 @@ export function Admin() {
 
   return (
     <div>
-      <PageHeader icon={<ShieldCheck size={22} />} title="Administration" sub="Users and access" />
+      <PageHeader icon={<ShieldCheck size={22} />} title={t('admin')} />
       {error && <Alert>{error}</Alert>}
-      <Card title="Users">
+      <Card title={t('user')}>
         <ul className="clean">
           {users.map((u) => (
             <li key={u.id}>
@@ -38,15 +40,16 @@ export function Admin() {
             </li>
           ))}
         </ul>
-        <h4>New user (min 10-char password)</h4>
+        {users.length === 0 && <p className="muted">{t('noData')}</p>}
+        <h4>{t('newUser')}</h4>
         <label className="field">
-          Login <input value={login} onChange={(e) => setLogin(e.target.value)} />
+          {t('login')} <input value={login} onChange={(e) => setLogin(e.target.value)} />
         </label>
         <label className="field">
-          Email <input value={email} onChange={(e) => setEmail(e.target.value)} />
+          {t('email')} <input value={email} onChange={(e) => setEmail(e.target.value)} />
         </label>
         <label className="field">
-          Password <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          {t('password')} <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </label>
         <button
           className="primary"
@@ -61,7 +64,7 @@ export function Admin() {
               .catch((e: Error) => setError(e.message))
           }
         >
-          Create
+          {t('create')}
         </button>
       </Card>
     </div>

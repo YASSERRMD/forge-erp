@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Truck } from 'lucide-react';
 import { apiExt } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 import { Alert, Badge, Card, PageHeader, statusTone } from '../components/ui';
 
 interface PurchaseDoc {
@@ -13,6 +14,7 @@ interface PurchaseDoc {
 
 export function Suppliers() {
   const { token } = useAuth();
+  const { t } = useLang();
   const [docs, setDocs] = useState<PurchaseDoc[]>([]);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('supplier_order');
@@ -39,16 +41,16 @@ export function Suppliers() {
 
   return (
     <div>
-      <PageHeader icon={<Truck size={22} />} title="Suppliers" sub="Orders, receptions and supplier payments" />
+      <PageHeader icon={<Truck size={22} />} title={t('suppliers')} />
       {error && <Alert>{error}</Alert>}
       <Card
-        title="Supplier documents"
+        title={t('suppliers')}
         action={
           <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-            <option value="supplier_order">Orders</option>
-            <option value="supplier_proposal">Price requests</option>
-            <option value="supplier_invoice">Invoices</option>
-            <option value="reception">Receptions</option>
+            <option value="supplier_order">{t('orders')}</option>
+            <option value="supplier_proposal">{t('priceRequests')}</option>
+            <option value="supplier_invoice">{t('invoices')}</option>
+            <option value="reception">{t('receptions')}</option>
           </select>
         }
       >
@@ -60,12 +62,12 @@ export function Suppliers() {
               </span>
               <Badge tone={statusTone(d.status)}>s{d.status}</Badge>
               {d.status === 0 && (
-                <button onClick={() => approve(d.id)}>Approve</button>
+                <button onClick={() => approve(d.id)}>{t('approve')}</button>
               )}
             </li>
           ))}
         </ul>
-        {docs.length === 0 && <p className="muted">No documents of this type.</p>}
+        {docs.length === 0 && <p className="muted">{t('noData')}</p>}
       </Card>
     </div>
   );

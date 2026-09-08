@@ -2,13 +2,8 @@ import { useEffect, useState } from 'react';
 import { BookOpenCheck } from 'lucide-react';
 import { api, apiExt, type Survey, type Tally } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 import { Alert, Badge, Card, PageHeader, statusTone } from '../components/ui';
-
-const surveyStatus: Record<number, string> = {
-  0: 'Draft',
-  1: 'Open',
-  2: 'Closed',
-};
 
 interface Question {
   id: number;
@@ -23,6 +18,7 @@ interface Option {
 
 export function Surveys() {
   const { token, login } = useAuth();
+  const { t } = useLang();
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [error, setError] = useState('');
   const [title, setTitle] = useState('');
@@ -33,6 +29,9 @@ export function Surveys() {
   const [options, setOptions] = useState<Option[]>([]);
   const [olabel, setOlabel] = useState('');
   const [tally, setTally] = useState<Tally[]>([]);
+
+  const surveyName = (s: number) =>
+    s === 0 ? t('stDraft') : s === 1 ? t('stOpen') : t('stClosed');
 
   const reload = () => {
     if (token) api.surveys(token).then(setSurveys).catch(() => undefined);
@@ -70,40 +69,41 @@ export function Surveys() {
 
   return (
     <div>
-      <PageHeader icon={<BookOpenCheck size={22} />} title="Surveys" sub="Polls, ballots and tallies" />
+      <PageHeader icon={<BookOpenCheck size={22} />} title={t('surveys')} />
       {error && <Alert>{error}</Alert>}
       <div className="grid two">
-        <Card title="Surveys">
+        <Card title={t('surveys')}>
           <ul className="clean">
             {surveys.map((s) => (
               <li key={s.id}>
-                <button onClick={() => openSurvey(s.id)} title="Open questions">
+                <button onClick={() => openSurvey(s.id)} title={t('details')}>
                   {s.title}
                 </button>
-                <Badge tone={statusTone(s.status)}>{surveyStatus[s.status] ?? s.status}</Badge>
+                <Badge tone={statusTone(s.status)}>{surveyName(s.status)}</Badge>
                 {s.status === 0 && token && (
                   <button onClick={() => act(api.setSurveyStatus(token, s.id, 1, s.row_version))}>
-                    Open
+                    {t('open')}
                   </button>
                 )}
                 {s.status === 1 && token && (
                   <button onClick={() => act(api.setSurveyStatus(token, s.id, 2, s.row_version))}>
-                    Close
+                    {t('close')}
                   </button>
                 )}
               </li>
             ))}
           </ul>
-          <h4>New survey</h4>
+          {surveys.length === 0 && <p className="muted">{t('noData')}</p>}
+          <h4>{t('newSurvey')}</h4>
           <label className="field">
-            Title <input value={title} onChange={(e) => setTitle(e.target.value)} />
+            {t('title')} <input value={title} onChange={(e) => setTitle(e.target.value)} />
           </label>
           <button className="primary" onClick={() => token && act(api.createSurvey(token, { title }))}>
-            Create
+            {t('create')}
           </button>
         </Card>
-        <Card title={selSurvey ? `Questions (survey ${selSurvey})` : 'Questions'}>
-          {!selSurvey && <p className="muted">Select a survey title above.</p>}
+        <Card title={selSurvey ? `${t('question')} — ${t('surveys')}` : t('question')}>
+          {!selSurvey && <p className="muted">{t('noData')}</p>}
           {selSurvey !== null && (
             <>
               <ul className="clean">
@@ -115,7 +115,7 @@ export function Surveys() {
                 ))}
               </ul>
               <label className="field">
-                New question <input value={qtext} onChange={(e) => setQtext(e.target.value)} />
+                {t('newQuestion')} <input value={qtext} onChange={(e) => setQtext(e.target.value)} />
               </label>
               <button
                 className="primary"
@@ -127,36 +127,34 @@ export function Surveys() {
                   )
                 }
               >
-                Add
+                {t('add')}
               </button>
             </>
           )}
         </Card>
       </div>
       {selQuestion !== null && (
-        <Card title={`Vote & results (question ${selQuestion})`}>
+        <Card title={`${t('votes')} & ${t('details')}`}>
           <ul className="clean">
             {options.map((o) => (
               <li key={o.id}>
                 <span>{o.label}</span>
-                {token && (
-                  <button onClick={() => vote(selQuestion, o.id)}>Vote</button>
-                )}
+                {token && <button onClick={() => vote(selQuestion, o.id)}>{t('votes')}</button>}
               </li>
             ))}
           </ul>
-          <h4>Tally</h4>
+          <h4>{t('votes')}</h4>
           <ul className="clean">
-            {tally.map((t) => (
-              <li key={t.option_id}>
+            {tally.map((x) => (
+              <li key={x.option_id}>
                 <span>
-                  {t.label}: <strong>{t.votes}</strong>
+                  {x.label}: <strong>{x.votes}</strong>
                 </span>
               </li>
             ))}
           </ul>
           <label className="field">
-            New option <input value={olabel} onChange={(e) => setOlabel(e.target.value)} />
+            {t('newOption')} <input value={olabel} onChange={(e) => setOlabel(e.target.value)} />
           </label>
           <button
             onClick={() =>
@@ -167,7 +165,7 @@ export function Surveys() {
               )
             }
           >
-            Add option
+            {t('add')}
           </button>
         </Card>
       )}

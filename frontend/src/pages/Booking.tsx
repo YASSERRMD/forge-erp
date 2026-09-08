@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CalendarDays } from 'lucide-react';
 import { api, apiExt, type Resource } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useLang } from '../i18n/lang';
 import { Alert, Badge, Card, PageHeader, statusTone } from '../components/ui';
 
 interface BookingItem {
@@ -16,6 +17,7 @@ interface BookingItem {
 
 export function Booking() {
   const { token, login } = useAuth();
+  const { t } = useLang();
   const [resources, setResources] = useState<Resource[]>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -65,69 +67,73 @@ export function Booking() {
       .catch((e: Error) => setError(e.message));
   };
 
+  const bookingName = (s: number) =>
+    s === 0 ? t('stBooked') : s === 1 ? t('stCheckedIn') : s === 2 ? t('stCompleted') : t('stCanceled');
+
   return (
     <div>
-      <PageHeader icon={<CalendarDays size={22} />} title="Booking" sub="Resources and reservations" />
+      <PageHeader icon={<CalendarDays size={22} />} title={t('booking')} />
       {error && <Alert>{error}</Alert>}
       {notice && <p className="alert-ok">{notice}</p>}
       <div className="grid two">
-        <Card title="Resources">
+        <Card title={t('booking')}>
           <ul className="clean">
             {resources.map((r) => (
               <li key={r.id}>
                 <span>
-                  {r.code} — {r.label} (cap {r.capacity})
+                  {r.code} — {r.label} ({t('capacity')} {r.capacity})
                 </span>
               </li>
             ))}
           </ul>
-          <h4>New resource</h4>
+          {resources.length === 0 && <p className="muted">{t('noData')}</p>}
+          <h4>{t('newResource')}</h4>
           <label className="field">
-            Code <input value={rcode} onChange={(e) => setRcode(e.target.value)} />
+            {t('code')} <input value={rcode} onChange={(e) => setRcode(e.target.value)} />
           </label>
           <label className="field">
-            Label <input value={rlabel} onChange={(e) => setRlabel(e.target.value)} />
+            {t('label')} <input value={rlabel} onChange={(e) => setRlabel(e.target.value)} />
           </label>
           <label className="field">
-            Capacity <input value={rcap} onChange={(e) => setRcap(e.target.value)} />
+            {t('capacity')} <input value={rcap} onChange={(e) => setRcap(e.target.value)} />
           </label>
           <button
             className="primary"
             onClick={() =>
-              token && act(apiExt.createResource(token, { code: rcode, label: rlabel, capacity: Number(rcap) }), 'Resource created')
+              token && act(apiExt.createResource(token, { code: rcode, label: rlabel, capacity: Number(rcap) }), t('create'))
             }
           >
-            Create
+            {t('create')}
           </button>
         </Card>
-        <Card title="Book & manage">
+        <Card title={t('newBooking')}>
           <label className="field">
-            Resource ID{' '}
+            {t('booking')} ID{' '}
             <input value={resourceId} onChange={(e) => setResourceId(e.target.value)} />
           </label>
           <label className="field">
-            User <input value={user} placeholder={login ?? ''} onChange={(e) => setUser(e.target.value)} />
+            {t('user')} <input value={user} placeholder={login ?? ''} onChange={(e) => setUser(e.target.value)} />
           </label>
           <label className="field">
-            Start <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
+            {t('start')} <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
           </label>
           <label className="field">
-            End <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} />
+            {t('end')} <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} />
           </label>
           <button className="primary" onClick={book}>
-            Book
+            {t('create')}
           </button>{' '}
-          <button onClick={viewBookings}>View bookings</button>
+          <button onClick={viewBookings}>{t('load')}</button>
           <ul className="clean">
             {bookings.map((b) => (
               <li key={b.id}>
                 <span>
-                  {b.user_login} — {new Date(b.start_at).toLocaleString()} ({b.seats} seat
-                  {b.seats > 1 ? 's' : ''}) <Badge tone={statusTone(b.status)}>{b.status === 0 ? 'booked' : b.status === 1 ? 'checked-in' : b.status === 2 ? 'done' : 'canceled'}</Badge>
+                  {b.user_login} — {new Date(b.start_at).toLocaleString()} ({b.seats} {t('seats')}){' '}
+                  <Badge tone={statusTone(b.status)}>{bookingName(b.status)}</Badge>
                 </span>
                 {(b.status === 0 || b.status === 1) && token && (
-                  <button onClick={() => act(api.cancelBooking(token, b.id, b.row_version), 'Canceled')}>
-                    Cancel
+                  <button onClick={() => act(api.cancelBooking(token, b.id, b.row_version), t('cancel'))}>
+                    {t('cancel')}
                   </button>
                 )}
               </li>

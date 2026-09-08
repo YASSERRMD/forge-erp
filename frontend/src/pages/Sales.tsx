@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { FileText } from 'lucide-react';
 import { api, apiExt, type SalesDocument } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
-import { Alert, Badge, Card, PageHeader, statusTone } from '../components/ui';
+import { useLang } from '../i18n/lang';
+import { Alert, Badge, Card, PageHeader, money, statusTone } from '../components/ui';
 
 const TYPES = ['proposal', 'order', 'invoice'] as const;
 
 export function Sales() {
   const { token } = useAuth();
+  const { t } = useLang();
   const [type, setType] = useState<string>('proposal');
   const [docs, setDocs] = useState<SalesDocument[]>([]);
   const [error, setError] = useState('');
@@ -41,15 +43,15 @@ export function Sales() {
 
   return (
     <div>
-      <PageHeader icon={<FileText size={22} />} title="Sales" sub="Quotes, orders and shipments flow" />
+      <PageHeader icon={<FileText size={22} />} title={t('sales')} />
       {error && <Alert>{error}</Alert>}
       <Card
-        title="Commercial documents"
+        title={t('sales')}
         action={
           <select value={type} onChange={(e) => setType(e.target.value)}>
-            {TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
+            {TYPES.map((x) => (
+              <option key={x} value={x}>
+                {x}
               </option>
             ))}
           </select>
@@ -59,29 +61,29 @@ export function Sales() {
           {docs.map((d) => (
             <li key={d.id}>
               <span>
-                {d.ref} — {(d.totals.gross / 100).toFixed(2)}{' '}
+                {d.ref} — {money(d.totals.gross)}{' '}
                 <Badge tone={statusTone(d.status)}>s{d.status}</Badge>
               </span>
               {d.status === 0 && token && (
                 <button onClick={() => act(api.setDocumentStatus(token, d.id, 1))}>
-                  Validate
+                  {t('validate')}
                 </button>
               )}
               {d.status === 1 && convertTarget && token && (
                 <button onClick={() => act(apiExt.convertDoc(token, d.id, { to: convertTarget }))}>
-                  To {convertTarget}
+                  → {convertTarget}
                 </button>
               )}
             </li>
           ))}
         </ul>
-        {docs.length === 0 && <p className="muted">No documents of this type.</p>}
-        <h4>New {type} (sample line, org required)</h4>
+        {docs.length === 0 && <p className="muted">{t('noData')}</p>}
+        <h4>{t('create')} {type}</h4>
         <label className="field">
-          Org ID <input value={org} onChange={(e) => setOrg(e.target.value)} />
+          {t('orgId')} <input value={org} onChange={(e) => setOrg(e.target.value)} />
         </label>
         <button className="primary" onClick={create}>
-          Create draft
+          {t('create')}
         </button>
       </Card>
     </div>
