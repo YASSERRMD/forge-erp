@@ -28,6 +28,7 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("catalog", "product", "read")).Get("/products", h.ListProducts)
 	r.With(mw("catalog", "product", "read")).Get("/products/{id}", h.GetProduct)
 	r.With(mw("catalog", "warehouse", "write")).Post("/warehouses", h.CreateWarehouse)
+	r.With(mw("catalog", "warehouse", "read")).Get("/warehouses", h.ListWarehouses)
 	r.With(mw("catalog", "stock", "write")).Post("/stock-movements", h.AppendMovement)
 	r.With(mw("catalog", "stock", "read")).Get("/stock-levels", h.GetLevel)
 	r.With(mw("catalog", "stock", "write")).Post("/inventory-adjust", h.Adjust)
@@ -134,6 +135,16 @@ func (h *Handler) CreateWarehouse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, wh)
+}
+
+// ListWarehouses lists warehouses within the caller's entity.
+func (h *Handler) ListWarehouses(w http.ResponseWriter, r *http.Request) {
+	list, err := h.deps.Store.ListWarehouses(r.Context(), entityOf(r))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
 }
 
 type movementRequest struct {

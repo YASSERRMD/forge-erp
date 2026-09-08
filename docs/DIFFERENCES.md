@@ -71,6 +71,15 @@ behavioral or structural deviation so auditors can distinguish design from drift
 26. Events: one shared bus process-wide (FERP_BUS_BACKEND=nats selects NATS
     JetStream with durable stream, else in-process memory); at-least-once
     delivery — handlers stay idempotent via status guards and row versions.
+27. Schema repair (verified against real PostgreSQL): migration 0008's file
+    table is `ferp_files` (it duplicated 0005's commercial `ferp_documents`
+    and no database could ever have applied it); NULLable code columns read
+    back via COALESCE so PG scans never fail on NULL.
+28. Multicurrency: board rates (PUT/GET /fx/rates) convert minor units;
+    document snapshots (rate_to_base) remain the audit source.
+29. Portal-lite: bearer share links (POST /documents/{id}/share, 7-day
+    default, 90-day cap) served unauthenticated at /public/share/{token}
+    under the same IP rate limit.
 
 ## Deferred scope (post-Phase-12 candidates)
 

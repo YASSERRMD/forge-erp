@@ -76,7 +76,7 @@ type VariantStore interface {
 	VariantsOf(ctx context.Context, productID int64) ([]Variant, error)
 }
 
-const variantCols = `id, entity_id, product_id, sku, attributes, price_delta, barcode, row_version`
+const variantCols = `id, entity_id, product_id, sku, attributes, price_delta, COALESCE(barcode,''), row_version`
 
 func scanVariant(row pgx.Row) (Variant, error) {
 	var v Variant

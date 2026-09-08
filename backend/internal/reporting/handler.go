@@ -27,6 +27,7 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("reporting", "receivables", "read")).Get("/reports/receivables", h.Receivables)
 	r.With(mw("reporting", "intraeu", "read")).Get("/reports/intra-eu", h.IntraEU)
 	r.With(mw("reporting", "monthly", "read")).Get("/reports/sales-monthly", h.Monthly)
+	r.With(mw("reporting", "margin", "read")).Get("/reports/margins", h.Margins)
 	r.With(mw("reporting", "valuation", "read")).Get("/reports/stock-valuation", h.Valuation)
 }
 
@@ -88,6 +89,16 @@ func (h *Handler) Monthly(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, points)
+}
+
+// Margins serves per-product sales margins.
+func (h *Handler) Margins(w http.ResponseWriter, r *http.Request) {
+	rows, err := ProductMargins(r.Context(), entityOf(r), h.deps.Billing, h.deps.Stock)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "report failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
 }
 
 // Valuation serves PMP stock valuation for one warehouse.

@@ -21,6 +21,7 @@ export function Documents() {
   const [notice, setNotice] = useState('');
   const [scope, setScope] = useState('general');
   const [file, setFile] = useState<File | null>(null);
+  const [link, setLink] = useState('');
 
   const reload = () => {
     if (token) apiExt.listDocuments(token).then((d) => setDocs(d as DocMeta[])).catch(() => undefined);
@@ -58,9 +59,29 @@ export function Documents() {
                 <span>
                   {d.name} — {d.scope} ({d.size} bytes)
                 </span>
+                {token && (
+                  <button
+                    onClick={() =>
+                      apiExt
+                        .shareDocument(token, d.id, { expires_hours: 168 })
+                        .then((s) => {
+                          setLink(`${window.location.origin}/api/v1/public/share/${s.token}`);
+                          setError('');
+                        })
+                        .catch((e: Error) => setError(e.message))
+                    }
+                  >
+                    {t('share')}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
+          {link && (
+            <p className="muted">
+              {t('share')}: <a href={link} target="_blank" rel="noreferrer">{link}</a>
+            </p>
+          )}
           {docs.length === 0 && <p className="muted">{t('noData')}</p>}
         </Card>
         <Card title={t('upload')}>

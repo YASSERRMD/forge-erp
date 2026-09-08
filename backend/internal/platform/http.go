@@ -9,12 +9,14 @@ import (
 )
 
 // Router builds the base HTTP router with platform middleware and health endpoints.
-func Router(build BuildInfo) http.Handler {
+// Extra middlewares must be supplied here (chi panics if Use follows routes).
+func Router(build BuildInfo, middlewares ...func(http.Handler) http.Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(SecurityHeaders)
+	r.Use(middlewares...)
 
 	r.Get("/healthz", HealthHandler(build, false))
 	r.Get("/readyz", HealthHandler(build, true))

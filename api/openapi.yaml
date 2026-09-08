@@ -130,9 +130,14 @@ paths:
         '409': { description: Duplicate SKU }
         '422': { description: Validation failed }
   /api/v1/warehouses:
+    get:
+      operationId: listWarehouses
+      summary: List warehouses (requires catalog.warehouse.read)
+      responses:
+        '200': { description: List }
     post:
       operationId: createWarehouse
-      summary: Open a warehouse (requires catalog.warehouse.write)
+      summary: Create a warehouse (requires catalog.warehouse.write)
       responses:
         '201': { description: Created }
   /api/v1/stock-movements:
@@ -563,6 +568,44 @@ paths:
       summary: 12-month invoice revenue series (requires reporting.monthly.read)
       responses:
         '200': { description: Points }
+  /api/v1/reports/margins:
+    get:
+      operationId: productMargins
+      summary: Per-product sales margins at PMP (requires reporting.margin.read)
+      responses:
+        '200': { description: Rows }
+  /api/v1/fx/rates:
+    get:
+      operationId: listRates
+      summary: List board rates (requires fx.rate.read)
+      responses:
+        '200': { description: List }
+    post:
+      operationId: setRate
+      summary: Upsert a board rate (requires fx.rate.write)
+      responses:
+        '200': { description: Saved }
+        '422': { description: Bad code or rate }
+  /api/v1/fx/convert:
+    get:
+      operationId: convertCurrency
+      summary: Convert minor units between board currencies (requires fx.rate.read)
+      responses:
+        '200': { description: Conversion }
+        '422': { description: Unknown currency }
+  /api/v1/documents/{id}/share:
+    post:
+      operationId: shareDocument
+      summary: Mint a bearer link (requires documents.file.write)
+      responses:
+        '201': { description: Token }
+  /api/v1/public/share/{token}:
+    get:
+      operationId: publicShare
+      summary: Bearer-link download, no auth (token is the credential)
+      responses:
+        '200': { description: Bytes }
+        '404': { description: Unknown or expired }
   /api/v1/sepa/batches:
     get:
       operationId: listSepaBatches

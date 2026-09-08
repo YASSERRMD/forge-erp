@@ -19,6 +19,7 @@ type Store interface {
 	ListProducts(ctx context.Context, entityID int64, limit, offset int) ([]Product, error)
 	CreateWarehouse(ctx context.Context, w *Warehouse) error
 	WarehouseByID(ctx context.Context, id int64) (Warehouse, error)
+	ListWarehouses(ctx context.Context, entityID int64) ([]Warehouse, error)
 	// AppendMovement validates, appends the ledger line, and advances the level
 	// atomically (PG) — the negative-stock guard lives in Apply.
 	AppendMovement(ctx context.Context, m *StockMovement, allowNegative bool) (StockLevel, error)
@@ -109,6 +110,24 @@ func (s *PGStore) WarehouseByID(ctx context.Context, id int64) (Warehouse, error
 		return Warehouse{}, identity.ErrNotFound
 	}
 	return w, err
+}
+
+func (s *PGStore) ListWarehouses(ctx context.Context, entityID int64) ([]Warehouse, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, code, label, status, created_at, updated_at
+		FROM ferp_warehouses WHERE entity_id=$1 ORDER BY code`, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Warehouse
+	for rows.Next() {
+		var w Warehouse
+		if err := rows.Scan(&w.ID, &w.EntityID, &w.Code, &w.Label, &w.Status, &w.CreatedAt, &w.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
 }
 
 func (s *PGStore) Level(ctx context.Context, productID, warehouseID int64) (StockLevel, error) {
@@ -258,6 +277,18 @@ func (m *MemoryStore) WarehouseByID(_ context.Context, id int64) (Warehouse, err
 		return Warehouse{}, identity.ErrNotFound
 	}
 	return w, nil
+}
+
+func (m *MemoryStore) ListWarehouses(_ context.Context, entityID int64) ([]Warehouse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Warehouse
+	for _, w := range m.houses {
+		if w.EntityID == entityID {
+			out = append(out, w)
+		}
+	}
+	return out, nil
 }
 
 func (m *MemoryStore) AppendMovement(_ context.Context, mov *StockMovement, allowNegative bool) (StockLevel, error) {

@@ -23,6 +23,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/documentsvc"
 	"github.com/YASSERRMD/forge-erp/backend/internal/events"
 	"github.com/YASSERRMD/forge-erp/backend/internal/finance"
+	"github.com/YASSERRMD/forge-erp/backend/internal/fx"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/kb"
 	"github.com/YASSERRMD/forge-erp/backend/internal/hr"
@@ -175,7 +176,7 @@ func run() error {
 		searcher = mem
 	}
 
-	base := platform.Router(build)
+	base := platform.Router(build, metrics.Instrument)
 	mux, ok := base.(chi.Router)
 	if !ok {
 		return errors.New("platform router is not a chi router")
@@ -230,7 +231,6 @@ func run() error {
 		log.Print("forgeerp: FERP_OIDC_ISSUER unset; SSO login disabled (dev JWT only)")
 	}
 	idH := identity.NewHandler(identDeps)
-	mux.Use(metrics.Instrument)
 	// Abuse caps: 20 rps burst 40 per IP across the API (login endpoints additionally
 	// guarded by per-account lockout in the identity context).
 	apiLimiter := platform.NewRateLimiter(20, 40)
@@ -280,6 +280,8 @@ func run() error {
 			idH.Require)
 		dataio.Routes(r, dataio.Deps{Orgs: pstore, Products: cstore, Bus: bus},
 			idH.Require)
+		fx.Routes(r, fx.Deps{Store: fx.NewPGStore(pool), Bus: bus}, idH.Require)
+		fx.Routes(r, fx.Deps{Store: fx.NewPGStore(pool), Bus: bus}, idH.Require)
 		sepa.Routes(r, sepa.Deps{Store: sepa.NewPGStore(pool), Bus: bus},
 			idH.Require)
 		inbound.Routes(r, inbound.Deps{Store: inbound.NewPGStore(pool), Tickets: svcstore, Bus: bus},
@@ -306,6 +308,9 @@ func run() error {
 		search.Routes(r, searcher, idH.Require)
 	})
 	mux.Handle("/metrics", metrics.Handler(build))
+	// Public bearer-link downloads (portal-lite). Rate-limited like the API,
+	// but outside RBAC: the unguessable token is the credential.
+	mux.With(apiLimiter.Limit).Get("/public/share/{token}", documentsvc.PublicShare(docSvc))
 	handler := mux
 	srv := &http.Server{
 		Addr:         ":" + cfg.HTTPPort,
