@@ -2,7 +2,7 @@
 -- Dolibarr equivalents: llx_ecm_files (+documents/ dir), llx_notify/notify_def,
 -- llx_cronjob, webhook module targets.
 
-CREATE TABLE ferp_documents (
+CREATE TABLE ferp_files (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     entity_id   BIGINT NOT NULL REFERENCES ferp_entities(id),
     scope       TEXT NOT NULL,                            -- sales|purchase|partners|...
@@ -16,7 +16,7 @@ CREATE TABLE ferp_documents (
     created_by  BIGINT,
     CHECK (size >= 0)
 );
-CREATE INDEX ferp_docs_scope_idx ON ferp_documents (entity_id, scope, object_id);
+CREATE INDEX ferp_files_scope_idx ON ferp_files (entity_id, scope, object_id);
 
 CREATE TABLE ferp_notify_templates (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

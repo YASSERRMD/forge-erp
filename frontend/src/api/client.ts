@@ -400,6 +400,13 @@ export const apiExt = {
   createLoan: (t: string, body: unknown) => post<unknown>(t, '/api/v1/finance/loans', body),
   // documents
   listDocuments: (t: string) => get<unknown[]>(t, '/api/v1/documents?limit=50'),
+  shareDocument: (t: string, id: number, body: unknown) =>
+    post<{ token: string }>(t, `/api/v1/documents/${id}/share`, body),
+  margins: (t: string) =>
+    request<Array<{ product_id: number; sku: string; qty: number; revenue: number; cost: number; margin: number; margin_pct: number }>>(
+      t,
+      '/api/v1/reports/margins',
+    ),
   uploadDocument: (t: string, form: FormData) =>
     fetch(apiUrl('/api/v1/documents/upload'), {
       method: 'POST',

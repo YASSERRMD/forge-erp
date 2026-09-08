@@ -25,7 +25,7 @@ type PGStore struct{ pool *pgxpool.Pool }
 // NewPGStore wraps a pool.
 func NewPGStore(pool *pgxpool.Pool) *PGStore { return &PGStore{pool: pool} }
 
-const attemptCols = `id, entity_id, ref, org_id, invoice_id, amount, currency, provider, status, webhook_key, created_at, updated_at, row_version`
+const attemptCols = `id, entity_id, ref, org_id, invoice_id, amount, currency, provider, status, COALESCE(webhook_key,''), created_at, updated_at, row_version`
 
 func scanAttempt(row pgx.Row) (PaymentAttempt, error) {
 	var a PaymentAttempt

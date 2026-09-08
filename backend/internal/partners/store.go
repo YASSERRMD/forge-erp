@@ -30,7 +30,7 @@ type PGStore struct{ pool *pgxpool.Pool }
 func NewPGStore(pool *pgxpool.Pool) *PGStore { return &PGStore{pool: pool} }
 
 const orgCols = `id, entity_id, name, alias, ref_ext, parent_id, status, is_customer,
-	is_supplier, is_prospect, customer_code, supplier_code, email, phone, address,
+	is_supplier, is_prospect, COALESCE(customer_code,''), COALESCE(supplier_code,''), email, phone, address,
 	acct_customer, acct_supplier, custom_fields, created_at, updated_at,
 	created_by, updated_by, row_version`
 

@@ -30,6 +30,7 @@ type Billing interface {
 type Stock interface {
 	ListProducts(ctx context.Context, entityID int64, limit, offset int) ([]catalog.Product, error)
 	Level(ctx context.Context, productID, warehouseID int64) (catalog.StockLevel, error)
+	ListWarehouses(ctx context.Context, entityID int64) ([]catalog.Warehouse, error)
 }
 
 // AccountLine is one P&L row (balance signed: revenue/equity/liability as
@@ -126,7 +127,86 @@ func SalesMonthly(ctx context.Context, entityID int64, billing Billing) ([]Month
 	return out, nil
 }
 
+// MarginLine is one product's sales margin (Dolibarr margin module):
+// invoiced net revenue minus cost of goods valued at PMP.
+type MarginLine struct {
+	ProductID int64  `json:"product_id"`
+	SKU       string `json:"sku"`
+	Qty       int64  `json:"qty"`
+	Revenue   int64  `json:"revenue"`
+	Cost      int64  `json:"cost"`
+	Margin    int64  `json:"margin"`
+	MarginPct int64  `json:"margin_pct"` // basis points of revenue
+}
+
+// ProductMargins computes margins from validated invoices and PMP levels.
+// Cost uses the quantity-weighted PMP across warehouses.
+func ProductMargins(ctx context.Context, entityID int64, billing Billing, stock Stock) ([]MarginLine, error) {
+	docs, err := billing.ListDocs(ctx, entityID, documents.TypeInvoice, 500, 0)
+	if err != nil {
+		return nil, err
+	}
+	type agg struct {
+		sku string
+		qty int64
+		rev int64
+	}
+	byProduct := map[int64]*agg{}
+	for _, d := range docs {
+		if d.Status == sales.InvoiceDraft || d.Status == 9 {
+			continue
+		}
+		for _, l := range d.Lines {
+			a, ok := byProduct[l.ProductID]
+			if !ok {
+				a = &agg{}
+				byProduct[l.ProductID] = a
+			}
+			a.qty += l.Qty
+			a.rev += l.Qty * l.UnitNet
+		}
+	}
+	warehouses, err := stock.ListWarehouses(ctx, entityID)
+	if err != nil {
+		return nil, err
+	}
+	prods, err := stock.ListProducts(ctx, entityID, 500, 0)
+	if err != nil {
+		return nil, err
+	}
+	skuOf := map[int64]string{}
+	for _, p := range prods {
+		skuOf[p.ID] = p.SKU
+	}
+	out := make([]MarginLine, 0, len(byProduct))
+	for pid, a := range byProduct {
+		var qty, value int64
+		for _, w := range warehouses {
+			lvl, err := stock.Level(ctx, pid, w.ID)
+			if err != nil {
+				return nil, err
+			}
+			qty += lvl.Qty
+			value += lvl.TotalValue
+		}
+		var pmp int64
+		if qty > 0 {
+			pmp = (value + qty/2) / qty
+		}
+		cost := pmp * a.qty
+		margin := a.rev - cost
+		var pct int64
+		if a.rev > 0 {
+			pct = margin * 10000 / a.rev
+		}
+	out = append(out, MarginLine{ProductID: pid, SKU: skuOf[pid],
+		Qty: a.qty, Revenue: a.rev, Cost: cost, Margin: margin, MarginPct: pct})
+	return out, nil
+}
+
 // Receivable is one unpaid invoice balance.
+	return out, nil
+}
 type Receivable struct {
 	InvoiceID int64  `json:"invoice_id"`
 	Ref       string `json:"ref"`

@@ -140,13 +140,16 @@ type Store interface {
 
 // MemoryStore is the in-process metadata fake.
 type MemoryStore struct {
-	mu   sync.Mutex
-	seq  int64
-	docs map[int64]Document
+	mu     sync.Mutex
+	seq    int64
+	docs   map[int64]Document
+	shares map[string]ShareToken
 }
 
 // NewMemoryStore builds an empty fake.
-func NewMemoryStore() *MemoryStore { return &MemoryStore{docs: map[int64]Document{}} }
+func NewMemoryStore() *MemoryStore {
+	return &MemoryStore{docs: map[int64]Document{}, shares: map[string]ShareToken{}}
+}
 
 // Service couples metadata with byte storage.
 type Service struct {
