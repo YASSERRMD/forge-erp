@@ -511,13 +511,15 @@ func seedDemoSales(ctx context.Context, sstore *sales.PGStore, pstore *partners.
 }
 
 // seedDemoFinance inserts a minimal chart of accounts, journals, an open fiscal
-// year, and a demo bank account. Development/demo only.
+// year, and a demo bank account. Development/demo only. Idempotent: skips when
+// any chart accounts exist (trial balance stays empty until entries post, so it
+// must not be used as the emptiness check).
 func seedDemoFinance(ctx context.Context, store *finance.PGStore) error {
-	tb, err := store.TrialBalance(ctx, 1)
+	existing, err := store.Accounts(ctx, 1)
 	if err != nil {
 		return err
 	}
-	if len(tb) > 0 {
+	if len(existing) > 0 {
 		return nil
 	}
 	accts := []finance.Account{
