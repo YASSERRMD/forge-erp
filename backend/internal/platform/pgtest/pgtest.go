@@ -58,3 +58,15 @@ func Pool(t *testing.T) *pgxpool.Pool {
 	})
 	return pool
 }
+
+// NewEntity inserts an extra tenant and returns its id (cross-tenant tests).
+func NewEntity(t *testing.T, pool *pgxpool.Pool, code string) int64 {
+	t.Helper()
+	var id int64
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO ferp_entities (code, label) VALUES ($1,$2) RETURNING id`,
+		code, code).Scan(&id); err != nil {
+		t.Fatalf("pgtest: new entity: %v", err)
+	}
+	return id
+}

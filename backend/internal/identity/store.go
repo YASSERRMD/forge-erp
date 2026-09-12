@@ -22,7 +22,7 @@ var ErrVersionConflict = errors.New("identity: row version conflict")
 // PGStore implements it against PostgreSQL; MemoryStore is the test fake.
 type Store interface {
 	CreateUser(ctx context.Context, u *User) error
-	UserByID(ctx context.Context, id int64) (User, error)
+	UserByID(ctx context.Context, entityID, id int64) (User, error)
 	UserByLogin(ctx context.Context, entityID int64, login string) (User, error)
 	UserByEmail(ctx context.Context, entityID int64, email string) (User, error)
 	ListUsers(ctx context.Context, entityID int64, limit, offset int) ([]User, error)
@@ -69,8 +69,8 @@ func scanUser(row pgx.Row) (User, error) {
 const userCols = `id, entity_id, login, email, first_name, last_name, status, password_hash,
 	is_admin, failed_attempts, locked_until, created_at, updated_at, created_by, updated_by, row_version`
 
-func (s *PGStore) UserByID(ctx context.Context, id int64) (User, error) {
-	return scanUser(s.pool.QueryRow(ctx, `SELECT `+userCols+` FROM ferp_users WHERE id=$1`, id))
+func (s *PGStore) UserByID(ctx context.Context, entityID, id int64) (User, error) {
+	return scanUser(s.pool.QueryRow(ctx, `SELECT `+userCols+` FROM ferp_users WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 func (s *PGStore) ListUsers(ctx context.Context, entityID int64, limit, offset int) ([]User, error) {
@@ -275,11 +275,11 @@ func (m *MemoryStore) CreateUser(_ context.Context, u *User) error {
 
 func key(entityID int64, login string) string { return fmt.Sprintf("%d\x00%s", entityID, login) }
 
-func (m *MemoryStore) UserByID(_ context.Context, id int64) (User, error) {
+func (m *MemoryStore) UserByID(_ context.Context, entityID, id int64) (User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	u, ok := m.users[id]
-	if !ok {
+	if !ok || u.EntityID != entityID {
 		return User{}, ErrNotFound
 	}
 	return u, nil

@@ -113,7 +113,7 @@ func (h *Handler) Require(module, entity, action string) func(http.Handler) http
 				writeErr(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
-			u, err := h.deps.Store.UserByID(r.Context(), claims.Subject)
+			u, err := h.deps.Store.UserByID(r.Context(), claims.EntityID, claims.Subject)
 			if err != nil {
 				writeErr(w, http.StatusUnauthorized, "unauthorized")
 				return
@@ -368,7 +368,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	u, err := h.deps.Store.UserByID(r.Context(), id)
+	u, err := h.deps.Store.UserByID(r.Context(), entityOf(r), id)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "user not found")
 		return
@@ -438,7 +438,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	u, err := h.deps.Store.UserByID(r.Context(), id)
+	u, err := h.deps.Store.UserByID(r.Context(), entityOf(r), id)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "user not found")
 		return

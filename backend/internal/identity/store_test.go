@@ -104,3 +104,20 @@ func TestPGStoreUsers(t *testing.T) {
 		t.Error("duplicate login accepted on PG")
 	}
 }
+
+func TestPGCrossTenantLookup(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
+	other := pgtest.NewEntity(t, pool, "otherco")
+	u := &User{EntityID: 1, Login: "tenant-a", Email: "a@example.com", Status: UserActive}
+	if err := st.CreateUser(ctx, u); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := st.UserByID(ctx, other, u.ID); err == nil {
+		t.Error("cross-tenant lookup succeeded on PG")
+	}
+	if _, err := st.UserByID(ctx, 1, u.ID); err != nil {
+		t.Fatalf("own-tenant lookup failed: %v", err)
+	}
+}
