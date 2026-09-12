@@ -1,6 +1,8 @@
-// Package e2e scripts the end-to-end business chains against in-memory stores:
-// quote-to-cash, procure-to-pay, and ledger posting with a balanced trial.
-// It runs without external services (DB-gated coverage lives in CI with Postgres).
+// Package e2e scripts the end-to-end business chains twice: once against
+// in-memory stores (always runs, no services needed) and once against real
+// PostgreSQL via pgtest (skipped without TEST_DATABASE_URL, runs in CI).
+// Chains: quote-to-cash, procure-to-pay, and ledger posting with a balanced
+// trial.
 package e2e
 
 import (
@@ -12,15 +14,28 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/finance"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/YASSERRMD/forge-erp/backend/internal/procurement"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 )
 
 func TestEndToEndChains(t *testing.T) {
+	t.Run("memory", func(t *testing.T) {
+		runChains(t,
+			partners.NewMemoryStore(), catalog.NewMemoryStore(), sales.NewMemoryStore(),
+			procurement.NewMemoryStore(), finance.NewMemoryStore())
+	})
+	t.Run("postgres", func(t *testing.T) {
+		pool := pgtest.Pool(t)
+		runChains(t,
+			partners.NewPGStore(pool), catalog.NewPGStore(pool), sales.NewPGStore(pool),
+			procurement.NewPGStore(pool), finance.NewPGStore(pool))
+	})
+}
+
+func runChains(t *testing.T, pst partners.Store, cst catalog.Store, sst sales.Store, procst procurement.Store, fst finance.Store) {
 	ctx := context.Background()
 	ym, now := "202609", time.Now().UTC()
-	pst, cst := partners.NewMemoryStore(), catalog.NewMemoryStore()
-	sst, procst, fst := sales.NewMemoryStore(), procurement.NewMemoryStore(), finance.NewMemoryStore()
 
 	// Master data.
 	cust := &partners.Organization{EntityID: 1, Name: "Acme", IsCustomer: true, CustomerCode: "ACME"}
@@ -172,21 +187,21 @@ func TestEndToEndChains(t *testing.T) {
 	}
 }
 
-func mustCreateSales(t *testing.T, ctx context.Context, s *sales.MemoryStore, d *sales.Document, ym string) {
+func mustCreateSales(t *testing.T, ctx context.Context, s sales.Store, d *sales.Document, ym string) {
 	t.Helper()
 	if err := s.CreateDoc(ctx, d, ym); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func mustStatusSales(t *testing.T, ctx context.Context, s *sales.MemoryStore, id int64, to int16) {
+func mustStatusSales(t *testing.T, ctx context.Context, s sales.Store, id int64, to int16) {
 	t.Helper()
 	if _, err := s.SetStatus(ctx, id, to); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func mustConvertSales(t *testing.T, ctx context.Context, s *sales.MemoryStore, src sales.Document, to documents.DocType, ym string) *sales.Document {
+func mustConvertSales(t *testing.T, ctx context.Context, s sales.Store, src sales.Document, to documents.DocType, ym string) *sales.Document {
 	t.Helper()
 	next, err := sales.Convert(src, to)
 	if err != nil {

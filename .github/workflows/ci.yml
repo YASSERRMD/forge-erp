@@ -7,6 +7,17 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: forgeerp
+          POSTGRES_PASSWORD: forgeerp
+          POSTGRES_DB: forgeerp_test
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+        ports: ["5432:5432"]
+    env:
+      TEST_DATABASE_URL: postgres://forgeerp:forgeerp@localhost:5432/forgeerp_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -16,7 +27,7 @@ jobs:
         run: |
           go build ./...
           go vet ./...
-          go test ./...
+          go test -race ./...
 
   frontend:
     runs-on: ubuntu-latest
