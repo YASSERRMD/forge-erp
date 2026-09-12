@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -71,5 +72,25 @@ func TestShareRoundTrip(t *testing.T) {
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("bogus: code=%d want 404", rec.Code)
+	}
+}
+
+func TestPGShareRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
+	d := &Document{EntityID: 1, Scope: "sales", ObjectID: 1, Name: "pg.pdf",
+		MIME: "application/pdf", Size: 3, SHA256: "x", StorageKey: "pg/1.pdf"}
+	if err := st.Create(ctx, d); err != nil {
+		t.Fatalf("doc: %v", err)
+	}
+	tok, _ := MintToken()
+	if err := st.CreateShare(ctx, &ShareToken{Token: tok, EntityID: 1,
+		DocID: d.ID, ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+	got, err := st.ShareTarget(ctx, tok)
+	if err != nil || got.DocID != d.ID {
+		t.Fatalf("target=%+v err=%v", got, err)
 	}
 }

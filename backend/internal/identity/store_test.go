@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
 // TestMemoryStoreCRUD exercises the fake through the Store contract so handler
@@ -73,5 +75,32 @@ func TestMemoryStoreCRUD(t *testing.T) {
 	}
 	if _, err := st.SessionUser(ctx, "tokhash", time.Now()); err != ErrNotFound {
 		t.Fatal("revoked session should miss")
+	}
+}
+
+func TestPGStoreUsers(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	u := &User{EntityID: 1, Login: "pgamina", Email: "pgamina@example.com", Status: UserActive}
+	if err := st.CreateUser(ctx, u); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if u.ID == 0 || u.RowVersion == 0 {
+		t.Fatalf("not populated: %+v", u)
+	}
+	got, err := st.UserByLogin(ctx, 1, "pgamina")
+	if err != nil || got.Email != "pgamina@example.com" {
+		t.Fatalf("by login: %+v %v", got, err)
+	}
+	if _, err := st.UserByEmail(ctx, 1, "pgamina@example.com"); err != nil {
+		t.Fatalf("by email: %v", err)
+	}
+	list, err := st.ListUsers(ctx, 1, 50, 0)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list=%d err=%v", len(list), err)
+	}
+	dup := &User{EntityID: 1, Login: "pgamina", Email: "other@example.com", Status: UserActive}
+	if err := st.CreateUser(ctx, dup); err == nil {
+		t.Error("duplicate login accepted on PG")
 	}
 }

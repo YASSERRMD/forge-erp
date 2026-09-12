@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
 func TestProjectTransitions(t *testing.T) {
@@ -160,5 +162,26 @@ func TestMemoryContractDates(t *testing.T) {
 	}
 	if orgs, _ := m.ContractsOfOrg(ctx, 7); len(orgs) != 1 {
 		t.Errorf("contracts of org=%d want 1", len(orgs))
+	}
+}
+
+func TestPGProjectLifecycle(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	p := &Project{EntityID: 1, Ref: "PG-P1", Label: "PG Project"}
+	if err := st.CreateProject(ctx, p); err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	tk := &Task{EntityID: 1, ProjectID: p.ID, Label: "PG Task"}
+	if err := st.CreateTask(ctx, tk); err != nil {
+		t.Fatalf("task: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := st.AddTime(ctx, &TimeEntry{EntityID: 1, ProjectID: p.ID, TaskID: tk.ID,
+		Author: "ada", Hours: 120, EntryDate: now}); err != nil {
+		t.Fatalf("time: %v", err)
+	}
+	if h, _ := st.ProjectHours(ctx, p.ID); h != 120 {
+		t.Fatalf("hours=%d", h)
 	}
 }

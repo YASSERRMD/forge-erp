@@ -1,6 +1,7 @@
 package dataio
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
 func passthrough(_, _, _ string) func(http.Handler) http.Handler {
@@ -73,5 +75,18 @@ func TestProductRoundTrip(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if !strings.Contains(rec.Body.String(), "WID-1,Widget,0,unit,19.90,2000,true") {
 		t.Fatalf("export=%q", rec.Body.String())
+	}
+}
+
+func TestPGOrgRoundTrip(t *testing.T) {
+	pool := pgtest.Pool(t)
+	pst := partners.NewPGStore(pool)
+	o := &partners.Organization{EntityID: 1, Name: "PG IO", IsCustomer: true, CustomerCode: "PGIO"}
+	if err := pst.CreateOrg(context.Background(), o); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	list, err := pst.ListOrgs(context.Background(), 1, 50, 0)
+	if err != nil || len(list) != 1 || list[0].CustomerCode != "PGIO" {
+		t.Fatalf("list=%+v err=%v", list, err)
 	}
 }

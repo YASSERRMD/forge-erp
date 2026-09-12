@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -121,5 +122,27 @@ func TestWorkerRunOnce(t *testing.T) {
 	}
 	if n, _ := w.RunOnce(ctx); n != 0 {
 		t.Fatalf("second run=%d want 0", n)
+	}
+}
+
+func TestPGEventFlow(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	now := time.Now().UTC().Truncate(time.Second)
+	e := &Event{EntityID: 1, Title: "PG Meet", OwnerLogin: "ada",
+		StartAt: now.Add(time.Hour), EndAt: now.Add(2 * time.Hour), ReminderMin: 30}
+	if err := st.CreateEvent(ctx, e); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	list, err := st.ListEvents(ctx, 1, now, now.Add(3*time.Hour), 50, 0)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list=%d err=%v", len(list), err)
+	}
+	due, err := st.DueRemindersAll(ctx, now.Add(50*time.Minute), 50)
+	if err != nil || len(due) != 1 {
+		t.Fatalf("due=%d err=%v", len(due), err)
+	}
+	if err := st.MarkReminded(ctx, e.ID); err != nil {
+		t.Fatalf("mark: %v", err)
 	}
 }

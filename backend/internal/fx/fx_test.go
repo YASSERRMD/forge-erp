@@ -2,11 +2,13 @@ package fx
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -72,5 +74,21 @@ func TestBoardAPI(t *testing.T) {
 	_ = json.NewDecoder(rec.Body).Decode(&list)
 	if len(list) != 2 {
 		t.Fatalf("rates=%d want 2 (USD seed + EUR)", len(list))
+	}
+}
+
+func TestPGBoardRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	if err := st.SetRate(ctx, &Rate{EntityID: 1, Code: "EUR", RateToBase: 1080000}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	got, err := st.RateByCode(ctx, 1, "eur")
+	if err != nil || got.RateToBase != 1080000 {
+		t.Fatalf("get=%+v err=%v", got, err)
+	}
+	list, err := st.ListRates(ctx, 1)
+	if err != nil || len(list) < 4 {
+		t.Fatalf("list=%d err=%v (seed 3 + EUR)", len(list), err)
 	}
 }

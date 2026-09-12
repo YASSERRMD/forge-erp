@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -104,5 +105,29 @@ func TestMembersAPI(t *testing.T) {
 	rec = post("/api/v1/members/9999/status", map[string]any{"status": 1, "row_version": 1})
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("missing: code=%d want 404", rec.Code)
+	}
+}
+
+func TestPGMemberFlow(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	ty := &MemberType{EntityID: 1, Code: "PG", Label: "PG", AnnualFee: 100}
+	if err := st.CreateType(ctx, ty); err != nil {
+		t.Fatalf("type: %v", err)
+	}
+	mb := &Member{EntityID: 1, Ref: "PG-M", TypeID: ty.ID, FirstName: "A"}
+	if err := st.CreateMember(ctx, mb); err != nil {
+		t.Fatalf("member: %v", err)
+	}
+	if _, err := st.SetMemberStatus(ctx, mb.ID, MemberActive, mb.RowVersion); err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+	d := &Donation{EntityID: 1, Ref: "PG-D", DonorName: "G", Amount: 500,
+		DonatedAt: time.Now().UTC(), Method: "transfer"}
+	if err := st.CreateDonation(ctx, d); err != nil {
+		t.Fatalf("donation: %v", err)
+	}
+	if _, err := st.SetDonationStatus(ctx, d.ID, DonationPaid, d.RowVersion); err != nil {
+		t.Fatalf("pay: %v", err)
 	}
 }

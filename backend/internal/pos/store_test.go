@@ -3,6 +3,8 @@ package pos
 import (
 	"context"
 	"testing"
+
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
 func TestMemoryTerminalSession(t *testing.T) {
@@ -44,5 +46,22 @@ func TestMemoryTerminalSession(t *testing.T) {
 	}
 	if list, _ := m.SalesOfSession(ctx, se.ID); len(list) != 1 {
 		t.Fatalf("sales=%d want 1", len(list))
+	}
+}
+
+func TestPGTerminalSession(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	term := &Terminal{EntityID: 1, Code: "PGT1", Label: "Till", WarehouseID: 1, Status: TerminalActive}
+	if err := st.CreateTerminal(ctx, term); err != nil {
+		t.Fatalf("terminal: %v", err)
+	}
+	se := &Session{EntityID: 1, TerminalID: term.ID, Cashier: "ada"}
+	if err := st.OpenSession(ctx, se); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	closed, err := st.CloseSession(ctx, se.ID, se.RowVersion)
+	if err != nil || closed.Status != SessionClosed {
+		t.Fatalf("close: %+v %v", closed, err)
 	}
 }

@@ -3,6 +3,8 @@ package partners
 import (
 	"context"
 	"testing"
+
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
 func TestMemoryStoreOrgs(t *testing.T) {
@@ -61,5 +63,39 @@ func TestMemoryStoreContacts(t *testing.T) {
 	list, err := st.ContactsOf(ctx, o.ID)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("contacts: %v (len=%d)", list, len(list))
+	}
+}
+
+func TestPGStoreOrgs(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	a := &Organization{EntityID: 1, Name: "PG Acme", IsCustomer: true, CustomerCode: "PG-1"}
+	if err := st.CreateOrg(ctx, a); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := st.OrgByID(ctx, a.ID)
+	if err != nil || got.Name != "PG Acme" {
+		t.Fatalf("by id: %+v %v", got, err)
+	}
+	list, err := st.ListOrgs(ctx, 1, 50, 0)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list=%d err=%v", len(list), err)
+	}
+	c := &Contact{EntityID: 1, OrgID: a.ID, FirstName: "Ada", LastName: "L", Role: "billing"}
+	if err := st.CreateContact(ctx, c); err != nil {
+		t.Fatalf("contact: %v", err)
+	}
+	contacts, err := st.ContactsOf(ctx, a.ID)
+	if err != nil || len(contacts) != 1 {
+		t.Fatalf("contacts=%d err=%v", len(contacts), err)
+	}
+	a.Name = "PG Acme II"
+	if err := st.UpdateOrg(ctx, a); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	stale := *a
+	stale.RowVersion--
+	if err := st.UpdateOrg(ctx, &stale); err == nil {
+		t.Error("stale version accepted on PG")
 	}
 }

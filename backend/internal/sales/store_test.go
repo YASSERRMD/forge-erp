@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
 func TestMemoryStoreChain(t *testing.T) {
@@ -75,5 +76,32 @@ func TestMemoryStoreChain(t *testing.T) {
 	pay3 := &Payment{EntityID: 1, OrgID: 7, Amount: 10, Currency: "USD", PaidAt: time.Now().UTC()}
 	if _, err := st.RecordPayment(ctx, pay3, []int64{invDoc.ID}, ym); err == nil {
 		t.Fatal("payment on settled invoice accepted")
+	}
+}
+
+func TestPGStoreChain(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	ym := "202609"
+	d := &Document{EntityID: 1, Type: documents.TypeInvoice, OrgID: 1, Currency: "USD",
+		RateToBase: 1000000,
+		Lines: []documents.Line{{ProductID: 1, Label: "W", Qty: 1, UnitNet: 1000, VATRateBps: 2000}}}
+	if err := st.CreateDoc(ctx, d, ym); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if d.Ref == "" || d.Totals.Gross != 1200 {
+		t.Fatalf("doc=%+v", d)
+	}
+	if _, err := st.SetStatus(ctx, d.ID, InvoiceValidated); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	pay := &Payment{EntityID: 1, OrgID: 1, Amount: 1200, Currency: "USD",
+		Method: "transfer", PaidAt: time.Now().UTC()}
+	if _, err := st.RecordPayment(ctx, pay, []int64{d.ID}, ym); err != nil {
+		t.Fatalf("pay: %v", err)
+	}
+	bal, err := st.InvoiceBalance(ctx, d.ID)
+	if err != nil || bal != 0 {
+		t.Fatalf("balance=%d err=%v", bal, err)
 	}
 }

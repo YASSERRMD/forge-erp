@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
 func TestMemoryStorePostAndTrial(t *testing.T) {
@@ -89,5 +91,41 @@ func TestMemoryStoreBankReconcile(t *testing.T) {
 	bal, _ := st.AccountBalance(ctx, ba.ID)
 	if bal != 5000 {
 		t.Fatalf("balance = %d", bal)
+	}
+}
+
+func TestPGStorePostAndTrial(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	rev := &Account{EntityID: 1, Code: "707000", Label: "Sales", Type: "revenue"}
+	bank := &Account{EntityID: 1, Code: "512000", Label: "Bank", Type: "asset"}
+	for _, a := range []*Account{rev, bank} {
+		if err := st.CreateAccount(ctx, a); err != nil {
+			t.Fatalf("account: %v", err)
+		}
+	}
+	j := &Journal{EntityID: 1, Code: "VEN", Label: "Sales"}
+	if err := st.CreateJournal(ctx, j); err != nil {
+		t.Fatalf("journal: %v", err)
+	}
+	e := &Entry{EntityID: 1, JournalID: j.ID, Ref: "PG-1", Date: time.Now().UTC(),
+		Lines: []EntryLine{
+			{AccountID: bank.ID, Debit: 1200},
+			{AccountID: rev.ID, Credit: 1200},
+		}}
+	if err := st.PostEntry(ctx, e); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	tb, err := st.TrialBalance(ctx, 1)
+	if err != nil {
+		t.Fatalf("trial: %v", err)
+	}
+	var dr, cr int64
+	for _, s := range tb {
+		dr += s[0]
+		cr += s[1]
+	}
+	if dr != cr || dr != 1200 {
+		t.Fatalf("trial dr=%d cr=%d", dr, cr)
 	}
 }

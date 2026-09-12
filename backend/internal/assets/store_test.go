@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -73,5 +74,21 @@ func TestUpdateFrozenRetired(t *testing.T) {
 	}
 	if _, err := m.UpdateAsset(ctx, a.ID, "L3", "", nil, ret.RowVersion); err == nil {
 		t.Error("retired edit accepted")
+	}
+}
+
+func TestPGAssetFlow(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	a := &Asset{EntityID: 1, Code: "PG-A", Label: "PG", Kind: "it", Status: AssetInService}
+	if err := st.CreateAsset(ctx, a); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := st.AssetByID(ctx, a.ID)
+	if err != nil || got.Code != "PG-A" {
+		t.Fatalf("by id: %+v %v", got, err)
+	}
+	if _, err := st.SetAssetStatus(ctx, a.ID, AssetMaintenance, a.RowVersion); err != nil {
+		t.Fatalf("maintenance: %v", err)
 	}
 }

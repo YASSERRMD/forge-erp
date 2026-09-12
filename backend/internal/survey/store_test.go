@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -147,5 +148,33 @@ func TestSurveyAPI(t *testing.T) {
 	_ = json.NewDecoder(rec.Body).Decode(&tally)
 	if len(tally) != 2 || tally[0].Votes+tally[1].Votes != 1 {
 		t.Fatalf("tally=%+v", tally)
+	}
+}
+
+func TestPGSurveyFlow(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	sv := &Survey{EntityID: 1, Title: "PG Poll"}
+	if err := st.CreateSurvey(ctx, sv); err != nil {
+		t.Fatalf("survey: %v", err)
+	}
+	q := &Question{EntityID: 1, SurveyID: sv.ID, Text: "Q?"}
+	if err := st.AddQuestion(ctx, q); err != nil {
+		t.Fatalf("question: %v", err)
+	}
+	o := &Option{EntityID: 1, QuestionID: q.ID, Label: "Yes"}
+	if err := st.AddOption(ctx, o); err != nil {
+		t.Fatalf("option: %v", err)
+	}
+	if _, err := st.SetSurveyStatus(ctx, sv.ID, SurveyOpen, sv.RowVersion); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := st.CastVote(ctx, &Vote{EntityID: 1, QuestionID: q.ID,
+		UserLogin: "ada", OptionIDs: []int64{o.ID}}); err != nil {
+		t.Fatalf("vote: %v", err)
+	}
+	tally, err := st.Results(ctx, q.ID)
+	if err != nil || len(tally) != 1 || tally[0].Votes != 1 {
+		t.Fatalf("tally=%+v err=%v", tally, err)
 	}
 }

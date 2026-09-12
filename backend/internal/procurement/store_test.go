@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
 func TestMemoryStoreProcureChain(t *testing.T) {
@@ -73,5 +74,27 @@ func TestMemoryStoreProcureChain(t *testing.T) {
 	got, _ := st.DocByID(ctx, sinvDoc.ID)
 	if got.Status != Paid {
 		t.Fatalf("status = %d want paid", got.Status)
+	}
+}
+
+func TestPGStoreProcureChain(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	ym := "202609"
+	po := &Document{EntityID: 1, Type: documents.TypeSupplierOrder, OrgID: 1,
+		Currency: "USD", RateToBase: 1000000,
+		Lines: []documents.Line{{ProductID: 1, Label: "W", Qty: 5, UnitNet: 300}}}
+	if err := st.CreateDoc(ctx, po, ym); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := st.SetApproval(ctx, po.ID, 1); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if _, err := st.SetStatus(ctx, po.ID, Validated); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	got, err := st.DocByID(ctx, po.ID)
+	if err != nil || got.Ref == "" {
+		t.Fatalf("by id: %+v %v", got, err)
 	}
 }

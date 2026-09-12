@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
 func TestExplodeAndTransitions(t *testing.T) {
@@ -154,5 +155,49 @@ func TestListMOsMemory(t *testing.T) {
 	list, err := m.ListMOs(ctx, 1, 10, 0)
 	if err != nil || len(list) != 1 || list[0].Ref != "MO-L" {
 		t.Fatalf("mos=%+v err=%v", list, err)
+	}
+}
+
+func TestPGMOProduce(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	cst := catalog.NewPGStore(pool)
+	p := &catalog.Product{EntityID: 1, SKU: "PG-MFG", Name: "MFG", Type: catalog.ProductGoods,
+		Status: catalog.ProductActive}
+	if err := cst.CreateProduct(ctx, p); err != nil {
+		t.Fatalf("product: %v", err)
+	}
+	c := &catalog.Product{EntityID: 1, SKU: "PG-CMP", Name: "Comp", Type: catalog.ProductGoods,
+		Status: catalog.ProductActive}
+	if err := cst.CreateProduct(ctx, c); err != nil {
+		t.Fatalf("component: %v", err)
+	}
+	w := &catalog.Warehouse{EntityID: 1, Code: "PGW", Label: "W", Status: 1}
+	if err := cst.CreateWarehouse(ctx, w); err != nil {
+		t.Fatalf("warehouse: %v", err)
+	}
+	st := NewPGStore(pool)
+	bom := &BOM{EntityID: 1, Ref: "PG-BOM", ProductID: p.ID, Label: "B"}
+	if err := st.CreateBOM(ctx, bom); err != nil {
+		t.Fatalf("bom: %v", err)
+	}
+	if err := st.AddLine(ctx, &BOMLine{EntityID: 1, BOMID: bom.ID, ComponentID: c.ID, Qty: 2}); err != nil {
+		t.Fatalf("line: %v", err)
+	}
+	mo := &ManufacturingOrder{EntityID: 1, Ref: "PG-MO", BOMID: bom.ID,
+		ProductID: p.ID, WarehouseID: w.ID, Qty: 5}
+	if err := st.CreateMO(ctx, mo); err != nil {
+		t.Fatalf("mo: %v", err)
+	}
+	upd, err := st.SetMOStatus(ctx, mo.ID, MOValidated, mo.RowVersion)
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if _, err := st.SetMOStatus(ctx, mo.ID, MOInProgress, upd.RowVersion); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	lines, err := st.LinesOf(ctx, bom.ID)
+	if err != nil || len(lines) != 1 {
+		t.Fatalf("lines=%d err=%v", len(lines), err)
 	}
 }

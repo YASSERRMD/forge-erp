@@ -3,6 +3,8 @@ package catalog
 import (
 	"context"
 	"testing"
+
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
 func TestVariantBarcodeRules(t *testing.T) {
@@ -42,5 +44,24 @@ func TestVariantBarcodeRules(t *testing.T) {
 	list, err := m.VariantsOf(ctx, p.ID)
 	if err != nil || len(list) != 2 {
 		t.Fatalf("variants=%d err=%v", len(list), err)
+	}
+}
+
+func TestPGVariantFlow(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
+	p := &Product{EntityID: 1, SKU: "PG-V", Name: "V", Type: ProductGoods, Status: ProductActive}
+	if err := st.CreateProduct(ctx, p); err != nil {
+		t.Fatalf("product: %v", err)
+	}
+	v := &Variant{EntityID: 1, ProductID: p.ID, SKU: "PG-V-L",
+		Attributes: map[string]any{"size": "L"}, Barcode: "5901234123457"}
+	if err := st.CreateVariant(ctx, v); err != nil {
+		t.Fatalf("variant: %v", err)
+	}
+	list, err := st.VariantsOf(ctx, p.ID)
+	if err != nil || len(list) != 1 || list[0].Barcode != "5901234123457" {
+		t.Fatalf("variants=%+v err=%v", list, err)
 	}
 }

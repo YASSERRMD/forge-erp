@@ -2,6 +2,7 @@ package sepa
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -116,3 +118,25 @@ func TestBatchXMLFlow(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+func TestPGBatchFlow(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	b := &Batch{EntityID: 1, Ref: "PG-SEPA", CreditorName: "C",
+		CreditorIBAN: "FR1420041010050500013M02606", CreditorBIC: "AGRIFRPP",
+		CreditorID: "ID", Sequence: "RCUR", RequestedAt: time.Now().UTC().Add(24 * time.Hour),
+		Transactions: []Transaction{{DebtorName: "D", IBAN: "DE89370400440532013000",
+			Amount: 100, Remittance: "R", EndToEndID: "PG-E2E"}}}
+	if err := st.CreateBatch(ctx, b); err != nil {
+		t.Fatalf("batch: %v", err)
+	}
+	upd, err := st.SetBatchStatus(ctx, b.ID, BatchValidated, b.RowVersion)
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	_ = upd
+	list, err := st.ListBatches(ctx, 1)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list=%d err=%v", len(list), err)
+	}
+}

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
 func signPayload(secret, payload string, ts int64) string {
@@ -76,5 +78,24 @@ func TestMemoryIdempotency(t *testing.T) {
 	}
 	if _, err := m.SetAttemptStatus(ctx, a.ID, AttemptRefunded, upd.RowVersion); err != nil {
 		t.Fatalf("refund: %v", err)
+	}
+}
+
+func TestPGAttemptFlow(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	a := &PaymentAttempt{EntityID: 1, Ref: "PG-A", OrgID: 1, Amount: 100,
+		Currency: "USD", Provider: ProviderManual}
+	if err := st.CreateAttempt(ctx, a); err != nil {
+		t.Fatalf("attempt: %v", err)
+	}
+	upd, err := st.SetAttemptStatus(ctx, a.ID, AttemptSucceeded, a.RowVersion)
+	if err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	_ = upd
+	list, err := st.ListAttempts(ctx, 1, 50, 0)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list=%d err=%v", len(list), err)
 	}
 }

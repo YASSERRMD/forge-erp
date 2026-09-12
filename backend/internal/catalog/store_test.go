@@ -3,6 +3,8 @@ package catalog
 import (
 	"context"
 	"testing"
+
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
 func TestMemoryStoreProductAndStock(t *testing.T) {
@@ -51,5 +53,31 @@ func TestMemoryStoreProductAndStock(t *testing.T) {
 	if _, err := st.AppendMovement(ctx, &StockMovement{EntityID: 1, ProductID: p.ID,
 		WarehouseID: w.ID, LotID: &l.ID, Qty: 2, UnitCost: 80, Reason: ReasonReceipt}, false); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPGStoreProductAndStock(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	p := &Product{EntityID: 1, SKU: "PG-1", Name: "PG Widget", Type: ProductGoods,
+		NetPrice: 100, VATRateBps: 2000, Status: ProductActive, StockTracked: true}
+	if err := st.CreateProduct(ctx, p); err != nil {
+		t.Fatalf("product: %v", err)
+	}
+	w := &Warehouse{EntityID: 1, Code: "PGW", Label: "PG", Status: 1}
+	if err := st.CreateWarehouse(ctx, w); err != nil {
+		t.Fatalf("warehouse: %v", err)
+	}
+	if _, err := st.AppendMovement(ctx, &StockMovement{EntityID: 1, ProductID: p.ID,
+		WarehouseID: w.ID, Qty: 10, UnitCost: 60, Reason: ReasonReceipt, Ref: "OPEN"}, false); err != nil {
+		t.Fatalf("receipt: %v", err)
+	}
+	lvl, err := st.Level(ctx, p.ID, w.ID)
+	if err != nil || lvl.Qty != 10 {
+		t.Fatalf("level=%+v err=%v", lvl, err)
+	}
+	if _, err := st.AppendMovement(ctx, &StockMovement{EntityID: 1, ProductID: p.ID,
+		WarehouseID: w.ID, Qty: -11, Reason: ReasonShipment, Ref: "OVER"}, false); err == nil {
+		t.Error("oversell accepted on PG")
 	}
 }

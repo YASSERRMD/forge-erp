@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -121,5 +122,24 @@ func TestBookingAPI(t *testing.T) {
 		map[string]any{"status": 2, "row_version": b.RowVersion})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("complete: code=%d", rec.Code)
+	}
+}
+
+func TestPGOverlapAndCapacity(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	r := &Resource{EntityID: 1, Code: "PG-R1", Label: "Room", Capacity: 2, Status: ResourceActive}
+	if err := st.CreateResource(ctx, r); err != nil {
+		t.Fatalf("resource: %v", err)
+	}
+	s := time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC)
+	e := time.Date(2026, 9, 10, 11, 0, 0, 0, time.UTC)
+	if err := st.CreateBooking(ctx, &Booking{EntityID: 1, ResourceID: r.ID,
+		UserLogin: "a", StartAt: s, EndAt: e, Seats: 2}); err != nil {
+		t.Fatalf("booking: %v", err)
+	}
+	if err := st.CreateBooking(ctx, &Booking{EntityID: 1, ResourceID: r.ID,
+		UserLogin: "b", StartAt: s, EndAt: e, Seats: 1}); err == nil {
+		t.Error("over-capacity accepted on PG")
 	}
 }

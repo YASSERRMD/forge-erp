@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -114,5 +115,31 @@ func TestEventsAPI(t *testing.T) {
 		map[string]any{"status": -1, "row_version": a.RowVersion})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("reject: code=%d", rec.Code)
+	}
+}
+
+func TestPGEventHiring(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	now := time.Now().UTC().Truncate(time.Second)
+	e := &OrgEvent{EntityID: 1, Title: "PG Conf", StartsAt: now.Add(24 * time.Hour),
+		EndsAt: now.Add(48 * time.Hour), Capacity: 1}
+	if err := st.CreateEvent(ctx, e); err != nil {
+		t.Fatalf("event: %v", err)
+	}
+	upd, err := st.SetEventStatus(ctx, e.ID, OrgEventPublished, e.RowVersion)
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	_ = upd
+	if err := st.Register(ctx, &Registration{EntityID: 1, EventID: e.ID, Name: "a"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if err := st.Register(ctx, &Registration{EntityID: 1, EventID: e.ID, Name: "b"}); err == nil {
+		t.Error("over-capacity accepted on PG")
+	}
+	p := &Position{EntityID: 1, Code: "PG-D", Title: "Dev"}
+	if err := st.CreatePosition(ctx, p); err != nil {
+		t.Fatalf("position: %v", err)
 	}
 }

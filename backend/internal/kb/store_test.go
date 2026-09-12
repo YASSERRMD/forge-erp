@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -84,5 +85,21 @@ func TestUpdateDraftOnly(t *testing.T) {
 	}
 	if _, err := m.UpdateArticle(ctx, a.ID, "T3", "b", nil, upd.RowVersion+1); err == nil {
 		t.Error("published edit accepted")
+	}
+}
+
+func TestPGArticleFlow(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	a := &Article{EntityID: 1, Slug: "pg-kb", Title: "PG", Body: "hello world"}
+	if err := st.CreateArticle(ctx, a); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := st.SetArticleStatus(ctx, a.ID, ArticlePublished, a.RowVersion); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	hits, err := st.SearchArticles(ctx, 1, "hello", 10)
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("search=%d err=%v", len(hits), err)
 	}
 }

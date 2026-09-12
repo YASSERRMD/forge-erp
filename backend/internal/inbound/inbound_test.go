@@ -2,12 +2,15 @@ package inbound
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/YASSERRMD/forge-erp/backend/internal/services"
 )
 
@@ -56,5 +59,27 @@ func TestGatewayFlow(t *testing.T) {
 	msgs, err := tickets.MessagesOf(t.Context(), tk.ID)
 	if err != nil || len(msgs) != 1 || msgs[0].Author != "client@x.io" {
 		t.Fatalf("messages=%+v err=%v", msgs, err)
+	}
+}
+
+func TestPGGatewayFlow(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
+	tickets := services.NewPGStore(pool)
+	if err := st.UpsertMailbox(ctx, &Mailbox{EntityID: 1, Code: "PG",
+		Host: "mail.example.com", Port: 993, Active: true}); err != nil {
+		t.Fatalf("mailbox: %v", err)
+	}
+	mb, err := st.MailboxByCode(ctx, 1, "PG")
+	if err != nil || !mb.Active {
+		t.Fatalf("mailbox=%+v err=%v", mb, err)
+	}
+	tk := &services.Ticket{EntityID: 1, Ref: "PG-T", Subject: "Hi", Priority: 2}
+	if err := tickets.CreateTicket(ctx, tk); err != nil {
+		t.Fatalf("ticket: %v", err)
+	}
+	if err := st.RecordFetch(ctx, 1, "PG", time.Now().UTC(), ""); err != nil {
+		t.Fatalf("fetch: %v", err)
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
 func TestLeaveDaysAndTransitions(t *testing.T) {
@@ -108,5 +110,22 @@ func TestMemorySalaryFlow(t *testing.T) {
 	}
 	if list, _ := m.SalariesOf(ctx, 1, "ada"); len(list) != 1 {
 		t.Fatalf("salaries=%d want 1", len(list))
+	}
+}
+
+func TestPGLeaveFlow(t *testing.T) {
+	ctx := context.Background()
+	st := NewPGStore(pgtest.Pool(t))
+	s := time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC)
+	e := time.Date(2026, 9, 7, 0, 0, 0, 0, time.UTC)
+	l := &LeaveRequest{EntityID: 1, UserLogin: "ada", Type: LeavePaid, StartDate: s, EndDate: e}
+	if err := st.CreateLeave(ctx, l); err != nil {
+		t.Fatalf("leave: %v", err)
+	}
+	if l.Days != 2 {
+		t.Fatalf("days=%d", l.Days)
+	}
+	if _, err := st.SetLeaveStatus(ctx, l.ID, LeaveSubmitted, l.RowVersion); err != nil {
+		t.Fatalf("submit: %v", err)
 	}
 }
