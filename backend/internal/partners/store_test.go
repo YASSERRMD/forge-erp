@@ -29,7 +29,7 @@ func TestMemoryStoreOrgs(t *testing.T) {
 		t.Fatal("nameless role-less org accepted")
 	}
 	// Update with stale version conflicts.
-	got, _ := st.OrgByID(ctx, a.ID)
+	got, _ := st.OrgByID(ctx, a.EntityID, a.ID)
 	stale := got
 	got.Name = "Acme Corp"
 	if err := st.UpdateOrg(ctx, &got); err != nil {
@@ -73,7 +73,7 @@ func TestPGStoreOrgs(t *testing.T) {
 	if err := st.CreateOrg(ctx, a); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	got, err := st.OrgByID(ctx, a.ID)
+	got, err := st.OrgByID(ctx, a.EntityID, a.ID)
 	if err != nil || got.Name != "PG Acme" {
 		t.Fatalf("by id: %+v %v", got, err)
 	}

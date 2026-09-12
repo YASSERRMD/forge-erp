@@ -81,7 +81,7 @@ func (h *Handler) CreateProduct(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.deps.Bus != nil {
 		_ = h.deps.Bus.Publish(r.Context(), platform.Event{
-			Subject: "forgeerp.catalog.product.created.v1", Entity: "product", ID: p.ID})
+			Subject: "forgeerp.catalog.product.created.v1", Entity: "product", EntityID: p.EntityID, ID: p.ID})
 	}
 	writeJSON(w, http.StatusCreated, p)
 }
@@ -108,7 +108,7 @@ func (h *Handler) GetProduct(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	p, err := h.deps.Store.ProductByID(r.Context(), id)
+	p, err := h.deps.Store.ProductByID(r.Context(), entityOf(r), id)
 	if err != nil || p.EntityID != entityOf(r) {
 		writeErr(w, http.StatusNotFound, "product not found")
 		return
@@ -173,7 +173,7 @@ func (h *Handler) AppendMovement(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.deps.Bus != nil {
 		_ = h.deps.Bus.Publish(r.Context(), platform.Event{
-			Subject: "forgeerp.catalog.stock.moved.v1", Entity: "stock_movement", ID: m.ID})
+			Subject: "forgeerp.catalog.stock.moved.v1", Entity: "stock_movement", EntityID: m.EntityID, ID: m.ID})
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"movement": m, "level": level})
 }

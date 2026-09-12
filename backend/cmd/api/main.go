@@ -199,14 +199,14 @@ func run() error {
 		// Write-through indexing: created orgs/products land in OpenSearch
 		// immediately; startup reindex + provider fallback cover the rest.
 		bus.Subscribe("forgeerp.partners.organization.created.v1", func(ctx context.Context, e platform.Event) {
-			o, err := pstore.OrgByID(ctx, e.ID)
+			o, err := pstore.OrgByID(ctx, e.EntityID, e.ID)
 			if err != nil {
 				return
 			}
 			_ = oss.IndexOne(ctx, search.MakeDocument("organization", o.EntityID, o.ID, o.Name, o.CustomerCode))
 		})
 		bus.Subscribe("forgeerp.catalog.product.created.v1", func(ctx context.Context, e platform.Event) {
-			p, err := cstore.ProductByID(ctx, e.ID)
+			p, err := cstore.ProductByID(ctx, e.EntityID, e.ID)
 			if err != nil {
 				return
 			}

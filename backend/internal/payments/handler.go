@@ -94,11 +94,11 @@ func pathID(r *http.Request, name string) (int64, bool) {
 	return id, true
 }
 
-func (h *Handler) publish(ctx context.Context, subject, entity string, id int64) {
+func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
 	if h.deps.Bus == nil {
 		return
 	}
-	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, ID: id})
+	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, EntityID: entityID, ID: id})
 }
 
 type intentIn struct {
@@ -146,7 +146,7 @@ func (h *Handler) CreateIntent(w http.ResponseWriter, r *http.Request) {
 		}
 		*a = settled
 	}
-	h.publish(r.Context(), "forgeerp.payments.attempt.created.v1", "attempt", a.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.payments.attempt.created.v1", "attempt", a.ID)
 	writeJSON(w, http.StatusCreated, map[string]any{"attempt": a, "client_ref": clientRef})
 }
 
@@ -242,6 +242,6 @@ func (h *Handler) StripeWebhook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.payments.attempt."+strings.ToLower(ev.Type)+".v1", "attempt", upd.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.payments.attempt."+strings.ToLower(ev.Type)+".v1", "attempt", upd.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"duplicate": false, "attempt": upd})
 }

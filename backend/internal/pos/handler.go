@@ -19,7 +19,7 @@ import (
 
 // Catalog abstracts the product/ledger reads and postings used at checkout.
 type Catalog interface {
-	ProductByID(ctx context.Context, id int64) (catalog.Product, error)
+	ProductByID(ctx context.Context, entityID, id int64) (catalog.Product, error)
 	Level(ctx context.Context, productID, warehouseID int64) (catalog.StockLevel, error)
 	AppendMovement(ctx context.Context, m *catalog.StockMovement, allowNegative bool) (catalog.StockLevel, error)
 }
@@ -112,11 +112,11 @@ func pathID(r *http.Request, name string) (int64, bool) {
 	return id, true
 }
 
-func (h *Handler) publish(ctx context.Context, subject, entity string, id int64) {
+func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
 	if h.deps.Bus == nil {
 		return
 	}
-	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, ID: id})
+	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, EntityID: entityID, ID: id})
 }
 
 // CreateTerminal registers a till.
@@ -165,7 +165,7 @@ func (h *Handler) OpenSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.pos.session.opened.v1", "session", se.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.pos.session.opened.v1", "session", se.ID)
 	writeJSON(w, http.StatusCreated, se)
 }
 
@@ -256,7 +256,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
-		p, err := h.deps.Catalog.ProductByID(ctx, l.ProductID)
+		p, err := h.deps.Catalog.ProductByID(ctx, entity, l.ProductID)
 		if err != nil {
 			writeErr(w, storeErrorCode(err), err.Error())
 			return
@@ -375,7 +375,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(ctx, "forgeerp.pos.sale.completed.v1", "sale", rec.ID)
+	h.publish(ctx, entityOf(r), "forgeerp.pos.sale.completed.v1", "sale", rec.ID)
 	writeJSON(w, http.StatusCreated, rec)
 }
 
@@ -535,7 +535,7 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, l := range creditLines {
-		p, err := h.deps.Catalog.ProductByID(ctx, l.ProductID)
+		p, err := h.deps.Catalog.ProductByID(ctx, sa.EntityID, l.ProductID)
 		if err != nil {
 			continue // service/unknown lines simply have no stock effect
 		}
@@ -570,6 +570,6 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	h.publish(ctx, "forgeerp.pos.sale.returned.v1", "sale", done.ID)
+	h.publish(ctx, entityOf(r), "forgeerp.pos.sale.returned.v1", "sale", done.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"sale": done, "credit_note": cn, "fully_returned": fully})
 }

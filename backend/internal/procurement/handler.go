@@ -302,7 +302,7 @@ func (h *Handler) Receive(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.deps.Bus != nil {
 		_ = h.deps.Bus.Publish(r.Context(), platform.Event{
-			Subject: "forgeerp.procurement.reception.received.v1", Entity: "reception", ID: d.ID})
+			Subject: "forgeerp.procurement.reception.received.v1", Entity: "reception", EntityID: d.EntityID, ID: d.ID})
 	}
 	writeJSON(w, http.StatusOK, closed)
 }

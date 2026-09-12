@@ -20,7 +20,7 @@ var euMembers = map[string]bool{
 
 // Orgs abstracts customer lookup for country attribution.
 type Orgs interface {
-	OrgByID(ctx context.Context, id int64) (partners.Organization, error)
+	OrgByID(ctx context.Context, entityID, id int64) (partners.Organization, error)
 }
 
 // IntraRow is one destination-country aggregate (Dolibarr intracommreport:
@@ -46,7 +46,7 @@ func IntraEU(ctx context.Context, entityID int64, home string, billing Billing, 
 		if d.Status == sales.InvoiceDraft || d.Status == 9 { // skip drafts/cancelled
 			continue
 		}
-		o, err := orgs.OrgByID(ctx, d.OrgID)
+		o, err := orgs.OrgByID(ctx, entityID, d.OrgID)
 		if err != nil {
 			continue // orphan invoice: excluded, never blocks the report
 		}

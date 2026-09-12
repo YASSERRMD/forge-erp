@@ -172,7 +172,7 @@ func (h *Handler) SetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.deps.Bus != nil {
 		_ = h.deps.Bus.Publish(r.Context(), platform.Event{
-			Subject: "forgeerp.sales.document.status.v1", Entity: string(d.Type), ID: d.ID})
+			Subject: "forgeerp.sales.document.status.v1", Entity: string(d.Type), EntityID: d.EntityID, ID: d.ID})
 	}
 	writeJSON(w, http.StatusOK, d)
 }

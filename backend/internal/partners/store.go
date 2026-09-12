@@ -14,7 +14,7 @@ import (
 // Store is the persistence contract for the partners context.
 type Store interface {
 	CreateOrg(ctx context.Context, o *Organization) error
-	OrgByID(ctx context.Context, id int64) (Organization, error)
+	OrgByID(ctx context.Context, entityID, id int64) (Organization, error)
 	ListOrgs(ctx context.Context, entityID int64, limit, offset int) ([]Organization, error)
 	UpdateOrg(ctx context.Context, o *Organization) error
 	ParentOf(ctx context.Context, id int64) (*int64, bool)
@@ -78,8 +78,8 @@ func nullableMap(m map[string]any) map[string]any {
 	return m
 }
 
-func (s *PGStore) OrgByID(ctx context.Context, id int64) (Organization, error) {
-	return scanOrg(s.pool.QueryRow(ctx, `SELECT `+orgCols+` FROM ferp_organizations WHERE id=$1`, id))
+func (s *PGStore) OrgByID(ctx context.Context, entityID, id int64) (Organization, error) {
+	return scanOrg(s.pool.QueryRow(ctx, `SELECT `+orgCols+` FROM ferp_organizations WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 func (s *PGStore) ListOrgs(ctx context.Context, entityID int64, limit, offset int) ([]Organization, error) {
@@ -221,11 +221,11 @@ func (m *MemoryStore) CreateOrg(_ context.Context, o *Organization) error {
 	return nil
 }
 
-func (m *MemoryStore) OrgByID(_ context.Context, id int64) (Organization, error) {
+func (m *MemoryStore) OrgByID(_ context.Context, entityID, id int64) (Organization, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	o, ok := m.orgs[id]
-	if !ok {
+	if !ok || o.EntityID != entityID {
 		return Organization{}, identity.ErrNotFound
 	}
 	return o, nil

@@ -15,10 +15,10 @@ import (
 // Store is the persistence contract for the catalog context.
 type Store interface {
 	CreateProduct(ctx context.Context, p *Product) error
-	ProductByID(ctx context.Context, id int64) (Product, error)
+	ProductByID(ctx context.Context, entityID, id int64) (Product, error)
 	ListProducts(ctx context.Context, entityID int64, limit, offset int) ([]Product, error)
 	CreateWarehouse(ctx context.Context, w *Warehouse) error
-	WarehouseByID(ctx context.Context, id int64) (Warehouse, error)
+	WarehouseByID(ctx context.Context, entityID, id int64) (Warehouse, error)
 	ListWarehouses(ctx context.Context, entityID int64) ([]Warehouse, error)
 	// AppendMovement validates, appends the ledger line, and advances the level
 	// atomically (PG) — the negative-stock guard lives in Apply.
@@ -73,8 +73,8 @@ func nullMap(m map[string]any) map[string]any {
 	return m
 }
 
-func (s *PGStore) ProductByID(ctx context.Context, id int64) (Product, error) {
-	return scanProduct(s.pool.QueryRow(ctx, `SELECT `+productCols+` FROM ferp_products WHERE id=$1`, id))
+func (s *PGStore) ProductByID(ctx context.Context, entityID, id int64) (Product, error) {
+	return scanProduct(s.pool.QueryRow(ctx, `SELECT `+productCols+` FROM ferp_products WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 func (s *PGStore) ListProducts(ctx context.Context, entityID int64, limit, offset int) ([]Product, error) {
@@ -101,10 +101,10 @@ func (s *PGStore) CreateWarehouse(ctx context.Context, w *Warehouse) error {
 		w.EntityID, w.Code, w.Label, w.Status).Scan(&w.ID, &w.CreatedAt, &w.UpdatedAt)
 }
 
-func (s *PGStore) WarehouseByID(ctx context.Context, id int64) (Warehouse, error) {
+func (s *PGStore) WarehouseByID(ctx context.Context, entityID, id int64) (Warehouse, error) {
 	var w Warehouse
 	err := s.pool.QueryRow(ctx, `SELECT id, entity_id, code, label, status, created_at, updated_at
-		FROM ferp_warehouses WHERE id=$1`, id).Scan(
+		FROM ferp_warehouses WHERE id=$1 AND entity_id=$2`, id, entityID).Scan(
 		&w.ID, &w.EntityID, &w.Code, &w.Label, &w.Status, &w.CreatedAt, &w.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Warehouse{}, identity.ErrNotFound
@@ -229,11 +229,11 @@ func (m *MemoryStore) CreateProduct(_ context.Context, p *Product) error {
 
 func skuKey(entityID int64, sku string) string { return fmt.Sprintf("%d\x00%s", entityID, sku) }
 
-func (m *MemoryStore) ProductByID(_ context.Context, id int64) (Product, error) {
+func (m *MemoryStore) ProductByID(_ context.Context, entityID, id int64) (Product, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.products[id]
-	if !ok {
+	if !ok || p.EntityID != entityID {
 		return Product{}, identity.ErrNotFound
 	}
 	return p, nil
@@ -269,11 +269,11 @@ func (m *MemoryStore) CreateWarehouse(_ context.Context, w *Warehouse) error {
 	return nil
 }
 
-func (m *MemoryStore) WarehouseByID(_ context.Context, id int64) (Warehouse, error) {
+func (m *MemoryStore) WarehouseByID(_ context.Context, entityID, id int64) (Warehouse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	w, ok := m.houses[id]
-	if !ok {
+	if !ok || w.EntityID != entityID {
 		return Warehouse{}, identity.ErrNotFound
 	}
 	return w, nil

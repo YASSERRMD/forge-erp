@@ -58,11 +58,11 @@ func entityOf(r *http.Request) int64 {
 	return 1
 }
 
-func (h *Handler) publish(ctx context.Context, subject, entity string, id int64) {
+func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
 	if h.deps.Bus == nil {
 		return
 	}
-	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, ID: id})
+	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, EntityID: entityID, ID: id})
 }
 
 // CreateOrg creates an organization (validates rules + hierarchy cycles; 409 on duplicate codes).
@@ -91,7 +91,7 @@ func (h *Handler) CreateOrg(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.partners.organization.created.v1", "organization", o.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.partners.organization.created.v1", "organization", o.ID)
 	writeJSON(w, http.StatusCreated, o)
 }
 
@@ -110,19 +110,15 @@ func (h *Handler) ListOrgs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, list)
 }
 
-// GetOrg fetches one organization (404 outside entity scope included).
+// GetOrg fetches one organization (404 outside the caller's entity).
 func (h *Handler) GetOrg(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	o, err := h.deps.Store.OrgByID(r.Context(), id)
+	o, err := h.deps.Store.OrgByID(r.Context(), entityOf(r), id)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "organization not found")
-		return
-	}
-	if o.EntityID != entityOf(r) {
 		writeErr(w, http.StatusNotFound, "organization not found")
 		return
 	}
@@ -159,7 +155,7 @@ func (h *Handler) UpdateOrg(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.partners.organization.updated.v1", "organization", o.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.partners.organization.updated.v1", "organization", o.ID)
 	writeJSON(w, http.StatusOK, o)
 }
 
@@ -170,7 +166,7 @@ func (h *Handler) CreateContact(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	if _, err := h.deps.Store.OrgByID(r.Context(), orgID); err != nil {
+	if _, err := h.deps.Store.OrgByID(r.Context(), entityOf(r), orgID); err != nil {
 		writeErr(w, http.StatusNotFound, "organization not found")
 		return
 	}
@@ -186,7 +182,7 @@ func (h *Handler) CreateContact(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.partners.contact.created.v1", "contact", c.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.partners.contact.created.v1", "contact", c.ID)
 	writeJSON(w, http.StatusCreated, c)
 }
 
@@ -197,7 +193,7 @@ func (h *Handler) ListContacts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	if _, err := h.deps.Store.OrgByID(r.Context(), orgID); err != nil {
+	if _, err := h.deps.Store.OrgByID(r.Context(), entityOf(r), orgID); err != nil {
 		writeErr(w, http.StatusNotFound, "organization not found")
 		return
 	}
