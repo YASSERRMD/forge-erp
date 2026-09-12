@@ -27,12 +27,12 @@ type Catalog interface {
 // Sales abstracts the invoice/payment postings used at checkout.
 type Sales interface {
 	CreateDoc(ctx context.Context, d *sales.Document, yearMonth string) error
-	DocByID(ctx context.Context, id int64) (sales.Document, error)
+	DocByID(ctx context.Context, entityID, id int64) (sales.Document, error)
 	ListDocs(ctx context.Context, entityID int64, t documents.DocType, limit, offset int) ([]sales.Document, error)
-	SetStatus(ctx context.Context, id int64, to int16) (sales.Document, error)
+	SetStatus(ctx context.Context, entityID, id int64, to int16) (sales.Document, error)
 	RecordPayment(ctx context.Context, p *sales.Payment, invoiceIDs []int64, yearMonth string) ([]int64, error)
-	ApplyCredit(ctx context.Context, invoiceID, creditID, amount int64) error
-	InvoiceBalance(ctx context.Context, invoiceID int64) (int64, error)
+	ApplyCredit(ctx context.Context, entityID, invoiceID, creditID, amount int64) error
+	InvoiceBalance(ctx context.Context, entityID, invoiceID int64) (int64, error)
 }
 
 // Deps wires handlers to persistence, the catalog/sales seams, and the bus.
@@ -335,7 +335,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	validated, err := h.deps.Sales.SetStatus(ctx, inv.ID, sales.InvoiceValidated)
+	validated, err := h.deps.Sales.SetStatus(ctx, entity, inv.ID, sales.InvoiceValidated)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -459,7 +459,7 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	inv, err := h.deps.Sales.DocByID(ctx, sa.InvoiceID)
+	inv, err := h.deps.Sales.DocByID(ctx, sa.EntityID, sa.InvoiceID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -480,7 +480,7 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 		if c.SourceID != inv.ID || c.Status == 9 {
 			continue
 		}
-		full, err := h.deps.Sales.DocByID(ctx, c.ID)
+		full, err := h.deps.Sales.DocByID(ctx, sa.EntityID, c.ID)
 		if err != nil {
 			continue
 		}
@@ -518,18 +518,18 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	validated, err := h.deps.Sales.SetStatus(ctx, cn.ID, 1)
+	validated, err := h.deps.Sales.SetStatus(ctx, sa.EntityID, cn.ID, 1)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
 	cn = &validated
-	if bal, err := h.deps.Sales.InvoiceBalance(ctx, inv.ID); err == nil && bal > 0 {
+	if bal, err := h.deps.Sales.InvoiceBalance(ctx, sa.EntityID, inv.ID); err == nil && bal > 0 {
 		apply := cn.Totals.Gross
 		if apply > bal {
 			apply = bal
 		}
-		if err := h.deps.Sales.ApplyCredit(ctx, inv.ID, cn.ID, apply); err != nil {
+		if err := h.deps.Sales.ApplyCredit(ctx, sa.EntityID, inv.ID, cn.ID, apply); err != nil {
 			writeErr(w, storeErrorCode(err), err.Error())
 			return
 		}

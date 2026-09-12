@@ -31,7 +31,7 @@ func TestIntraEU(t *testing.T) {
 		if err := billing.CreateDoc(ctx, d, "202609"); err != nil {
 			t.Fatalf("invoice: %v", err)
 		}
-		if _, err := billing.SetStatus(ctx, d.ID, sales.InvoiceValidated); err != nil {
+		if _, err := billing.SetStatus(ctx, d.EntityID, d.ID, sales.InvoiceValidated); err != nil {
 			t.Fatalf("validate: %v", err)
 		}
 	}
@@ -48,7 +48,7 @@ func TestIntraEU(t *testing.T) {
 	// Paid invoices count too.
 	docs, _ := billing.ListDocs(ctx, 1, documents.TypeInvoice, 10, 0)
 	for _, d := range docs {
-		if _, err := billing.SetStatus(ctx, d.ID, sales.InvoicePaid); err != nil {
+		if _, err := billing.SetStatus(ctx, d.EntityID, d.ID, sales.InvoicePaid); err != nil {
 			t.Fatalf("pay %d: %v", d.ID, err)
 		}
 	}
@@ -75,7 +75,7 @@ func TestSalesMonthlyBuckets(t *testing.T) {
 		if err := billing.CreateDoc(ctx, d, "202609"); err != nil {
 			t.Fatalf("invoice: %v", err)
 		}
-		if _, err := billing.SetStatus(ctx, d.ID, sales.InvoiceValidated); err != nil {
+		if _, err := billing.SetStatus(ctx, d.EntityID, d.ID, sales.InvoiceValidated); err != nil {
 			t.Fatalf("validate: %v", err)
 		}
 	}

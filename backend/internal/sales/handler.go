@@ -129,7 +129,7 @@ func (h *Handler) UpdateDoc(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	upd, err := h.deps.Store.UpdateDocLines(r.Context(), d.ID, body.Lines)
+	upd, err := h.deps.Store.UpdateDocLines(r.Context(), entityOf(r), d.ID, body.Lines)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -143,7 +143,7 @@ func (h *Handler) load(w http.ResponseWriter, r *http.Request) (Document, bool) 
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return Document{}, false
 	}
-	d, err := h.deps.Store.DocByID(r.Context(), id)
+	d, err := h.deps.Store.DocByID(r.Context(), entityOf(r), id)
 	if err != nil || d.EntityID != entityOf(r) {
 		writeErr(w, http.StatusNotFound, "document not found")
 		return Document{}, false
@@ -165,7 +165,7 @@ func (h *Handler) SetStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	d, err := h.deps.Store.SetStatus(r.Context(), id, req.To)
+	d, err := h.deps.Store.SetStatus(r.Context(), entityOf(r), id, req.To)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -275,7 +275,7 @@ func (h *Handler) Fulfill(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	closed, err := h.deps.Store.SetStatus(r.Context(), d.ID, ShipmentClosed)
+	closed, err := h.deps.Store.SetStatus(r.Context(), entityOf(r), d.ID, ShipmentClosed)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -309,7 +309,7 @@ func (h *Handler) CreateCreditNote(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invoice_id required")
 		return
 	}
-	src, err := h.deps.Store.DocByID(r.Context(), req.InvoiceID)
+	src, err := h.deps.Store.DocByID(r.Context(), entityOf(r), req.InvoiceID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -343,11 +343,11 @@ func (h *Handler) ApplyCredit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invoice_id and amount required")
 		return
 	}
-	if err := h.deps.Store.ApplyCredit(r.Context(), req.InvoiceID, id, req.Amount); err != nil {
+	if err := h.deps.Store.ApplyCredit(r.Context(), entityOf(r), req.InvoiceID, id, req.Amount); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	bal, err := h.deps.Store.InvoiceBalance(r.Context(), req.InvoiceID)
+	bal, err := h.deps.Store.InvoiceBalance(r.Context(), entityOf(r), req.InvoiceID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

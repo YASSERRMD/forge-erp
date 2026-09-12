@@ -23,10 +23,10 @@ func TestMemoryStoreChain(t *testing.T) {
 	if prop.Ref != "PROP-202609-0001" {
 		t.Fatalf("ref = %q", prop.Ref)
 	}
-	if _, err := st.SetStatus(ctx, prop.ID, ProposalValidated); err != nil {
+	if _, err := st.SetStatus(ctx, prop.EntityID, prop.ID, ProposalValidated); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.SetStatus(ctx, prop.ID, ProposalBilled); err == nil {
+	if _, err := st.SetStatus(ctx, prop.EntityID, prop.ID, ProposalBilled); err == nil {
 		t.Fatal("skip transition accepted")
 	}
 
@@ -56,11 +56,11 @@ func TestMemoryStoreChain(t *testing.T) {
 	if _, err := st.RecordPayment(ctx, pay, []int64{invDoc.ID}, ym); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := st.DocByID(ctx, invDoc.ID)
+	got, _ := st.DocByID(ctx, invDoc.EntityID, invDoc.ID)
 	if got.Status != InvoicePartPaid {
 		t.Fatalf("status = %d want part-paid", got.Status)
 	}
-	bal, _ := st.InvoiceBalance(ctx, invDoc.ID)
+	bal, _ := st.InvoiceBalance(ctx, invDoc.EntityID, invDoc.ID)
 	if bal != 800 {
 		t.Fatalf("balance = %d want 800", bal)
 	}
@@ -68,7 +68,7 @@ func TestMemoryStoreChain(t *testing.T) {
 	if _, err := st.RecordPayment(ctx, pay2, []int64{invDoc.ID}, ym); err != nil {
 		t.Fatal(err)
 	}
-	got, _ = st.DocByID(ctx, invDoc.ID)
+	got, _ = st.DocByID(ctx, invDoc.EntityID, invDoc.ID)
 	if got.Status != InvoicePaid {
 		t.Fatalf("status = %d want paid", got.Status)
 	}
@@ -92,7 +92,7 @@ func TestPGStoreChain(t *testing.T) {
 	if d.Ref == "" || d.Totals.Gross != 1200 {
 		t.Fatalf("doc=%+v", d)
 	}
-	if _, err := st.SetStatus(ctx, d.ID, InvoiceValidated); err != nil {
+	if _, err := st.SetStatus(ctx, d.EntityID, d.ID, InvoiceValidated); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 	pay := &Payment{EntityID: 1, OrgID: 1, Amount: 1200, Currency: "USD",
@@ -100,8 +100,30 @@ func TestPGStoreChain(t *testing.T) {
 	if _, err := st.RecordPayment(ctx, pay, []int64{d.ID}, ym); err != nil {
 		t.Fatalf("pay: %v", err)
 	}
-	bal, err := st.InvoiceBalance(ctx, d.ID)
+	bal, err := st.InvoiceBalance(ctx, d.EntityID, d.ID)
 	if err != nil || bal != 0 {
 		t.Fatalf("balance=%d err=%v", bal, err)
+	}
+}
+
+func TestPGCrossTenantInvoice(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
+	other := pgtest.NewEntity(t, pool, "otherco")
+	d := &Document{EntityID: 1, Type: documents.TypeInvoice, OrgID: 1, Currency: "USD",
+		RateToBase: 1000000,
+		Lines: []documents.Line{{ProductID: 1, Label: "W", Qty: 1, UnitNet: 100, VATRateBps: 0}}}
+	if err := st.CreateDoc(ctx, d, "202609"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := st.DocByID(ctx, other, d.ID); err == nil {
+		t.Error("cross-tenant DocByID succeeded on PG")
+	}
+	if _, err := st.SetStatus(ctx, other, d.ID, InvoiceValidated); err == nil {
+		t.Error("cross-tenant SetStatus succeeded on PG")
+	}
+	if _, err := st.InvoiceBalance(ctx, other, d.ID); err == nil {
+		t.Error("cross-tenant balance succeeded on PG")
 	}
 }

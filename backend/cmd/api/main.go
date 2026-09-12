@@ -466,12 +466,12 @@ func seedDemoSales(ctx context.Context, sstore *sales.PGStore, pstore *partners.
 	if err := sstore.CreateDoc(ctx, prop, ym); err != nil {
 		return err
 	}
-	if _, err := sstore.SetStatus(ctx, prop.ID, sales.ProposalSigned); err != nil {
+	if _, err := sstore.SetStatus(ctx, 1, prop.ID, sales.ProposalSigned); err != nil {
 		// Signed requires validated first; walk the chain explicitly.
-		if _, err := sstore.SetStatus(ctx, prop.ID, sales.ProposalValidated); err != nil {
+		if _, err := sstore.SetStatus(ctx, 1, prop.ID, sales.ProposalValidated); err != nil {
 			return err
 		}
-		if _, err := sstore.SetStatus(ctx, prop.ID, sales.ProposalSigned); err != nil {
+		if _, err := sstore.SetStatus(ctx, 1, prop.ID, sales.ProposalSigned); err != nil {
 			return err
 		}
 	}
@@ -483,7 +483,7 @@ func seedDemoSales(ctx context.Context, sstore *sales.PGStore, pstore *partners.
 	if err := sstore.CreateDoc(ctx, ord, ym); err != nil {
 		return err
 	}
-	if _, err := sstore.SetStatus(ctx, ord.ID, sales.OrderValidated); err != nil {
+	if _, err := sstore.SetStatus(ctx, 1, ord.ID, sales.OrderValidated); err != nil {
 		return err
 	}
 	nx2, err := sales.Convert(*ord, documents.TypeInvoice)
@@ -494,10 +494,10 @@ func seedDemoSales(ctx context.Context, sstore *sales.PGStore, pstore *partners.
 	if err := sstore.CreateDoc(ctx, inv, ym); err != nil {
 		return err
 	}
-	if _, err := sstore.SetStatus(ctx, inv.ID, sales.InvoiceValidated); err != nil {
+	if _, err := sstore.SetStatus(ctx, 1, inv.ID, sales.InvoiceValidated); err != nil {
 		return err
 	}
-	bal, err := sstore.InvoiceBalance(ctx, inv.ID)
+	bal, err := sstore.InvoiceBalance(ctx, 1, inv.ID)
 	if err != nil {
 		return err
 	}

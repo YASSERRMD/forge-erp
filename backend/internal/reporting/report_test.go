@@ -72,7 +72,7 @@ func TestReceivablesAndValuation(t *testing.T) {
 	if err := billing.CreateDoc(ctx, d, "202609"); err != nil {
 		t.Fatalf("invoice: %v", err)
 	}
-	if _, err := billing.SetStatus(ctx, d.ID, sales.InvoiceValidated); err != nil {
+	if _, err := billing.SetStatus(ctx, d.EntityID, d.ID, sales.InvoiceValidated); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 	got, total, err := Receivables(ctx, 1, billing)

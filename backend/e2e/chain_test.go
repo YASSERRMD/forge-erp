@@ -85,7 +85,7 @@ func runChains(t *testing.T, pst partners.Store, cst catalog.Store, sst sales.St
 		[]int64{inv.ID}, ym); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := sst.DocByID(ctx, inv.ID)
+	got, _ := sst.DocByID(ctx, inv.EntityID, inv.ID)
 	if got.Status != sales.InvoicePaid {
 		t.Fatalf("sales invoice status = %d", got.Status)
 	}
@@ -196,7 +196,11 @@ func mustCreateSales(t *testing.T, ctx context.Context, s sales.Store, d *sales.
 
 func mustStatusSales(t *testing.T, ctx context.Context, s sales.Store, id int64, to int16) {
 	t.Helper()
-	if _, err := s.SetStatus(ctx, id, to); err != nil {
+	d, err := s.DocByID(ctx, 1, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetStatus(ctx, d.EntityID, id, to); err != nil {
 		t.Fatal(err)
 	}
 }

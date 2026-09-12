@@ -68,7 +68,8 @@ func TestMemoryStoreContacts(t *testing.T) {
 
 func TestPGStoreOrgs(t *testing.T) {
 	ctx := context.Background()
-	st := NewPGStore(pgtest.Pool(t))
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
 	a := &Organization{EntityID: 1, Name: "PG Acme", IsCustomer: true, CustomerCode: "PG-1"}
 	if err := st.CreateOrg(ctx, a); err != nil {
 		t.Fatalf("create: %v", err)
@@ -76,6 +77,10 @@ func TestPGStoreOrgs(t *testing.T) {
 	got, err := st.OrgByID(ctx, a.EntityID, a.ID)
 	if err != nil || got.Name != "PG Acme" {
 		t.Fatalf("by id: %+v %v", got, err)
+	}
+	other := pgtest.NewEntity(t, pool, "otherco")
+	if _, err := st.OrgByID(ctx, other, a.ID); err == nil {
+		t.Error("cross-tenant lookup succeeded on PG")
 	}
 	list, err := st.ListOrgs(ctx, 1, 50, 0)
 	if err != nil || len(list) != 1 {

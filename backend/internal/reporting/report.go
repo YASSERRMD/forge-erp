@@ -23,7 +23,7 @@ type Ledger interface {
 // Billing abstracts invoice balances for receivables.
 type Billing interface {
 	ListDocs(ctx context.Context, entityID int64, t documents.DocType, limit, offset int) ([]sales.Document, error)
-	InvoiceBalance(ctx context.Context, invoiceID int64) (int64, error)
+	InvoiceBalance(ctx context.Context, entityID, invoiceID int64) (int64, error)
 }
 
 // Stock abstracts product levels for valuation.
@@ -227,7 +227,7 @@ func Receivables(ctx context.Context, entityID int64, billing Billing) ([]Receiv
 		if d.Status == sales.InvoiceDraft || d.Status == 9 { // skip drafts/cancelled
 			continue
 		}
-		bal, err := billing.InvoiceBalance(ctx, d.ID)
+		bal, err := billing.InvoiceBalance(ctx, entityID, d.ID)
 		if err != nil {
 			return nil, 0, err
 		}
