@@ -1,7 +1,5 @@
 <div align="center">
-  <img src="docs/assets/forgeerp-logo.png" alt="ForgeERP logo" width="200" />
-  <h1>ForgeERP</h1>
-  <p><strong>Modern open-source ERP &amp; CRM</strong> — a complete functional modernization of Dolibarr, rebuilt as a Go + React modular monolith.</p>
+  <img src="docs/assets/forgeerp-hero.png" alt="ForgeERP — modern open-source ERP" width="100%" />
   <p>
     <a href="https://github.com/YASSERRMD/forge-erp/actions/workflows/ci.yml"><img src="https://github.com/YASSERRMD/forge-erp/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
     <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white" alt="Go 1.25" />
@@ -10,10 +8,12 @@
     <img src="https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql&logoColor=white" alt="PostgreSQL 16" />
     <img src="https://img.shields.io/badge/license-MIT-C5A55A" alt="MIT license" />
   </p>
+  <p><strong>Modern open-source ERP &amp; CRM</strong> — a complete functional modernization of Dolibarr, rebuilt as a Go + React modular monolith.</p>
 </div>
 
 ## Contents
 
+- [Screenshots](#screenshots)
 - [About](#about)
 - [Why ForgeERP](#why-forgeerp)
 - [Features](#features)
@@ -28,6 +28,18 @@
 - [Acknowledgments](#acknowledgments)
 - [License](#license)
 
+## Screenshots
+
+Real screens, captured against a live stack (no mockups):
+
+| Sign in | Live dashboard |
+|---|---|
+| ![Sign in](docs/assets/shot-login.png) | ![Dashboard](docs/assets/shot-dashboard.png) |
+
+| Invoices with validate & pay actions |
+|---|
+| ![Invoices](docs/assets/shot-invoices.png) |
+
 ## About
 
 ForgeERP takes the battle-tested business logic of [Dolibarr](https://github.com/Dolibarr/dolibarr)
@@ -35,8 +47,8 @@ ERP/CRM — quotes, orders, invoices, inventory, manufacturing, HR, projects —
 and re-implements it as a clean, typed, observable modern stack. This is a
 **functional modernization, not a port**: every workflow was re-analyzed from
 the PHP source, redesigned around explicit domain models and server-side state
-machines, and verified with characterization tests. Intentional deviations are
-logged in [docs/DIFFERENCES.md](docs/DIFFERENCES.md).
+machines, and verified with characterization tests (plus a real-PostgreSQL boot
+proof). Intentional deviations are logged in [docs/DIFFERENCES.md](docs/DIFFERENCES.md).
 
 > **Experiment note:** this repository was built as an end-to-end experiment in
 > autonomous software engineering — designed, implemented, tested, and merged
@@ -51,12 +63,12 @@ logged in [docs/DIFFERENCES.md](docs/DIFFERENCES.md).
 |---|---|
 | PHP monolith, per-module pages | Go modular monolith, one REST API + React SPA |
 | Client-side status handling | Server-side state machines, immutable validated docs |
-| `llx_*` schema, MySQL-first | Clean PostgreSQL schema, versioned migrations |
+| `llx_*` schema, MySQL-first | Clean PostgreSQL schema, 22 versioned migrations |
 | Built-in password auth | Keycloak OIDC (dev JWT fallback), RBAC matrix |
 | Triggers in-process only | Shared event bus, NATS JetStream-ready |
 | Local file dirs | S3/MinIO selectable backend |
 | No full-text search | OpenSearch with provider fallback |
-| TCPDF reports | PDF/CSV exports, P&L, margins, receivables, dashboards |
+| TCPDF reports | CSV exports, P&L, margins, receivables, chart dashboards |
 
 ## Features
 
@@ -86,11 +98,11 @@ scheduler, CSV import/export, 229-key EN/FR UI, icon sidebar, chart dashboard.
 ![ForgeERP architecture](docs/assets/forgeerp-architecture.png)
 
 Modular monolith first: 27 bounded contexts (`backend/internal/*`) share one
-process and one PostgreSQL database (23 versioned migrations, `ferp_*` tables).
-Cross-context communication goes over one shared event bus (in-process today,
-NATS JetStream via `FERP_BUS_BACKEND=nats`). MinIO/S3, OpenSearch, Keycloak,
-Redis and the OTel stack sit behind env-selected adapters with in-process
-fallbacks, so the system boots with just Postgres.
+process and one PostgreSQL database (`ferp_*` tables). Cross-context
+communication goes over one shared event bus (in-process today, NATS JetStream
+via `FERP_BUS_BACKEND=nats`). MinIO/S3, OpenSearch, Keycloak, Redis and the
+OTel stack sit behind env-selected adapters with in-process fallbacks, so the
+system boots with just Postgres.
 
 Details: [docs/architecture.md](docs/architecture.md) ·
 [backend pattern](docs/backend-pattern.md) · [runbook](docs/RUNBOOK.md) ·
@@ -183,7 +195,7 @@ Every change lands through a short-lived branch → PR → **full merge commit**
 
 - Backend: `go build`, `go vet`, `go test ./...` (29 packages, incl. `-race` clean)
 - Fresh-install proof: migrations apply on empty PostgreSQL; double-boot idempotent
-- Frontend: `vitest`, `tsc --noEmit`, production `vite build`
+- Frontend: `vitest`, `tsc --noEmit`, production `vite build` (+ Playwright smoke shots)
 - Spec parity: OpenAPI ↔ router check both directions; i18n key parity EN/FR
 
 ## Roadmap

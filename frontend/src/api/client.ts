@@ -201,7 +201,10 @@ async function request<T>(token: string | null, path: string, init?: RequestInit
     throw new Error(`API ${res.status}: ${body}`);
   }
   if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  const data = (await res.json()) as T;
+  // List endpoints serialize empty results as JSON null (Go nil slices);
+  // normalize so callers can always map/filter.
+  return (data === null ? [] : data) as T;
 }
 
 export const api = {
