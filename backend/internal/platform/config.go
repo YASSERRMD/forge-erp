@@ -13,6 +13,7 @@ import (
 type Config struct {
 	Env            string // development | test | production
 	HTTPPort       string
+	AdminPort      string // loopback-only metrics listener (Phase 0 task 6)
 	DatabaseURL    string
 	JWTSecret      string
 	AdminEmail     string
@@ -43,6 +44,7 @@ func Load() Config {
 	return Config{
 		Env:            getenv("FERP_ENV", "development"),
 		HTTPPort:       getenv("FERP_HTTP_PORT", "8080"),
+		AdminPort:      getenv("FERP_ADMIN_PORT", "9090"),
 		DatabaseURL:    getenv("FERP_DATABASE_URL", "postgres://forgeerp:forgeerp@localhost:5432/forgeerp?sslmode=disable"),
 		JWTSecret:      getenv("FERP_JWT_SECRET", "dev-only-insecure-secret-change-me"),
 		AdminEmail:     getenv("FERP_ADMIN_EMAIL", "admin@forgeerp.local"),

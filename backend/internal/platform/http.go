@@ -10,7 +10,9 @@ import (
 
 // Router builds the base HTTP router with platform middleware and health endpoints.
 // Extra middlewares must be supplied here (chi panics if Use follows routes).
-func Router(build BuildInfo, middlewares ...func(http.Handler) http.Handler) http.Handler {
+// readyPing gates /readyz on the database (nil leaves the pre-existing
+// always-ok behavior for contexts without a pool, e.g. unit tests).
+func Router(build BuildInfo, readyPing func() error, middlewares ...func(http.Handler) http.Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -19,7 +21,11 @@ func Router(build BuildInfo, middlewares ...func(http.Handler) http.Handler) htt
 	r.Use(middlewares...)
 
 	r.Get("/healthz", HealthHandler(build, false))
-	r.Get("/readyz", HealthHandler(build, true))
+	var pings []func() error
+	if readyPing != nil {
+		pings = append(pings, readyPing)
+	}
+	r.Get("/readyz", HealthHandler(build, true, pings...))
 	return r
 }
 

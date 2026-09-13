@@ -176,7 +176,8 @@ func run() error {
 		searcher = mem
 	}
 
-	base := platform.Router(build, metrics.Instrument)
+	// /readyz gates on a live database connection (Phase 0 task 6).
+	base := platform.Router(build, func() error { return pool.Ping(ctx) }, metrics.Instrument)
 	mux, ok := base.(chi.Router)
 	if !ok {
 		return errors.New("platform router is not a chi router")
@@ -307,7 +308,6 @@ func run() error {
 		documentsvc.Routes(r, docSvc, idH.Require)
 		search.Routes(r, searcher, idH.Require)
 	})
-	mux.Handle("/metrics", metrics.Handler(build))
 	// Public bearer-link downloads (portal-lite). Rate-limited like the API,
 	// but outside RBAC: the unguessable token is the credential.
 	mux.With(apiLimiter.Limit).Get("/public/share/{token}", documentsvc.PublicShare(docSvc))
@@ -319,13 +319,32 @@ func run() error {
 		WriteTimeout: cfg.WriteTimeout,
 	}
 
+	// /metrics lives off the public listener on a loopback-only admin port
+	// (Phase 0 task 6): scrapers reach it via the host/pod network, the
+	// public API surface does not expose it.
+	adminMux := http.NewServeMux()
+	adminMux.Handle("/metrics", metrics.Handler(build))
+	adminSrv := &http.Server{
+		Addr:         "127.0.0.1:" + cfg.AdminPort,
+		Handler:      adminMux,
+		ReadTimeout:  cfg.ReadTimeout,
+		WriteTimeout: cfg.WriteTimeout,
+	}
+
 	go func() {
 		<-ctx.Done()
 		shutCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimout)
 		defer cancel()
 		_ = srv.Shutdown(shutCtx)
+		_ = adminSrv.Shutdown(shutCtx)
 	}()
 
+	go func() {
+		log.Printf("forgeerp admin (metrics) listening on 127.0.0.1:%s", cfg.AdminPort)
+		if err := adminSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("forgeerp: admin server: %v", err)
+		}
+	}()
 	log.Printf("forgeerp api listening on :%s (env=%s)", cfg.HTTPPort, cfg.Env)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
