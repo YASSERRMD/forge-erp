@@ -139,22 +139,21 @@ func (s *PGStore) PostEntry(ctx context.Context, db platform.DBTX, e *Entry) err
 	if err := e.Validate(); err != nil {
 		return err
 	}
-	// Begin is not part of the DBTX surface; the store keeps its pool
-	// for starting the post transaction.
-	tx, err := s.pool.Begin(ctx)
+	// Joins the caller's transaction when one is in flight (service
+	// orchestration); otherwise posts in its own transaction.
+	tx, finish, err := platform.JoinTx(ctx, s.pool, db)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
 	// Fiscal-year lock: entry date must fall in an unlocked year (or no year defined).
 	var locked bool
 	err = tx.QueryRow(ctx, `SELECT COALESCE(BOOL_OR(locked), FALSE) FROM ferp_fiscal_years
 		WHERE entity_id=$1 AND start_date<=$2 AND end_date>=$2`, e.EntityID, e.Date).Scan(&locked)
 	if err != nil {
-		return err
+		return finish(err)
 	}
 	if locked {
-		return errors.New("finance: fiscal year locked for entry date")
+		return finish(errors.New("finance: fiscal year locked for entry date"))
 	}
 	// Chain head.
 	var prev string
@@ -163,7 +162,7 @@ func (s *PGStore) PostEntry(ctx context.Context, db platform.DBTX, e *Entry) err
 	if errors.Is(err, pgx.ErrNoRows) {
 		prev = GenesisHash
 	} else if err != nil {
-		return err
+		return finish(err)
 	}
 	e.PrevHash = prev
 	e.ChainHash = Chain(prev, e.JournalID, e.Ref, e.Date, e.Lines)
@@ -174,16 +173,16 @@ func (s *PGStore) PostEntry(ctx context.Context, db platform.DBTX, e *Entry) err
 		e.EntityID, e.JournalID, e.Ref, e.Date, e.Memo, e.Status, e.PrevHash, e.ChainHash, e.CreatedBy,
 	).Scan(&e.ID, &e.RowVersion)
 	if err != nil {
-		return err
+		return finish(err)
 	}
 	for i, l := range e.Lines {
 		if _, err := tx.Exec(ctx, `INSERT INTO ferp_entry_lines
 			(entry_id, pos, account_id, label, debit, credit) VALUES ($1,$2,$3,$4,$5,$6)`,
 			e.ID, i, l.AccountID, l.Label, l.Debit, l.Credit); err != nil {
-			return err
+			return finish(err)
 		}
 	}
-	return tx.Commit(ctx)
+	return finish(nil)
 }
 
 type queryFunc func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)

@@ -143,13 +143,13 @@ func (s *PGStore) Level(ctx context.Context, db platform.DBTX, productID, wareho
 }
 
 func (s *PGStore) AppendMovement(ctx context.Context, db platform.DBTX, m *StockMovement, allowNegative bool) (StockLevel, error) {
-	// Begin is not part of the DBTX surface; the store keeps its pool
-	// for starting the post transaction.
-	tx, err := s.pool.Begin(ctx)
+	// Joins the caller's transaction when one is in flight (service
+	// orchestration); otherwise posts in its own transaction. The FOR UPDATE
+	// row lock serializes concurrent postings either way.
+	tx, finish, err := platform.JoinTx(ctx, s.pool, db)
 	if err != nil {
 		return StockLevel{}, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
 	var cur StockLevel
 	err = tx.QueryRow(ctx, `SELECT product_id, warehouse_id, qty, total_value FROM ferp_stock_levels
 		WHERE product_id=$1 AND warehouse_id=$2 FOR UPDATE`, m.ProductID, m.WarehouseID).
@@ -157,27 +157,27 @@ func (s *PGStore) AppendMovement(ctx context.Context, db platform.DBTX, m *Stock
 	if errors.Is(err, pgx.ErrNoRows) {
 		cur = StockLevel{ProductID: m.ProductID, WarehouseID: m.WarehouseID}
 	} else if err != nil {
-		return StockLevel{}, err
+		return StockLevel{}, finish(err)
 	}
 	next, err := Apply(cur, *m, allowNegative)
 	if err != nil {
-		return StockLevel{}, err
+		return StockLevel{}, finish(err)
 	}
 	if err := tx.QueryRow(ctx, `INSERT INTO ferp_stock_movements
 		(entity_id, product_id, warehouse_id, lot_id, qty, unit_cost, reason, ref, created_by)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, created_at`,
 		m.EntityID, m.ProductID, m.WarehouseID, m.LotID, m.Qty, m.UnitCost, m.Reason, m.Ref, m.CreatedBy,
 	).Scan(&m.ID, &m.CreatedAt); err != nil {
-		return StockLevel{}, err
+		return StockLevel{}, finish(err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO ferp_stock_levels (product_id, warehouse_id, qty, total_value, updated_at)
 		VALUES ($1,$2,$3,$4,now())
 		ON CONFLICT (product_id, warehouse_id) DO UPDATE
 		SET qty=$3, total_value=$4, updated_at=now()`,
 		next.ProductID, next.WarehouseID, next.Qty, next.TotalValue); err != nil {
-		return StockLevel{}, err
+		return StockLevel{}, finish(err)
 	}
-	if err := tx.Commit(ctx); err != nil {
+	if err := finish(nil); err != nil {
 		return StockLevel{}, err
 	}
 	return next, nil

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
@@ -43,6 +44,7 @@ type Deps struct {
 	WalkinOrg int64 // FERP_POS_WALKIN_ORG: default customer for anonymous sales (0 = require org)
 	Bus       platform.Bus
 	DB        platform.DBTX
+	Pool      *pgxpool.Pool // transaction source for the checkout service (nil in tests)
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -50,7 +52,7 @@ type Middleware func(module, entity, action string) func(http.Handler) http.Hand
 
 // Routes mounts the pos surface (caller nests at /api/v1).
 func Routes(r chi.Router, d Deps, mw Middleware) {
-	h := &Handler{deps: d}
+	h := &Handler{deps: d, svc: NewService(d.Pool, d.Store, d.Catalog, d.Sales, d.WalkinOrg, d.Bus)}
 	r.With(mw("pos", "terminal", "write")).Post("/pos/terminals", h.CreateTerminal)
 	r.With(mw("pos", "terminal", "read")).Get("/pos/terminals", h.ListTerminals)
 	r.With(mw("pos", "session", "write")).Post("/pos/sessions", h.OpenSession)
@@ -64,7 +66,10 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 }
 
 // Handler implements the pos HTTP surface.
-type Handler struct{ deps Deps }
+type Handler struct {
+	deps Deps
+	svc  *Service
+}
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -218,165 +223,21 @@ type checkoutIn struct {
 	Payments  []Tender `json:"payments"` // optional multi-tender legs
 }
 
-// Checkout rings a sale: validates stock, posts a validated invoice + full
-// payment, decrements tracked goods, and records the till sale.
+// Checkout rings a sale through the checkout service: validated invoice +
+// full payment, tracked-goods decrements, and the till sale commit atomically.
 func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	var in checkoutIn
 	if err := decode(r, &in); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	se, err := h.deps.Store.SessionByID(ctx, h.deps.DB, entityOf(r), in.SessionID)
+	rec, err := h.svc.Checkout(r.Context(), CheckoutCmd{
+		EntityID: entityOf(r), SessionID: in.SessionID, OrgID: in.OrgID,
+		Lines: in.Lines, Method: in.Method, Tendered: in.Tendered, Payments: in.Payments})
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	if se.Status != SessionOpen {
-		writeErr(w, http.StatusUnprocessableEntity, "pos: session closed")
-		return
-	}
-	term, err := h.deps.Store.TerminalByID(ctx, h.deps.DB, entityOf(r), se.TerminalID)
-	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
-	}
-	if term.Status != TerminalActive {
-		writeErr(w, http.StatusUnprocessableEntity, "pos: terminal inactive")
-		return
-	}
-	entity := entityOf(r)
-	dlines := make([]documents.Line, 0, len(in.Lines))
-	type need struct {
-		productID int64
-		qty       int64
-	}
-	var needs []need
-	for _, l := range in.Lines {
-		if err := l.Validate(); err != nil {
-			writeErr(w, http.StatusUnprocessableEntity, err.Error())
-			return
-		}
-		p, err := h.deps.Catalog.ProductByID(ctx, h.deps.DB, entity, l.ProductID)
-		if err != nil {
-			writeErr(w, storeErrorCode(err), err.Error())
-			return
-		}
-		if p.Status != catalog.ProductActive {
-			writeErr(w, http.StatusUnprocessableEntity, "pos: product not sellable")
-			return
-		}
-		dlines = append(dlines, documents.Line{ProductID: p.ID, Label: p.Name,
-			Qty: l.Qty, UnitNet: p.NetPrice, VATRateBps: int(p.VATRateBps)})
-		if p.Type == catalog.ProductGoods && p.StockTracked {
-			lvl, err := h.deps.Catalog.Level(ctx, h.deps.DB, p.ID, term.WarehouseID)
-			if err != nil {
-				writeErr(w, http.StatusInternalServerError, "stock check failed")
-				return
-			}
-			if lvl.Qty < l.Qty {
-				writeErr(w, http.StatusUnprocessableEntity, "pos: insufficient stock")
-				return
-			}
-			needs = append(needs, need{productID: p.ID, qty: l.Qty})
-		}
-	}
-	tot, err := documents.Sum(dlines)
-	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	method := in.Method
-	if method == "" {
-		method = PayCash
-	}
-	tendered := in.Tendered
-	legs := []Tender{{Method: method, Amount: tendered}}
-	if len(in.Payments) > 0 {
-		for _, tg := range in.Payments {
-			if err := tg.Validate(); err != nil {
-				writeErr(w, http.StatusUnprocessableEntity, err.Error())
-				return
-			}
-		}
-		tendered = 0
-		seen := map[string]bool{}
-		for _, tg := range in.Payments {
-			tendered += tg.Amount
-			seen[tg.Method] = true
-		}
-		legs = in.Payments
-		method = in.Payments[0].Method
-		if len(seen) > 1 {
-			method = "mixed"
-		}
-	}
-	orgID := in.OrgID
-	if orgID == 0 {
-		if h.deps.WalkinOrg == 0 {
-			writeErr(w, http.StatusUnprocessableEntity, "pos: customer org required (no anonymous sales in lite scope)")
-			return
-		}
-		orgID = h.deps.WalkinOrg
-	}
-	sale := Sale{EntityID: entity, SessionID: se.ID, OrgID: orgID,
-		Lines: in.Lines, Method: method, Tendered: tendered}
-	if err := sale.Validate(); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
-	}
-	if tendered < tot.Gross {
-		writeErr(w, http.StatusUnprocessableEntity, "pos: tendered below total")
-		return
-	}
-	ym := time.Now().UTC().Format("200601")
-	inv := &sales.Document{EntityID: entity, Type: documents.TypeInvoice, OrgID: orgID,
-		Currency: "USD", RateToBase: 1000000, Lines: dlines}
-	if err := h.deps.Sales.CreateDoc(ctx, h.deps.DB, inv, ym); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
-	}
-	validated, err := h.deps.Sales.SetStatus(ctx, h.deps.DB, entity, inv.ID, sales.InvoiceValidated)
-	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
-	}
-	inv = &validated
-	// Split the gross across tender legs in order (change stays on the till).
-	remaining := tot.Gross
-	for _, leg := range legs {
-		alloc := leg.Amount
-		if alloc > remaining {
-			alloc = remaining
-		}
-		if alloc <= 0 {
-			continue
-		}
-		pay := &sales.Payment{EntityID: entity, OrgID: orgID, Amount: alloc,
-			Currency: "USD", Method: leg.Method, PaidAt: time.Now().UTC()}
-		if _, err := h.deps.Sales.RecordPayment(ctx, h.deps.DB, pay, []int64{inv.ID}, ym); err != nil {
-			writeErr(w, storeErrorCode(err), err.Error())
-			return
-		}
-		remaining -= alloc
-	}
-	for _, n := range needs {
-		qty := n.qty
-		if _, err := h.deps.Catalog.AppendMovement(ctx, h.deps.DB, &catalog.StockMovement{
-			EntityID: entity, ProductID: n.productID, WarehouseID: term.WarehouseID,
-			Qty: -qty, Reason: catalog.ReasonShipment, Ref: inv.Ref}, false); err != nil {
-			writeErr(w, storeErrorCode(err), err.Error())
-			return
-		}
-	}
-	rec := &Sale{EntityID: entity, SessionID: se.ID, Ref: inv.Ref, OrgID: orgID,
-		Lines: in.Lines, TotalGross: tot.Gross, Method: method, Tendered: tendered,
-		Change: tendered - tot.Gross, Status: SaleCompleted, InvoiceID: inv.ID}
-	if err := h.deps.Store.CreateSale(ctx, h.deps.DB, rec); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
-	}
-	h.publish(ctx, entityOf(r), "forgeerp.pos.sale.completed.v1", "sale", rec.ID)
 	writeJSON(w, http.StatusCreated, rec)
 }
 

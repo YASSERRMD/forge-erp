@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
@@ -19,6 +20,7 @@ type Deps struct {
 	DB     platform.DBTX
 	Ledger Ledger
 	Bus    platform.Bus
+	Pool   *pgxpool.Pool // transaction source for the produce service (nil in tests)
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -26,7 +28,7 @@ type Middleware func(module, entity, action string) func(http.Handler) http.Hand
 
 // Routes mounts the manufacturing surface (caller nests at /api/v1).
 func Routes(r chi.Router, d Deps, mw Middleware) {
-	h := &Handler{deps: d}
+	h := &Handler{deps: d, svc: NewService(d.Pool, d.Store, d.Ledger, d.Bus)}
 	r.With(mw("manufacturing", "bom", "write")).Post("/manufacturing/boms", h.CreateBOM)
 	r.With(mw("manufacturing", "bom", "read")).Get("/manufacturing/boms", h.ListBOMs)
 	r.With(mw("manufacturing", "bom", "read")).Get("/manufacturing/boms/{id}", h.GetBOM)
@@ -41,7 +43,10 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 }
 
 // Handler implements the manufacturing HTTP surface.
-type Handler struct{ deps Deps }
+type Handler struct {
+	deps Deps
+	svc  *Service
+}
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -276,33 +281,18 @@ func (h *Handler) SetMOStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // Produce consumes components and receipts the finished good through the
-// catalog ledger, then flips the MO to produced. 422 on insufficient stock.
+// catalog ledger, then flips the MO to produced — atomically via the produce
+// service. 422 on insufficient stock.
 func (h *Handler) Produce(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	mo, err := h.deps.Store.MOByID(r.Context(), h.deps.DB, entityOf(r), id)
+	done, plan, err := h.svc.Produce(r.Context(), ProduceCmd{EntityID: entityOf(r), MOID: id})
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	lines, err := h.deps.Store.LinesOf(r.Context(), h.deps.DB, mo.BOMID)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "lines failed")
-		return
-	}
-	plan, err := PostProduce(r.Context(), h.deps.DB, mo, lines, h.deps.Ledger)
-	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
-	}
-	done, err := h.deps.Store.MarkProduced(r.Context(), h.deps.DB, entityOf(r), mo.ID, mo.RowVersion)
-	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
-	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.manufacturing.mo.produced.v1", "mo", done.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"mo": done, "plan": plan})
 }

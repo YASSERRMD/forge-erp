@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/finance"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
@@ -26,6 +26,7 @@ type Deps struct {
 	DB      platform.DBTX
 	Finance Finance // nil disables expense payout posting
 	Bus     platform.Bus
+	Pool    *pgxpool.Pool // transaction source for the payout service (nil in tests)
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -33,7 +34,7 @@ type Middleware func(module, entity, action string) func(http.Handler) http.Hand
 
 // Routes mounts the hr surface (caller nests at /api/v1).
 func Routes(r chi.Router, d Deps, mw Middleware) {
-	h := &Handler{deps: d}
+	h := &Handler{deps: d, svc: NewService(d.Pool, d.Store, d.Finance, d.Bus)}
 	r.With(mw("hr", "leave", "write")).Post("/hr/leaves", h.CreateLeave)
 	r.With(mw("hr", "leave", "read")).Get("/hr/leaves", h.ListLeaves)
 	r.With(mw("hr", "leave", "validate")).Post("/hr/leaves/{id}/status", h.SetLeaveStatus)
@@ -48,7 +49,10 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 }
 
 // Handler implements the hr HTTP surface.
-type Handler struct{ deps Deps }
+type Handler struct {
+	deps Deps
+	svc  *Service
+}
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -249,9 +253,9 @@ type payExpenseIn struct {
 	RowVersion      int64 `json:"row_version"`
 }
 
-// PayExpense pays an approved report posting a balanced ledger entry
-// (debit expense, credit bank). Flip-first with best-effort revert bounds
-// double-posting when the ledger write fails mid-flight.
+// PayExpense pays an approved report through the payout service: status
+// flip and balanced ledger entry (debit expense, credit bank) commit
+// atomically. A ledger failure now rolls back instead of best-effort revert.
 func (h *Handler) PayExpense(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r, "id")
 	if !ok {
@@ -271,29 +275,13 @@ func (h *Handler) PayExpense(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "hr: journal, expense and bank accounts required")
 		return
 	}
-	paid, err := h.deps.Store.SetExpenseStatus(r.Context(), h.deps.DB, entityOf(r), id, ExpensePaid, in.RowVersion)
+	paid, err := h.svc.Pay(r.Context(), PayCmd{
+		EntityID: entityOf(r), ReportID: id, JournalID: in.JournalID,
+		ExpenseAccount: in.ExpenseAccount, BankAccount: in.BankAccount, RowVersion: in.RowVersion})
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	total, err := h.deps.Store.ExpenseTotal(r.Context(), h.deps.DB, entityOf(r), id)
-	if err != nil {
-		_, _ = h.deps.Store.SetExpenseStatus(r.Context(), h.deps.DB, entityOf(r), id, ExpenseApproved, paid.RowVersion)
-		writeErr(w, http.StatusInternalServerError, "total failed")
-		return
-	}
-	entry := &finance.Entry{EntityID: paid.EntityID, JournalID: in.JournalID,
-		Ref: "EXP-" + paid.Ref, Date: time.Now().UTC(), Memo: "Expense payout " + paid.Ref,
-		Lines: []finance.EntryLine{
-			{AccountID: in.ExpenseAccount, Label: "Expense " + paid.Ref, Debit: total},
-			{AccountID: in.BankAccount, Label: "Expense " + paid.Ref, Credit: total},
-		}}
-	if err := h.deps.Finance.PostEntry(r.Context(), h.deps.DB, entry); err != nil {
-		_, _ = h.deps.Store.SetExpenseStatus(r.Context(), h.deps.DB, entityOf(r), id, ExpenseApproved, paid.RowVersion)
-		writeErr(w, http.StatusBadGateway, "ledger posting failed; report reverted to approved")
-		return
-	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.hr.expense.paid.v1", "expense", paid.ID)
 	writeJSON(w, http.StatusOK, paid)
 }
 // CreateSalary records a draft salary line (net must equal gross minus charges).

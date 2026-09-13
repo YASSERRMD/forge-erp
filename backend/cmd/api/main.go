@@ -247,15 +247,15 @@ func run() error {
 		finance.Routes(r, finance.Deps{Store: fstore, DB: pool}, idH.Require)
 		services.Routes(r, services.Deps{Store: svcstore, Bus: bus, DB: pool},
 			idH.Require)
-		manufacturing.Routes(r, manufacturing.Deps{Store: mfstore, Ledger: cstore, Bus: bus, DB: pool},
+		manufacturing.Routes(r, manufacturing.Deps{Store: mfstore, Ledger: cstore, Bus: bus, DB: pool, Pool: pool},
 			idH.Require)
-		hr.Routes(r, hr.Deps{Store: hrstore, Finance: fstore, Bus: bus, DB: pool}, idH.Require)
+		hr.Routes(r, hr.Deps{Store: hrstore, Finance: fstore, Bus: bus, DB: pool, Pool: pool}, idH.Require)
 		posstore := pos.NewPGStore(pool)
 		var walkinOrg int64
 		if v := os.Getenv("FERP_POS_WALKIN_ORG"); v != "" {
 			_, _ = fmt.Sscanf(v, "%d", &walkinOrg)
 		}
-		pos.Routes(r, pos.Deps{Store: posstore, Catalog: cstore, Sales: sstore, WalkinOrg: walkinOrg, Bus: bus, DB: pool},
+		pos.Routes(r, pos.Deps{Store: posstore, Catalog: cstore, Sales: sstore, WalkinOrg: walkinOrg, Bus: bus, DB: pool, Pool: pool},
 			idH.Require)
 		reporting.Routes(r, reporting.Deps{Ledger: fstore, Billing: sstore, Stock: cstore, Orgs: pstore, DB: pool},
 			idH.Require)
