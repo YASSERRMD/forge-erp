@@ -25,3 +25,17 @@ func TestLoadEnvOverrides(t *testing.T) {
 		t.Fatalf("env overrides not applied: %+v", cfg)
 	}
 }
+
+// TestCheckProdSecrets proves production refuses the development JWT
+// secret while development and operator-set secrets boot (Phase 0 task 7).
+func TestCheckProdSecrets(t *testing.T) {
+	if err := CheckProdSecrets(Config{Env: "production", JWTSecret: DefaultJWTSecret}); err == nil {
+		t.Fatal("production with default secret booted")
+	}
+	if err := CheckProdSecrets(Config{Env: "production", JWTSecret: "operator-set-secret"}); err != nil {
+		t.Fatalf("production with operator secret refused: %v", err)
+	}
+	if err := CheckProdSecrets(Config{Env: "development", JWTSecret: DefaultJWTSecret}); err != nil {
+		t.Fatalf("development refused: %v", err)
+	}
+}

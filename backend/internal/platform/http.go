@@ -15,7 +15,9 @@ import (
 func Router(build BuildInfo, readyPing func() error, middlewares ...func(http.Handler) http.Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// Trusted-proxy client IP (Phase 0 task 7): X-Forwarded-For is honored
+	// only from FERP_TRUSTED_PROXIES (default loopback + RFC 1918).
+	r.Use(RealIPFromTrusted(TrustedProxiesFromEnv()))
 	r.Use(middleware.Recoverer)
 	r.Use(SecurityHeaders)
 	r.Use(middlewares...)

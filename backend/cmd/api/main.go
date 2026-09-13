@@ -75,6 +75,11 @@ func run() error {
 	} else if n > 0 {
 		log.Printf("forgeerp: applied %d config overlay keys", n)
 	}
+	// Refuse production boot with development secrets (Phase 0 task 7).
+	// Checked after the DB overlay so an operator-set secret passes.
+	if err := platform.CheckProdSecrets(cfg); err != nil {
+		return err
+	}
 
 	issuer, err := identity.NewIssuer(cfg.JWTSecret)
 	if err != nil {
@@ -235,6 +240,10 @@ func run() error {
 	// Abuse caps: 20 rps burst 40 per IP across the API (login endpoints additionally
 	// guarded by per-account lockout in the identity context).
 	apiLimiter := platform.NewRateLimiter(20, 40)
+	// Bound the per-IP bucket map: evict buckets idle > 10m, every minute
+	// (Phase 0 task 7).
+	stopLimiter := apiLimiter.StartCleanup(time.Minute, 10*time.Minute)
+	defer stopLimiter()
 	mux.With(apiLimiter.Limit).Route("/api/v1", func(r chi.Router) {
 		identity.Routes(r, identDeps)
 		partners.Routes(r, partners.Deps{Store: pstore, Bus: bus, DB: pool},
