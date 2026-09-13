@@ -179,7 +179,7 @@ func (h *Handler) SetMemberStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	m, err := h.deps.Store.SetMemberStatus(r.Context(), id, MemberStatus(in.Status), in.RowVersion)
+	m, err := h.deps.Store.SetMemberStatus(r.Context(), entityOf(r), id, MemberStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -217,7 +217,7 @@ func (h *Handler) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.SubscriptionsOf(r.Context(), mid)
+	list, err := h.deps.Store.SubscriptionsOf(r.Context(), entityOf(r), mid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -237,7 +237,7 @@ func (h *Handler) SetSubscriptionStatus(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	s, err := h.deps.Store.SetSubscriptionStatus(r.Context(), id, SubscriptionStatus(in.Status), in.RowVersion)
+	s, err := h.deps.Store.SetSubscriptionStatus(r.Context(), entityOf(r), id, SubscriptionStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -286,7 +286,7 @@ func (h *Handler) SetDonationStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	d, err := h.deps.Store.SetDonationStatus(r.Context(), id, DonationStatus(in.Status), in.RowVersion)
+	d, err := h.deps.Store.SetDonationStatus(r.Context(), entityOf(r), id, DonationStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

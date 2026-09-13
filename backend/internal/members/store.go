@@ -15,14 +15,14 @@ type Store interface {
 	CreateType(ctx context.Context, t *MemberType) error
 	ListTypes(ctx context.Context, entityID int64) ([]MemberType, error)
 	CreateMember(ctx context.Context, m *Member) error
-	MemberByID(ctx context.Context, id int64) (Member, error)
+	MemberByID(ctx context.Context, entityID int64, id int64) (Member, error)
 	ListMembers(ctx context.Context, entityID int64, limit, offset int) ([]Member, error)
-	SetMemberStatus(ctx context.Context, id int64, to MemberStatus, rowVersion int64) (Member, error)
+	SetMemberStatus(ctx context.Context, entityID int64, id int64, to MemberStatus, rowVersion int64) (Member, error)
 	CreateSubscription(ctx context.Context, s *Subscription) error
-	SetSubscriptionStatus(ctx context.Context, id int64, to SubscriptionStatus, rowVersion int64) (Subscription, error)
-	SubscriptionsOf(ctx context.Context, memberID int64) ([]Subscription, error)
+	SetSubscriptionStatus(ctx context.Context, entityID int64, id int64, to SubscriptionStatus, rowVersion int64) (Subscription, error)
+	SubscriptionsOf(ctx context.Context, entityID int64, memberID int64) ([]Subscription, error)
 	CreateDonation(ctx context.Context, d *Donation) error
-	SetDonationStatus(ctx context.Context, id int64, to DonationStatus, rowVersion int64) (Donation, error)
+	SetDonationStatus(ctx context.Context, entityID int64, id int64, to DonationStatus, rowVersion int64) (Donation, error)
 	ListDonations(ctx context.Context, entityID int64, limit, offset int) ([]Donation, error)
 }
 
@@ -75,6 +75,11 @@ func (s *PGStore) CreateMember(ctx context.Context, m *Member) error {
 	if err := m.Validate(); err != nil {
 		return err
 	}
+	var typeID int64
+	if err := s.pool.QueryRow(ctx, `SELECT id FROM ferp_member_types WHERE id=$1 AND entity_id=$2`,
+		m.TypeID, m.EntityID).Scan(&typeID); err != nil {
+		return errors.New("members: unknown type")
+	}
 	return s.pool.QueryRow(ctx, `INSERT INTO ferp_members
 		(entity_id, ref, type_id, first_name, last_name, company, email, status)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, row_version`,
@@ -82,8 +87,8 @@ func (s *PGStore) CreateMember(ctx context.Context, m *Member) error {
 	).Scan(&m.ID, &m.RowVersion)
 }
 
-func (s *PGStore) MemberByID(ctx context.Context, id int64) (Member, error) {
-	return scanMember(s.pool.QueryRow(ctx, `SELECT `+memberCols+` FROM ferp_members WHERE id=$1`, id))
+func (s *PGStore) MemberByID(ctx context.Context, entityID int64, id int64) (Member, error) {
+	return scanMember(s.pool.QueryRow(ctx, `SELECT `+memberCols+` FROM ferp_members WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 func (s *PGStore) ListMembers(ctx context.Context, entityID int64, limit, offset int) ([]Member, error) {
@@ -104,8 +109,8 @@ func (s *PGStore) ListMembers(ctx context.Context, entityID int64, limit, offset
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetMemberStatus(ctx context.Context, id int64, to MemberStatus, rowVersion int64) (Member, error) {
-	m, err := s.MemberByID(ctx, id)
+func (s *PGStore) SetMemberStatus(ctx context.Context, entityID int64, id int64, to MemberStatus, rowVersion int64) (Member, error) {
+	m, err := s.MemberByID(ctx, entityID, id)
 	if err != nil {
 		return Member{}, err
 	}
@@ -116,7 +121,7 @@ func (s *PGStore) SetMemberStatus(ctx context.Context, id int64, to MemberStatus
 		return Member{}, errors.New("members: illegal transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_members SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND entity_id=$4 AND row_version=$3`, to, id, rowVersion, entityID)
 	if err != nil {
 		return Member{}, err
 	}
@@ -144,6 +149,9 @@ func (s *PGStore) CreateSubscription(ctx context.Context, su *Subscription) erro
 	if err := su.Validate(); err != nil {
 		return err
 	}
+	if _, err := s.MemberByID(ctx, su.EntityID, su.MemberID); err != nil {
+		return errors.New("members: unknown member")
+	}
 	return s.pool.QueryRow(ctx, `INSERT INTO ferp_subscriptions
 		(entity_id, member_id, year, amount, status)
 		VALUES ($1,$2,$3,$4,$5) RETURNING id, row_version`,
@@ -151,8 +159,8 @@ func (s *PGStore) CreateSubscription(ctx context.Context, su *Subscription) erro
 	).Scan(&su.ID, &su.RowVersion)
 }
 
-func (s *PGStore) SetSubscriptionStatus(ctx context.Context, id int64, to SubscriptionStatus, rowVersion int64) (Subscription, error) {
-	su, err := scanSub(s.pool.QueryRow(ctx, `SELECT `+subCols+` FROM ferp_subscriptions WHERE id=$1`, id))
+func (s *PGStore) SetSubscriptionStatus(ctx context.Context, entityID int64, id int64, to SubscriptionStatus, rowVersion int64) (Subscription, error) {
+	su, err := scanSub(s.pool.QueryRow(ctx, `SELECT `+subCols+` FROM ferp_subscriptions WHERE id=$1 AND entity_id=$2`, id, entityID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Subscription{}, identity.ErrNotFound
 	}
@@ -166,7 +174,7 @@ func (s *PGStore) SetSubscriptionStatus(ctx context.Context, id int64, to Subscr
 		return Subscription{}, errors.New("members: illegal transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_subscriptions SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND entity_id=$4 AND row_version=$3`, to, id, rowVersion, entityID)
 	if err != nil {
 		return Subscription{}, err
 	}
@@ -178,8 +186,8 @@ func (s *PGStore) SetSubscriptionStatus(ctx context.Context, id int64, to Subscr
 	return su, nil
 }
 
-func (s *PGStore) SubscriptionsOf(ctx context.Context, memberID int64) ([]Subscription, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+subCols+` FROM ferp_subscriptions WHERE member_id=$1 ORDER BY year`, memberID)
+func (s *PGStore) SubscriptionsOf(ctx context.Context, entityID int64, memberID int64) ([]Subscription, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+subCols+` FROM ferp_subscriptions WHERE member_id=$1 AND entity_id=$2 ORDER BY year`, memberID, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -218,8 +226,8 @@ func (s *PGStore) CreateDonation(ctx context.Context, d *Donation) error {
 	).Scan(&d.ID, &d.RowVersion)
 }
 
-func (s *PGStore) SetDonationStatus(ctx context.Context, id int64, to DonationStatus, rowVersion int64) (Donation, error) {
-	d, err := scanDonation(s.pool.QueryRow(ctx, `SELECT `+donationCols+` FROM ferp_donations WHERE id=$1`, id))
+func (s *PGStore) SetDonationStatus(ctx context.Context, entityID int64, id int64, to DonationStatus, rowVersion int64) (Donation, error) {
+	d, err := scanDonation(s.pool.QueryRow(ctx, `SELECT `+donationCols+` FROM ferp_donations WHERE id=$1 AND entity_id=$2`, id, entityID))
 	if err != nil {
 		return Donation{}, err
 	}
@@ -230,7 +238,7 @@ func (s *PGStore) SetDonationStatus(ctx context.Context, id int64, to DonationSt
 		return Donation{}, errors.New("members: illegal transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_donations SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND entity_id=$4 AND row_version=$3`, to, id, rowVersion, entityID)
 	if err != nil {
 		return Donation{}, err
 	}
@@ -314,7 +322,8 @@ func (m *MemoryStore) CreateMember(_ context.Context, mb *Member) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.types[mb.TypeID]; !ok {
+	ty, ok := m.types[mb.TypeID]
+	if !ok || ty.EntityID != mb.EntityID {
 		return errors.New("members: unknown type")
 	}
 	for _, e := range m.members {
@@ -328,11 +337,11 @@ func (m *MemoryStore) CreateMember(_ context.Context, mb *Member) error {
 	return nil
 }
 
-func (m *MemoryStore) MemberByID(_ context.Context, id int64) (Member, error) {
+func (m *MemoryStore) MemberByID(_ context.Context, entityID int64, id int64) (Member, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	mb, ok := m.members[id]
-	if !ok {
+	if !ok || mb.EntityID != entityID {
 		return Member{}, identity.ErrNotFound
 	}
 	return mb, nil
@@ -357,11 +366,11 @@ func (m *MemoryStore) ListMembers(_ context.Context, entityID int64, limit, offs
 	return out, nil
 }
 
-func (m *MemoryStore) SetMemberStatus(_ context.Context, id int64, to MemberStatus, rowVersion int64) (Member, error) {
+func (m *MemoryStore) SetMemberStatus(_ context.Context, entityID int64, id int64, to MemberStatus, rowVersion int64) (Member, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	mb, ok := m.members[id]
-	if !ok {
+	if !ok || mb.EntityID != entityID {
 		return Member{}, identity.ErrNotFound
 	}
 	if mb.RowVersion != rowVersion {
@@ -382,7 +391,8 @@ func (m *MemoryStore) CreateSubscription(_ context.Context, s *Subscription) err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.members[s.MemberID]; !ok {
+	mb, ok := m.members[s.MemberID]
+	if !ok || mb.EntityID != s.EntityID {
 		return errors.New("members: unknown member")
 	}
 	for _, e := range m.subs {
@@ -396,11 +406,11 @@ func (m *MemoryStore) CreateSubscription(_ context.Context, s *Subscription) err
 	return nil
 }
 
-func (m *MemoryStore) SetSubscriptionStatus(_ context.Context, id int64, to SubscriptionStatus, rowVersion int64) (Subscription, error) {
+func (m *MemoryStore) SetSubscriptionStatus(_ context.Context, entityID int64, id int64, to SubscriptionStatus, rowVersion int64) (Subscription, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.subs[id]
-	if !ok {
+	if !ok || s.EntityID != entityID {
 		return Subscription{}, identity.ErrNotFound
 	}
 	if s.RowVersion != rowVersion {
@@ -415,12 +425,12 @@ func (m *MemoryStore) SetSubscriptionStatus(_ context.Context, id int64, to Subs
 	return s, nil
 }
 
-func (m *MemoryStore) SubscriptionsOf(_ context.Context, memberID int64) ([]Subscription, error) {
+func (m *MemoryStore) SubscriptionsOf(_ context.Context, entityID int64, memberID int64) ([]Subscription, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Subscription
 	for _, s := range m.subs {
-		if s.MemberID == memberID {
+		if s.MemberID == memberID && s.EntityID == entityID {
 			out = append(out, s)
 		}
 	}
@@ -444,11 +454,11 @@ func (m *MemoryStore) CreateDonation(_ context.Context, d *Donation) error {
 	return nil
 }
 
-func (m *MemoryStore) SetDonationStatus(_ context.Context, id int64, to DonationStatus, rowVersion int64) (Donation, error) {
+func (m *MemoryStore) SetDonationStatus(_ context.Context, entityID int64, id int64, to DonationStatus, rowVersion int64) (Donation, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, ok := m.dons[id]
-	if !ok {
+	if !ok || d.EntityID != entityID {
 		return Donation{}, identity.ErrNotFound
 	}
 	if d.RowVersion != rowVersion {

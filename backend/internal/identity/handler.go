@@ -168,7 +168,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	if u.PasswordHash == "" || !VerifyPassword(u.PasswordHash, req.Password) {
 		updated, _ := RegisterFailure(u, now)
-		_ = h.deps.Store.UpdateUser(r.Context(), &updated)
+		_ = h.deps.Store.UpdateUser(r.Context(), updated.EntityID, &updated)
 		writeErr(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
@@ -177,7 +177,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "account unavailable")
 		return
 	}
-	_ = h.deps.Store.UpdateUser(r.Context(), &updated)
+	_ = h.deps.Store.UpdateUser(r.Context(), updated.EntityID, &updated)
 	access, err := h.deps.Issuer.IssueAccess(updated)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "token issue failed")
@@ -279,7 +279,7 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "account unavailable")
 		return
 	}
-	_ = h.deps.Store.UpdateUser(r.Context(), &updated)
+	_ = h.deps.Store.UpdateUser(r.Context(), updated.EntityID, &updated)
 	access, err := h.deps.Issuer.IssueAccess(updated)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "token issue failed")
@@ -392,7 +392,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	if req.IsAdmin != nil {
 		u.IsAdmin = *req.IsAdmin
 	}
-	if err := h.deps.Store.UpdateUser(r.Context(), &u); err != nil {
+	if err := h.deps.Store.UpdateUser(r.Context(), entityOf(r), &u); err != nil {
 		if errors.Is(err, ErrVersionConflict) {
 			writeErr(w, http.StatusConflict, "stale row version")
 			return

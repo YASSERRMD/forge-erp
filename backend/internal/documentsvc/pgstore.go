@@ -25,10 +25,10 @@ func (s *PGStore) Create(ctx context.Context, d *Document) error {
 	).Scan(&d.ID, &d.CreatedAt)
 }
 
-func (s *PGStore) ByID(ctx context.Context, id int64) (Document, error) {
+func (s *PGStore) ByID(ctx context.Context, entityID int64, id int64) (Document, error) {
 	var d Document
 	err := s.pool.QueryRow(ctx, `SELECT id, entity_id, scope, object_id, name, mime, size,
-		sha256, storage_key, created_at, created_by FROM ferp_files WHERE id=$1`, id).
+		sha256, storage_key, created_at, created_by FROM ferp_files WHERE id=$1 AND entity_id=$2`, id, entityID).
 		Scan(&d.ID, &d.EntityID, &d.Scope, &d.ObjectID, &d.Name, &d.MIME, &d.Size,
 			&d.SHA256, &d.StorageKey, &d.CreatedAt, &d.CreatedBy)
 	if errors.Is(err, pgx.ErrNoRows) {

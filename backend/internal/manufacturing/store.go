@@ -14,16 +14,16 @@ import (
 // Store is the persistence contract for the manufacturing context.
 type Store interface {
 	CreateBOM(ctx context.Context, b *BOM) error
-	BOMByID(ctx context.Context, id int64) (BOM, error)
+	BOMByID(ctx context.Context, entityID int64, id int64) (BOM, error)
 	ListBOMs(ctx context.Context, entityID int64, limit, offset int) ([]BOM, error)
-	SetBOMStatus(ctx context.Context, id int64, to BOMStatus, rowVersion int64) (BOM, error)
+	SetBOMStatus(ctx context.Context, entityID int64, id int64, to BOMStatus, rowVersion int64) (BOM, error)
 	AddLine(ctx context.Context, l *BOMLine) error
 	LinesOf(ctx context.Context, bomID int64) ([]BOMLine, error)
 	CreateMO(ctx context.Context, m *ManufacturingOrder) error
-	MOByID(ctx context.Context, id int64) (ManufacturingOrder, error)
+	MOByID(ctx context.Context, entityID int64, id int64) (ManufacturingOrder, error)
 	ListMOs(ctx context.Context, entityID int64, limit, offset int) ([]ManufacturingOrder, error)
-	SetMOStatus(ctx context.Context, id int64, to MOStatus, rowVersion int64) (ManufacturingOrder, error)
-	MarkProduced(ctx context.Context, id int64, rowVersion int64) (ManufacturingOrder, error)
+	SetMOStatus(ctx context.Context, entityID int64, id int64, to MOStatus, rowVersion int64) (ManufacturingOrder, error)
+	MarkProduced(ctx context.Context, entityID int64, id int64, rowVersion int64) (ManufacturingOrder, error)
 }
 
 // Ledger abstracts the catalog stock postings used at produce time.
@@ -61,8 +61,8 @@ func (s *PGStore) CreateBOM(ctx context.Context, b *BOM) error {
 	).Scan(&b.ID, &b.RowVersion)
 }
 
-func (s *PGStore) BOMByID(ctx context.Context, id int64) (BOM, error) {
-	return scanBOM(s.pool.QueryRow(ctx, `SELECT `+bomCols+` FROM ferp_boms WHERE id=$1`, id))
+func (s *PGStore) BOMByID(ctx context.Context, entityID int64, id int64) (BOM, error) {
+	return scanBOM(s.pool.QueryRow(ctx, `SELECT `+bomCols+` FROM ferp_boms WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 func (s *PGStore) ListBOMs(ctx context.Context, entityID int64, limit, offset int) ([]BOM, error) {
@@ -83,8 +83,8 @@ func (s *PGStore) ListBOMs(ctx context.Context, entityID int64, limit, offset in
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetBOMStatus(ctx context.Context, id int64, to BOMStatus, rowVersion int64) (BOM, error) {
-	b, err := s.BOMByID(ctx, id)
+func (s *PGStore) SetBOMStatus(ctx context.Context, entityID int64, id int64, to BOMStatus, rowVersion int64) (BOM, error) {
+	b, err := s.BOMByID(ctx, entityID, id)
 	if err != nil {
 		return BOM{}, err
 	}
@@ -95,7 +95,7 @@ func (s *PGStore) SetBOMStatus(ctx context.Context, id int64, to BOMStatus, rowV
 		return BOM{}, errors.New("manufacturing: illegal BOM transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_boms SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND row_version=$3 AND entity_id=$4`, to, id, rowVersion, entityID)
 	if err != nil {
 		return BOM{}, err
 	}
@@ -108,7 +108,7 @@ func (s *PGStore) SetBOMStatus(ctx context.Context, id int64, to BOMStatus, rowV
 }
 
 func (s *PGStore) AddLine(ctx context.Context, l *BOMLine) error {
-	b, err := s.BOMByID(ctx, l.BOMID)
+	b, err := s.BOMByID(ctx, l.EntityID, l.BOMID)
 	if err != nil {
 		return err
 	}
@@ -159,7 +159,7 @@ func (s *PGStore) CreateMO(ctx context.Context, m *ManufacturingOrder) error {
 	if err := m.Validate(); err != nil {
 		return err
 	}
-	b, err := s.BOMByID(ctx, m.BOMID)
+	b, err := s.BOMByID(ctx, m.EntityID, m.BOMID)
 	if err != nil {
 		return err
 	}
@@ -173,8 +173,8 @@ func (s *PGStore) CreateMO(ctx context.Context, m *ManufacturingOrder) error {
 	).Scan(&m.ID, &m.RowVersion)
 }
 
-func (s *PGStore) MOByID(ctx context.Context, id int64) (ManufacturingOrder, error) {
-	return scanMO(s.pool.QueryRow(ctx, `SELECT `+moCols+` FROM ferp_mos WHERE id=$1`, id))
+func (s *PGStore) MOByID(ctx context.Context, entityID int64, id int64) (ManufacturingOrder, error) {
+	return scanMO(s.pool.QueryRow(ctx, `SELECT `+moCols+` FROM ferp_mos WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 func (s *PGStore) ListMOs(ctx context.Context, entityID int64, limit, offset int) ([]ManufacturingOrder, error) {
@@ -195,8 +195,8 @@ func (s *PGStore) ListMOs(ctx context.Context, entityID int64, limit, offset int
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetMOStatus(ctx context.Context, id int64, to MOStatus, rowVersion int64) (ManufacturingOrder, error) {
-	m, err := s.MOByID(ctx, id)
+func (s *PGStore) SetMOStatus(ctx context.Context, entityID int64, id int64, to MOStatus, rowVersion int64) (ManufacturingOrder, error) {
+	m, err := s.MOByID(ctx, entityID, id)
 	if err != nil {
 		return ManufacturingOrder{}, err
 	}
@@ -207,7 +207,7 @@ func (s *PGStore) SetMOStatus(ctx context.Context, id int64, to MOStatus, rowVer
 		return ManufacturingOrder{}, errors.New("manufacturing: illegal MO transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_mos SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND row_version=$3 AND entity_id=$4`, to, id, rowVersion, entityID)
 	if err != nil {
 		return ManufacturingOrder{}, err
 	}
@@ -252,8 +252,8 @@ func PostProduce(ctx context.Context, mo ManufacturingOrder, lines []BOMLine, le
 	return plan, nil
 }
 
-func (s *PGStore) MarkProduced(ctx context.Context, id int64, rowVersion int64) (ManufacturingOrder, error) {
-	return s.SetMOStatus(ctx, id, MOProduced, rowVersion)
+func (s *PGStore) MarkProduced(ctx context.Context, entityID int64, id int64, rowVersion int64) (ManufacturingOrder, error) {
+	return s.SetMOStatus(ctx, entityID, id, MOProduced, rowVersion)
 }
 
 // MemoryStore is the in-process fake for handler tests.
@@ -289,11 +289,11 @@ func (m *MemoryStore) CreateBOM(_ context.Context, b *BOM) error {
 	return nil
 }
 
-func (m *MemoryStore) BOMByID(_ context.Context, id int64) (BOM, error) {
+func (m *MemoryStore) BOMByID(_ context.Context, entityID int64, id int64) (BOM, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.boms[id]
-	if !ok {
+	if !ok || b.EntityID != entityID {
 		return BOM{}, identity.ErrNotFound
 	}
 	return b, nil
@@ -318,11 +318,11 @@ func (m *MemoryStore) ListBOMs(_ context.Context, entityID int64, limit, offset 
 	return out, nil
 }
 
-func (m *MemoryStore) SetBOMStatus(_ context.Context, id int64, to BOMStatus, rowVersion int64) (BOM, error) {
+func (m *MemoryStore) SetBOMStatus(_ context.Context, entityID int64, id int64, to BOMStatus, rowVersion int64) (BOM, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.boms[id]
-	if !ok {
+	if !ok || b.EntityID != entityID {
 		return BOM{}, identity.ErrNotFound
 	}
 	if b.RowVersion != rowVersion {
@@ -341,7 +341,7 @@ func (m *MemoryStore) AddLine(_ context.Context, l *BOMLine) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.boms[l.BOMID]
-	if !ok {
+	if !ok || b.EntityID != l.EntityID {
 		return errors.New("manufacturing: BOM not found")
 	}
 	if err := l.Validate(b.ProductID); err != nil {
@@ -379,7 +379,7 @@ func (m *MemoryStore) CreateMO(_ context.Context, mo *ManufacturingOrder) error 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.boms[mo.BOMID]
-	if !ok {
+	if !ok || b.EntityID != mo.EntityID {
 		return errors.New("manufacturing: BOM not found")
 	}
 	if b.ProductID != mo.ProductID {
@@ -396,11 +396,11 @@ func (m *MemoryStore) CreateMO(_ context.Context, mo *ManufacturingOrder) error 
 	return nil
 }
 
-func (m *MemoryStore) MOByID(_ context.Context, id int64) (ManufacturingOrder, error) {
+func (m *MemoryStore) MOByID(_ context.Context, entityID int64, id int64) (ManufacturingOrder, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	mo, ok := m.mos[id]
-	if !ok {
+	if !ok || mo.EntityID != entityID {
 		return ManufacturingOrder{}, identity.ErrNotFound
 	}
 	return mo, nil
@@ -425,11 +425,11 @@ func (m *MemoryStore) ListMOs(_ context.Context, entityID int64, limit, offset i
 	return out, nil
 }
 
-func (m *MemoryStore) SetMOStatus(_ context.Context, id int64, to MOStatus, rowVersion int64) (ManufacturingOrder, error) {
+func (m *MemoryStore) SetMOStatus(_ context.Context, entityID int64, id int64, to MOStatus, rowVersion int64) (ManufacturingOrder, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	mo, ok := m.mos[id]
-	if !ok {
+	if !ok || mo.EntityID != entityID {
 		return ManufacturingOrder{}, identity.ErrNotFound
 	}
 	if mo.RowVersion != rowVersion {
@@ -444,6 +444,6 @@ func (m *MemoryStore) SetMOStatus(_ context.Context, id int64, to MOStatus, rowV
 	return mo, nil
 }
 
-func (m *MemoryStore) MarkProduced(_ context.Context, id int64, rowVersion int64) (ManufacturingOrder, error) {
-	return m.SetMOStatus(context.Background(), id, MOProduced, rowVersion)
+func (m *MemoryStore) MarkProduced(ctx context.Context, entityID int64, id int64, rowVersion int64) (ManufacturingOrder, error) {
+	return m.SetMOStatus(ctx, entityID, id, MOProduced, rowVersion)
 }

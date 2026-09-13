@@ -314,9 +314,9 @@ func ExportXML(b Batch, now time.Time) ([]byte, error) {
 // Store is the persistence contract for SEPA batches.
 type Store interface {
 	CreateBatch(ctx context.Context, b *Batch) error
-	BatchByID(ctx context.Context, id int64) (Batch, error)
+	BatchByID(ctx context.Context, entityID int64, id int64) (Batch, error)
 	ListBatches(ctx context.Context, entityID int64) ([]Batch, error)
-	SetBatchStatus(ctx context.Context, id int64, to BatchStatus, rowVersion int64) (Batch, error)
+	SetBatchStatus(ctx context.Context, entityID int64, id int64, to BatchStatus, rowVersion int64) (Batch, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -357,8 +357,8 @@ func (s *PGStore) CreateBatch(ctx context.Context, b *Batch) error {
 	).Scan(&b.ID, &b.RowVersion)
 }
 
-func (s *PGStore) BatchByID(ctx context.Context, id int64) (Batch, error) {
-	return scanBatch(s.pool.QueryRow(ctx, `SELECT `+batchCols+` FROM ferp_sepa_batches WHERE id=$1`, id))
+func (s *PGStore) BatchByID(ctx context.Context, entityID int64, id int64) (Batch, error) {
+	return scanBatch(s.pool.QueryRow(ctx, `SELECT `+batchCols+` FROM ferp_sepa_batches WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 func (s *PGStore) ListBatches(ctx context.Context, entityID int64) ([]Batch, error) {
@@ -378,8 +378,8 @@ func (s *PGStore) ListBatches(ctx context.Context, entityID int64) ([]Batch, err
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetBatchStatus(ctx context.Context, id int64, to BatchStatus, rowVersion int64) (Batch, error) {
-	b, err := s.BatchByID(ctx, id)
+func (s *PGStore) SetBatchStatus(ctx context.Context, entityID int64, id int64, to BatchStatus, rowVersion int64) (Batch, error) {
+	b, err := s.BatchByID(ctx, entityID, id)
 	if err != nil {
 		return Batch{}, err
 	}
@@ -390,7 +390,7 @@ func (s *PGStore) SetBatchStatus(ctx context.Context, id int64, to BatchStatus, 
 		return Batch{}, errors.New("sepa: illegal transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_sepa_batches SET status=$1, row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND row_version=$3 AND entity_id=$4`, to, id, rowVersion, entityID)
 	if err != nil {
 		return Batch{}, err
 	}
@@ -433,11 +433,11 @@ func (m *MemoryStore) CreateBatch(_ context.Context, b *Batch) error {
 	return nil
 }
 
-func (m *MemoryStore) BatchByID(_ context.Context, id int64) (Batch, error) {
+func (m *MemoryStore) BatchByID(_ context.Context, entityID int64, id int64) (Batch, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.batches[id]
-	if !ok {
+	if !ok || b.EntityID != entityID {
 		return Batch{}, identity.ErrNotFound
 	}
 	return b, nil
@@ -455,11 +455,11 @@ func (m *MemoryStore) ListBatches(_ context.Context, entityID int64) ([]Batch, e
 	return out, nil
 }
 
-func (m *MemoryStore) SetBatchStatus(_ context.Context, id int64, to BatchStatus, rowVersion int64) (Batch, error) {
+func (m *MemoryStore) SetBatchStatus(_ context.Context, entityID int64, id int64, to BatchStatus, rowVersion int64) (Batch, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.batches[id]
-	if !ok {
+	if !ok || b.EntityID != entityID {
 		return Batch{}, identity.ErrNotFound
 	}
 	if b.RowVersion != rowVersion {

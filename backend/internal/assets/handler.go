@@ -126,7 +126,7 @@ func (h *Handler) UpdateAsset(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a, err := h.deps.Store.UpdateAsset(r.Context(), id, in.Label, in.Serial, in.WarehouseID, in.RowVersion)
+	a, err := h.deps.Store.UpdateAsset(r.Context(), entityOf(r), id, in.Label, in.Serial, in.WarehouseID, in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -161,7 +161,7 @@ func (h *Handler) SetAssetStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a, err := h.deps.Store.SetAssetStatus(r.Context(), id, AssetStatus(in.Status), in.RowVersion)
+	a, err := h.deps.Store.SetAssetStatus(r.Context(), entityOf(r), id, AssetStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

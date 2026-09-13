@@ -83,7 +83,7 @@ func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"bad id"}`, http.StatusBadRequest)
 		return
 	}
-	d, err := h.svc.Store.ByID(r.Context(), id)
+	d, err := h.svc.Store.ByID(r.Context(), entityOf(r), id)
 	if err != nil || d.EntityID != entityOf(r) {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 		return
@@ -110,7 +110,7 @@ func (h *Handler) Share(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"bad id"}`, http.StatusBadRequest)
 		return
 	}
-	d, err := h.svc.Store.ByID(r.Context(), id)
+	d, err := h.svc.Store.ByID(r.Context(), entityOf(r), id)
 	if err != nil || d.EntityID != entityOf(r) {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 		return
@@ -166,7 +166,7 @@ func PublicShare(svc *Service) http.HandlerFunc {
 			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 			return
 		}
-		d, err := svc.Store.ByID(r.Context(), st.DocID)
+		d, err := svc.Store.ByID(r.Context(), st.EntityID, st.DocID)
 		if err != nil || d.EntityID != st.EntityID {
 			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 			return

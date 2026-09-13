@@ -246,7 +246,7 @@ func TestListAndUpdateUsers(t *testing.T) {
 	upd := u
 	upd.FirstName = "List"
 	upd.LastName = "Ee"
-	if err := st.UpdateUser(context.Background(), &upd); err != nil {
+	if err := st.UpdateUser(context.Background(), 1, &upd); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	groups, err := st.ListGroups(context.Background(), 1)

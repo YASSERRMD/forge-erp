@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/go-chi/chi/v5"
 )
@@ -29,7 +31,7 @@ func TestArticlePublishSearch(t *testing.T) {
 	if hits, _ := m.SearchArticles(ctx, 1, "password", 10); len(hits) != 0 {
 		t.Fatalf("draft searchable: %d", len(hits))
 	}
-	upd, err := m.SetArticleStatus(ctx, a.ID, ArticlePublished, a.RowVersion)
+	upd, err := m.SetArticleStatus(ctx, 1, a.ID, ArticlePublished, a.RowVersion)
 	if err != nil {
 		t.Fatalf("publish: %v", err)
 	}
@@ -76,14 +78,14 @@ func TestUpdateDraftOnly(t *testing.T) {
 	if err := m.CreateArticle(ctx, a); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	upd, err := m.UpdateArticle(ctx, a.ID, "T2", "b2", []string{"x"}, a.RowVersion)
+	upd, err := m.UpdateArticle(ctx, 1, a.ID, "T2", "b2", []string{"x"}, a.RowVersion)
 	if err != nil || upd.Title != "T2" {
 		t.Fatalf("update: %+v %v", upd, err)
 	}
-	if _, err := m.SetArticleStatus(ctx, a.ID, ArticlePublished, upd.RowVersion); err != nil {
+	if _, err := m.SetArticleStatus(ctx, 1, a.ID, ArticlePublished, upd.RowVersion); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	if _, err := m.UpdateArticle(ctx, a.ID, "T3", "b", nil, upd.RowVersion+1); err == nil {
+	if _, err := m.UpdateArticle(ctx, 1, a.ID, "T3", "b", nil, upd.RowVersion+1); err == nil {
 		t.Error("published edit accepted")
 	}
 }
@@ -95,11 +97,29 @@ func TestPGArticleFlow(t *testing.T) {
 	if err := st.CreateArticle(ctx, a); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := st.SetArticleStatus(ctx, a.ID, ArticlePublished, a.RowVersion); err != nil {
+	if _, err := st.SetArticleStatus(ctx, 1, a.ID, ArticlePublished, a.RowVersion); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 	hits, err := st.SearchArticles(ctx, 1, "hello", 10)
 	if err != nil || len(hits) != 1 {
 		t.Fatalf("search=%d err=%v", len(hits), err)
+	}
+}
+
+func TestCrossTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemoryStore()
+	a := &Article{EntityID: 1, Slug: "x", Title: "T", Body: "b"}
+	if err := m.CreateArticle(ctx, a); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := m.ArticleByID(ctx, 2, a.ID); !errors.Is(err, identity.ErrNotFound) {
+		t.Fatalf("cross-tenant ArticleByID err=%v want ErrNotFound", err)
+	}
+	if _, err := m.UpdateArticle(ctx, 2, a.ID, "T2", "b2", nil, a.RowVersion); !errors.Is(err, identity.ErrNotFound) {
+		t.Fatalf("cross-tenant UpdateArticle err=%v want ErrNotFound", err)
+	}
+	if _, err := m.SetArticleStatus(ctx, 2, a.ID, ArticlePublished, a.RowVersion); !errors.Is(err, identity.ErrNotFound) {
+		t.Fatalf("cross-tenant SetArticleStatus err=%v want ErrNotFound", err)
 	}
 }

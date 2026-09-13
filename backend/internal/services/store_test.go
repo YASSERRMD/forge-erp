@@ -2,10 +2,16 @@ package services
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
+	"github.com/go-chi/chi/v5"
 )
 
 func TestProjectTransitions(t *testing.T) {
@@ -67,10 +73,10 @@ func TestMemoryLifecycle(t *testing.T) {
 	if err := m.CreateProject(ctx, &Project{EntityID: 1, Ref: "PRJ-1", Label: "dup"}); err == nil {
 		t.Error("duplicate ref accepted")
 	}
-	if _, err := m.SetProjectStatus(ctx, p.ID, ProjectClosed, p.RowVersion); err == nil {
+	if _, err := m.SetProjectStatus(ctx, 1, p.ID, ProjectClosed, p.RowVersion); err == nil {
 		t.Error("draft→closed accepted")
 	}
-	pActive, err := m.SetProjectStatus(ctx, p.ID, ProjectActive, p.RowVersion)
+	pActive, err := m.SetProjectStatus(ctx, 1, p.ID, ProjectActive, p.RowVersion)
 	if err != nil {
 		t.Fatalf("activate: %v", err)
 	}
@@ -94,7 +100,7 @@ func TestMemoryLifecycle(t *testing.T) {
 	if h, _ := m.ProjectHours(ctx, p.ID); h != 400 {
 		t.Errorf("project hours=%d want 400", h)
 	}
-	tk2, err := m.SetTaskStatus(ctx, tk.ID, TaskDone, tk.RowVersion)
+	tk2, err := m.SetTaskStatus(ctx, 1, tk.ID, TaskDone, tk.RowVersion)
 	if err != nil {
 		t.Fatalf("finish task: %v", err)
 	}
@@ -103,7 +109,7 @@ func TestMemoryLifecycle(t *testing.T) {
 		t.Error("time on done task accepted")
 	}
 	_ = tk2
-	pClosed, err := m.SetProjectStatus(ctx, p.ID, ProjectClosed, p.RowVersion)
+	pClosed, err := m.SetProjectStatus(ctx, 1, p.ID, ProjectClosed, p.RowVersion)
 	if err != nil {
 		t.Fatalf("close project: %v", err)
 	}
@@ -127,18 +133,18 @@ func TestMemoryTicketFlow(t *testing.T) {
 	if err := m.AddMessage(ctx, &TicketMessage{EntityID: 1, TicketID: tk.ID, Author: "bob", Body: "seen"}); err != nil {
 		t.Fatalf("add message: %v", err)
 	}
-	upd, err := m.SetTicketStatus(ctx, tk.ID, TicketResolved, tk.RowVersion)
+	upd, err := m.SetTicketStatus(ctx, 1, tk.ID, TicketResolved, tk.RowVersion)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	upd, err = m.SetTicketStatus(ctx, tk.ID, TicketClosed, upd.RowVersion)
+	upd, err = m.SetTicketStatus(ctx, 1, tk.ID, TicketClosed, upd.RowVersion)
 	if err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	if err := m.AddMessage(ctx, &TicketMessage{EntityID: 1, TicketID: tk.ID, Author: "bob", Body: "late"}); err == nil {
 		t.Error("message on closed ticket accepted")
 	}
-	upd, err = m.SetTicketStatus(ctx, tk.ID, TicketOpen, upd.RowVersion)
+	upd, err = m.SetTicketStatus(ctx, 1, tk.ID, TicketOpen, upd.RowVersion)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -183,5 +189,45 @@ func TestPGProjectLifecycle(t *testing.T) {
 	}
 	if h, _ := st.ProjectHours(ctx, p.ID); h != 120 {
 		t.Fatalf("hours=%d", h)
+	}
+}
+
+func TestCrossTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemoryStore()
+	p := &Project{EntityID: 1, Ref: "X-1", Label: "X"}
+	if err := m.CreateProject(ctx, p); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if _, err := m.ProjectByID(ctx, 2, p.ID); !errors.Is(err, identity.ErrNotFound) {
+		t.Fatalf("cross-tenant ProjectByID err=%v want ErrNotFound", err)
+	}
+	if _, err := m.SetProjectStatus(ctx, 2, p.ID, ProjectActive, p.RowVersion); !errors.Is(err, identity.ErrNotFound) {
+		t.Fatalf("cross-tenant SetProjectStatus err=%v want ErrNotFound", err)
+	}
+	tk := &Ticket{EntityID: 1, Ref: "X-T1", Subject: "s", Priority: 2}
+	if err := m.CreateTicket(ctx, tk); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	if _, err := m.TicketByID(ctx, 2, tk.ID); !errors.Is(err, identity.ErrNotFound) {
+		t.Fatalf("cross-tenant TicketByID err=%v want ErrNotFound", err)
+	}
+
+	// Handler GET under another entity (row seeded under entity 2,
+	// default request entity is 1) must 404.
+	m2 := NewMemoryStore()
+	p2 := &Project{EntityID: 2, Ref: "X-2", Label: "foreign"}
+	if err := m2.CreateProject(ctx, p2); err != nil {
+		t.Fatalf("seed foreign project: %v", err)
+	}
+	r := chi.NewRouter()
+	r.Route("/api/v1", func(r chi.Router) {
+		Routes(r, Deps{Store: m2}, passthrough)
+	})
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/services/projects/%d", p2.ID), nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("handler cross-tenant GET code=%d want 404 body=%s", rec.Code, rec.Body.String())
 	}
 }

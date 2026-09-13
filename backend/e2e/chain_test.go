@@ -102,10 +102,10 @@ func runChains(t *testing.T, pst partners.Store, cst catalog.Store, sst sales.St
 		t.Fatal(err)
 	}
 	approver := int64(1)
-	if _, err := procst.SetApproval(ctx, po.ID, approver); err != nil {
+	if _, err := procst.SetApproval(ctx, po.EntityID, po.ID, approver); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := procst.SetStatus(ctx, po.ID, procurement.Validated); err != nil {
+	if _, err := procst.SetStatus(ctx, po.EntityID, po.ID, procurement.Validated); err != nil {
 		t.Fatal(err)
 	}
 	rcvDoc, err := procurement.Convert(*po, documents.TypeReception)
@@ -116,7 +116,7 @@ func runChains(t *testing.T, pst partners.Store, cst catalog.Store, sst sales.St
 	if err := procst.CreateDoc(ctx, rcv, ym); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := procst.SetStatus(ctx, rcv.ID, procurement.Validated); err != nil {
+	if _, err := procst.SetStatus(ctx, rcv.EntityID, rcv.ID, procurement.Validated); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := cst.AppendMovement(ctx, &catalog.StockMovement{EntityID: 1,
@@ -124,7 +124,7 @@ func runChains(t *testing.T, pst partners.Store, cst catalog.Store, sst sales.St
 		Reason: catalog.ReasonReceipt, Ref: rcv.Ref}, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := procst.SetStatus(ctx, rcv.ID, procurement.Stage2); err != nil {
+	if _, err := procst.SetStatus(ctx, rcv.EntityID, rcv.ID, procurement.Stage2); err != nil {
 		t.Fatal(err)
 	}
 	sinvDoc, err := procurement.Convert(*rcv, documents.TypeSupplierInvoice)
@@ -135,10 +135,10 @@ func runChains(t *testing.T, pst partners.Store, cst catalog.Store, sst sales.St
 	if err := procst.CreateDoc(ctx, sinv, ym); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := procst.SetStatus(ctx, sinv.ID, procurement.Validated); err != nil {
+	if _, err := procst.SetStatus(ctx, sinv.EntityID, sinv.ID, procurement.Validated); err != nil {
 		t.Fatal(err)
 	}
-	bal, _ := procst.InvoiceBalance(ctx, sinv.ID)
+	bal, _ := procst.InvoiceBalance(ctx, sinv.EntityID, sinv.ID)
 	if _, err := procst.RecordPayment(ctx, &procurement.SupplierPayment{EntityID: 1,
 		OrgID: supp.ID, Amount: bal, Currency: "USD", Method: "transfer"},
 		[]int64{sinv.ID}, ym); err != nil {

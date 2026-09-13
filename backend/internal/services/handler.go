@@ -160,7 +160,7 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	p, err := h.deps.Store.ProjectByID(r.Context(), id)
+	p, err := h.deps.Store.ProjectByID(r.Context(), entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -180,7 +180,7 @@ func (h *Handler) SetProjectStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	p, err := h.deps.Store.SetProjectStatus(r.Context(), id, ProjectStatus(in.Status), in.RowVersion)
+	p, err := h.deps.Store.SetProjectStatus(r.Context(), entityOf(r), id, ProjectStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -240,7 +240,7 @@ func (h *Handler) SetTaskStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	t, err := h.deps.Store.SetTaskStatus(r.Context(), id, TaskStatus(in.Status), in.RowVersion)
+	t, err := h.deps.Store.SetTaskStatus(r.Context(), entityOf(r), id, TaskStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -330,7 +330,7 @@ func (h *Handler) SetContractStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	c, err := h.deps.Store.SetContractStatus(r.Context(), id, ContractStatus(in.Status), in.RowVersion)
+	c, err := h.deps.Store.SetContractStatus(r.Context(), entityOf(r), id, ContractStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -405,7 +405,7 @@ func (h *Handler) SetInterventionStatus(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	upd, err := h.deps.Store.SetInterventionStatus(r.Context(), id, InterventionStatus(in.Status), in.RowVersion)
+	upd, err := h.deps.Store.SetInterventionStatus(r.Context(), entityOf(r), id, InterventionStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -449,7 +449,7 @@ func (h *Handler) GetTicket(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	t, err := h.deps.Store.TicketByID(r.Context(), id)
+	t, err := h.deps.Store.TicketByID(r.Context(), entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -469,7 +469,7 @@ func (h *Handler) SetTicketStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	t, err := h.deps.Store.SetTicketStatus(r.Context(), id, TicketStatus(in.Status), in.RowVersion)
+	t, err := h.deps.Store.SetTicketStatus(r.Context(), entityOf(r), id, TicketStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

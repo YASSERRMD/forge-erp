@@ -63,10 +63,10 @@ func (a Article) CanTransition(to ArticleStatus) bool {
 // Store is the persistence contract for the knowledge base.
 type Store interface {
 	CreateArticle(ctx context.Context, a *Article) error
-	ArticleByID(ctx context.Context, id int64) (Article, error)
-	UpdateArticle(ctx context.Context, id int64, title, body string, tags []string, rowVersion int64) (Article, error)
+	ArticleByID(ctx context.Context, entityID int64, id int64) (Article, error)
+	UpdateArticle(ctx context.Context, entityID int64, id int64, title, body string, tags []string, rowVersion int64) (Article, error)
 	ListArticles(ctx context.Context, entityID int64, publishedOnly bool, limit, offset int) ([]Article, error)
-	SetArticleStatus(ctx context.Context, id int64, to ArticleStatus, rowVersion int64) (Article, error)
+	SetArticleStatus(ctx context.Context, entityID int64, id int64, to ArticleStatus, rowVersion int64) (Article, error)
 	SearchArticles(ctx context.Context, entityID int64, q string, limit int) ([]Article, error)
 }
 
@@ -108,13 +108,13 @@ func (s *PGStore) CreateArticle(ctx context.Context, a *Article) error {
 	).Scan(&a.ID, &a.RowVersion)
 }
 
-func (s *PGStore) ArticleByID(ctx context.Context, id int64) (Article, error) {
-	return scanArticle(s.pool.QueryRow(ctx, `SELECT `+articleCols+` FROM ferp_articles WHERE id=$1`, id))
+func (s *PGStore) ArticleByID(ctx context.Context, entityID int64, id int64) (Article, error) {
+	return scanArticle(s.pool.QueryRow(ctx, `SELECT `+articleCols+` FROM ferp_articles WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 // UpdateArticle edits a draft article (published must be unpublished first).
-func (s *PGStore) UpdateArticle(ctx context.Context, id int64, title, body string, tags []string, rowVersion int64) (Article, error) {
-	a, err := s.ArticleByID(ctx, id)
+func (s *PGStore) UpdateArticle(ctx context.Context, entityID int64, id int64, title, body string, tags []string, rowVersion int64) (Article, error) {
+	a, err := s.ArticleByID(ctx, entityID, id)
 	if err != nil {
 		return Article{}, err
 	}
@@ -132,8 +132,8 @@ func (s *PGStore) UpdateArticle(ctx context.Context, id int64, title, body strin
 		raw = []byte("[]")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_articles SET title=$1, body=$2, tags=$3,
-		updated_at=now(), row_version=row_version+1 WHERE id=$4 AND row_version=$5`,
-		title, body, raw, id, rowVersion)
+		updated_at=now(), row_version=row_version+1 WHERE id=$4 AND entity_id=$5 AND row_version=$6`,
+		title, body, raw, id, entityID, rowVersion)
 	if err != nil {
 		return Article{}, err
 	}
@@ -170,8 +170,8 @@ func (s *PGStore) ListArticles(ctx context.Context, entityID int64, publishedOnl
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetArticleStatus(ctx context.Context, id int64, to ArticleStatus, rowVersion int64) (Article, error) {
-	a, err := s.ArticleByID(ctx, id)
+func (s *PGStore) SetArticleStatus(ctx context.Context, entityID int64, id int64, to ArticleStatus, rowVersion int64) (Article, error) {
+	a, err := s.ArticleByID(ctx, entityID, id)
 	if err != nil {
 		return Article{}, err
 	}
@@ -182,7 +182,7 @@ func (s *PGStore) SetArticleStatus(ctx context.Context, id int64, to ArticleStat
 		return Article{}, errors.New("kb: illegal transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_articles SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
 	if err != nil {
 		return Article{}, err
 	}
@@ -245,21 +245,21 @@ func (m *MemoryStore) CreateArticle(_ context.Context, a *Article) error {
 	return nil
 }
 
-func (m *MemoryStore) ArticleByID(_ context.Context, id int64) (Article, error) {
+func (m *MemoryStore) ArticleByID(_ context.Context, entityID int64, id int64) (Article, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.articles[id]
-	if !ok {
+	if !ok || a.EntityID != entityID {
 		return Article{}, identity.ErrNotFound
 	}
 	return a, nil
 }
 
-func (m *MemoryStore) UpdateArticle(_ context.Context, id int64, title, body string, tags []string, rowVersion int64) (Article, error) {
+func (m *MemoryStore) UpdateArticle(_ context.Context, entityID int64, id int64, title, body string, tags []string, rowVersion int64) (Article, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.articles[id]
-	if !ok {
+	if !ok || a.EntityID != entityID {
 		return Article{}, identity.ErrNotFound
 	}
 	if a.RowVersion != rowVersion {
@@ -298,11 +298,11 @@ func (m *MemoryStore) ListArticles(_ context.Context, entityID int64, publishedO
 	return out, nil
 }
 
-func (m *MemoryStore) SetArticleStatus(_ context.Context, id int64, to ArticleStatus, rowVersion int64) (Article, error) {
+func (m *MemoryStore) SetArticleStatus(_ context.Context, entityID int64, id int64, to ArticleStatus, rowVersion int64) (Article, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.articles[id]
-	if !ok {
+	if !ok || a.EntityID != entityID {
 		return Article{}, identity.ErrNotFound
 	}
 	if a.RowVersion != rowVersion {

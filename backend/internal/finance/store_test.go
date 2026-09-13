@@ -82,10 +82,13 @@ func TestMemoryStoreBankReconcile(t *testing.T) {
 	if err := st.RecordTransaction(ctx, tx); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Reconcile(ctx, tx.ID, time.Now().UTC()); err != nil {
+	if err := st.Reconcile(ctx, 2, tx.ID, time.Now().UTC()); err == nil {
+		t.Fatal("cross-tenant reconcile accepted")
+	}
+	if err := st.Reconcile(ctx, 1, tx.ID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Reconcile(ctx, tx.ID, time.Now().UTC()); err == nil {
+	if err := st.Reconcile(ctx, 1, tx.ID, time.Now().UTC()); err == nil {
 		t.Fatal("double reconcile accepted")
 	}
 	bal, _ := st.AccountBalance(ctx, ba.ID)

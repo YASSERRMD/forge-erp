@@ -236,7 +236,7 @@ func (h *Handler) Reconcile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	if err := h.deps.Store.Reconcile(r.Context(), id, time.Now().UTC()); err != nil {
+	if err := h.deps.Store.Reconcile(r.Context(), entityOf(r), id, time.Now().UTC()); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}

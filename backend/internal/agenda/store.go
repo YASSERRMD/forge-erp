@@ -15,12 +15,12 @@ import (
 // Store is the persistence contract for the agenda context.
 type Store interface {
 	CreateEvent(ctx context.Context, e *Event) error
-	EventByID(ctx context.Context, id int64) (Event, error)
+	EventByID(ctx context.Context, entityID int64, id int64) (Event, error)
 	ListEvents(ctx context.Context, entityID int64, from, to time.Time, limit, offset int) ([]Event, error)
-	SetEventStatus(ctx context.Context, id int64, to EventStatus, rowVersion int64) (Event, error)
+	SetEventStatus(ctx context.Context, entityID int64, id int64, to EventStatus, rowVersion int64) (Event, error)
 	DueReminders(ctx context.Context, entityID int64, now time.Time, limit int) ([]Event, error)
 	DueRemindersAll(ctx context.Context, now time.Time, limit int) ([]Event, error)
-	MarkReminded(ctx context.Context, id int64) error
+	MarkReminded(ctx context.Context, entityID int64, id int64) error
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -64,8 +64,8 @@ func (s *PGStore) CreateEvent(ctx context.Context, e *Event) error {
 	).Scan(&e.ID, &e.RowVersion)
 }
 
-func (s *PGStore) EventByID(ctx context.Context, id int64) (Event, error) {
-	return scanEvent(s.pool.QueryRow(ctx, `SELECT `+eventCols+` FROM ferp_events WHERE id=$1`, id))
+func (s *PGStore) EventByID(ctx context.Context, entityID int64, id int64) (Event, error) {
+	return scanEvent(s.pool.QueryRow(ctx, `SELECT `+eventCols+` FROM ferp_events WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 func (s *PGStore) ListEvents(ctx context.Context, entityID int64, from, to time.Time, limit, offset int) ([]Event, error) {
@@ -87,8 +87,8 @@ func (s *PGStore) ListEvents(ctx context.Context, entityID int64, from, to time.
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetEventStatus(ctx context.Context, id int64, to EventStatus, rowVersion int64) (Event, error) {
-	e, err := s.EventByID(ctx, id)
+func (s *PGStore) SetEventStatus(ctx context.Context, entityID int64, id int64, to EventStatus, rowVersion int64) (Event, error) {
+	e, err := s.EventByID(ctx, entityID, id)
 	if err != nil {
 		return Event{}, err
 	}
@@ -99,7 +99,7 @@ func (s *PGStore) SetEventStatus(ctx context.Context, id int64, to EventStatus, 
 		return Event{}, errors.New("agenda: illegal transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_events SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND entity_id=$4 AND row_version=$3`, to, id, rowVersion, entityID)
 	if err != nil {
 		return Event{}, err
 	}
@@ -153,9 +153,9 @@ func (s *PGStore) DueRemindersAll(ctx context.Context, now time.Time, limit int)
 	return out, rows.Err()
 }
 
-func (s *PGStore) MarkReminded(ctx context.Context, id int64) error {
+func (s *PGStore) MarkReminded(ctx context.Context, entityID int64, id int64) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_events SET reminded_at=now(), updated_at=now()
-		WHERE id=$1 AND reminded_at IS NULL`, id)
+		WHERE id=$1 AND entity_id=$2 AND reminded_at IS NULL`, id, entityID)
 	if err != nil {
 		return err
 	}
@@ -191,11 +191,11 @@ func (m *MemoryStore) CreateEvent(_ context.Context, e *Event) error {
 	return nil
 }
 
-func (m *MemoryStore) EventByID(_ context.Context, id int64) (Event, error) {
+func (m *MemoryStore) EventByID(_ context.Context, entityID int64, id int64) (Event, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.events[id]
-	if !ok {
+	if !ok || e.EntityID != entityID {
 		return Event{}, identity.ErrNotFound
 	}
 	return e, nil
@@ -220,11 +220,11 @@ func (m *MemoryStore) ListEvents(_ context.Context, entityID int64, from, to tim
 	return out, nil
 }
 
-func (m *MemoryStore) SetEventStatus(_ context.Context, id int64, to EventStatus, rowVersion int64) (Event, error) {
+func (m *MemoryStore) SetEventStatus(_ context.Context, entityID int64, id int64, to EventStatus, rowVersion int64) (Event, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.events[id]
-	if !ok {
+	if !ok || e.EntityID != entityID {
 		return Event{}, identity.ErrNotFound
 	}
 	if e.RowVersion != rowVersion {
@@ -263,11 +263,11 @@ func (m *MemoryStore) DueRemindersAll(_ context.Context, now time.Time, _ int) (
 	return out, nil
 }
 
-func (m *MemoryStore) MarkReminded(_ context.Context, id int64) error {
+func (m *MemoryStore) MarkReminded(_ context.Context, entityID int64, id int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.events[id]
-	if !ok {
+	if !ok || e.EntityID != entityID {
 		return identity.ErrNotFound
 	}
 	if e.RemindedAt != nil {

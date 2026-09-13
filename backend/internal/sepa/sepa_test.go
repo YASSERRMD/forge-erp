@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -11,9 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/go-chi/chi/v5"
 )
+
+func isNotFound(err error) bool { return errors.Is(err, identity.ErrNotFound) }
 
 func passthrough(_, _, _ string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler { return next }
@@ -130,7 +134,7 @@ func TestPGBatchFlow(t *testing.T) {
 	if err := st.CreateBatch(ctx, b); err != nil {
 		t.Fatalf("batch: %v", err)
 	}
-	upd, err := st.SetBatchStatus(ctx, b.ID, BatchValidated, b.RowVersion)
+	upd, err := st.SetBatchStatus(ctx, 1, b.ID, BatchValidated, b.RowVersion)
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
@@ -138,5 +142,24 @@ func TestPGBatchFlow(t *testing.T) {
 	list, err := st.ListBatches(ctx, 1)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list=%d err=%v", len(list), err)
+	}
+}
+
+func TestCrossTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemoryStore()
+	b := &Batch{EntityID: 1, Ref: "SEPA-X", CreditorName: "C",
+		CreditorIBAN: "FR1420041010050500013M02606", CreditorBIC: "AGRIFRPP",
+		CreditorID: "ID", Sequence: "RCUR", RequestedAt: time.Now().UTC().Add(24 * time.Hour),
+		Transactions: []Transaction{{DebtorName: "D", IBAN: "DE89370400440532013000",
+			Amount: 100, Remittance: "R", EndToEndID: "X-E2E"}}}
+	if err := m.CreateBatch(ctx, b); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := m.BatchByID(ctx, 2, b.ID); !isNotFound(err) {
+		t.Fatalf("cross-tenant BatchByID err=%v want not-found", err)
+	}
+	if _, err := m.SetBatchStatus(ctx, 2, b.ID, BatchValidated, b.RowVersion); !isNotFound(err) {
+		t.Fatalf("cross-tenant SetBatchStatus err=%v want not-found", err)
 	}
 }

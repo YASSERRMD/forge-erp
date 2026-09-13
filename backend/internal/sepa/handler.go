@@ -129,7 +129,7 @@ func (h *Handler) SetBatchStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	b, err := h.deps.Store.SetBatchStatus(r.Context(), id, BatchStatus(in.Status), in.RowVersion)
+	b, err := h.deps.Store.SetBatchStatus(r.Context(), entityOf(r), id, BatchStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -145,7 +145,7 @@ func (h *Handler) ExportXML(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	b, err := h.deps.Store.BatchByID(r.Context(), id)
+	b, err := h.deps.Store.BatchByID(r.Context(), entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

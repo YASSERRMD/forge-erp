@@ -13,18 +13,18 @@ import (
 // Store is the persistence contract for events + hiring.
 type Store interface {
 	CreateEvent(ctx context.Context, e *OrgEvent) error
-	EventByID(ctx context.Context, id int64) (OrgEvent, error)
+	EventByID(ctx context.Context, entityID, id int64) (OrgEvent, error)
 	ListEvents(ctx context.Context, entityID int64) ([]OrgEvent, error)
-	SetEventStatus(ctx context.Context, id int64, to OrgEventStatus, rowVersion int64) (OrgEvent, error)
+	SetEventStatus(ctx context.Context, entityID, id int64, to OrgEventStatus, rowVersion int64) (OrgEvent, error)
 	Register(ctx context.Context, r *Registration) error
 	RegistrationsOf(ctx context.Context, eventID int64) ([]Registration, error)
-	SetRegistrationStatus(ctx context.Context, id int64, to RegistrationStatus) (Registration, error)
+	SetRegistrationStatus(ctx context.Context, entityID, id int64, to RegistrationStatus) (Registration, error)
 	CreatePosition(ctx context.Context, p *Position) error
 	ListPositions(ctx context.Context, entityID int64) ([]Position, error)
-	SetPositionStatus(ctx context.Context, id int64, to PositionStatus, rowVersion int64) (Position, error)
+	SetPositionStatus(ctx context.Context, entityID, id int64, to PositionStatus, rowVersion int64) (Position, error)
 	Apply(ctx context.Context, a *Application) error
 	ApplicationsOf(ctx context.Context, positionID int64) ([]Application, error)
-	SetApplicationStatus(ctx context.Context, id int64, to ApplicationStatus, rowVersion int64) (Application, error)
+	SetApplicationStatus(ctx context.Context, entityID, id int64, to ApplicationStatus, rowVersion int64) (Application, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -58,8 +58,8 @@ func (s *PGStore) CreateEvent(ctx context.Context, e *OrgEvent) error {
 	).Scan(&e.ID, &e.RowVersion)
 }
 
-func (s *PGStore) EventByID(ctx context.Context, id int64) (OrgEvent, error) {
-	return scanEvent(s.pool.QueryRow(ctx, `SELECT `+eventCols+` FROM ferp_org_events WHERE id=$1`, id))
+func (s *PGStore) EventByID(ctx context.Context, entityID, id int64) (OrgEvent, error) {
+	return scanEvent(s.pool.QueryRow(ctx, `SELECT `+eventCols+` FROM ferp_org_events WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 func (s *PGStore) ListEvents(ctx context.Context, entityID int64) ([]OrgEvent, error) {
@@ -79,8 +79,8 @@ func (s *PGStore) ListEvents(ctx context.Context, entityID int64) ([]OrgEvent, e
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetEventStatus(ctx context.Context, id int64, to OrgEventStatus, rowVersion int64) (OrgEvent, error) {
-	e, err := s.EventByID(ctx, id)
+func (s *PGStore) SetEventStatus(ctx context.Context, entityID, id int64, to OrgEventStatus, rowVersion int64) (OrgEvent, error) {
+	e, err := s.EventByID(ctx, entityID, id)
 	if err != nil {
 		return OrgEvent{}, err
 	}
@@ -91,7 +91,7 @@ func (s *PGStore) SetEventStatus(ctx context.Context, id int64, to OrgEventStatu
 		return OrgEvent{}, errors.New("events: illegal transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_org_events SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
 	if err != nil {
 		return OrgEvent{}, err
 	}
@@ -118,7 +118,7 @@ func (s *PGStore) Register(ctx context.Context, r *Registration) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
-	e, err := s.EventByID(ctx, r.EventID)
+	e, err := s.EventByID(ctx, r.EntityID, r.EventID)
 	if err != nil {
 		return err
 	}
@@ -156,9 +156,9 @@ func (s *PGStore) RegistrationsOf(ctx context.Context, eventID int64) ([]Registr
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetRegistrationStatus(ctx context.Context, id int64, to RegistrationStatus) (Registration, error) {
+func (s *PGStore) SetRegistrationStatus(ctx context.Context, entityID, id int64, to RegistrationStatus) (Registration, error) {
 	var cur Registration
-	err := s.pool.QueryRow(ctx, `SELECT `+regCols+` FROM ferp_registrations WHERE id=$1`, id).Scan(
+	err := s.pool.QueryRow(ctx, `SELECT `+regCols+` FROM ferp_registrations WHERE id=$1 AND entity_id=$2`, id, entityID).Scan(
 		&cur.ID, &cur.EntityID, &cur.EventID, &cur.Name, &cur.Email, &cur.OrgID, &cur.Status, &cur.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Registration{}, identity.ErrNotFound
@@ -169,7 +169,7 @@ func (s *PGStore) SetRegistrationStatus(ctx context.Context, id int64, to Regist
 	if !cur.CanTransition(to) {
 		return Registration{}, errors.New("events: illegal transition")
 	}
-	_, err = s.pool.Exec(ctx, `UPDATE ferp_registrations SET status=$1 WHERE id=$2`, to, id)
+	_, err = s.pool.Exec(ctx, `UPDATE ferp_registrations SET status=$1 WHERE id=$2 AND entity_id=$3`, to, id, entityID)
 	if err != nil {
 		return Registration{}, err
 	}
@@ -217,8 +217,8 @@ func (s *PGStore) ListPositions(ctx context.Context, entityID int64) ([]Position
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetPositionStatus(ctx context.Context, id int64, to PositionStatus, rowVersion int64) (Position, error) {
-	p, err := scanPosition(s.pool.QueryRow(ctx, `SELECT `+posCols+` FROM ferp_positions WHERE id=$1`, id))
+func (s *PGStore) SetPositionStatus(ctx context.Context, entityID, id int64, to PositionStatus, rowVersion int64) (Position, error) {
+	p, err := scanPosition(s.pool.QueryRow(ctx, `SELECT `+posCols+` FROM ferp_positions WHERE id=$1 AND entity_id=$2`, id, entityID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Position{}, identity.ErrNotFound
 	}
@@ -232,7 +232,7 @@ func (s *PGStore) SetPositionStatus(ctx context.Context, id int64, to PositionSt
 		return Position{}, errors.New("events: illegal transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_positions SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
 	if err != nil {
 		return Position{}, err
 	}
@@ -260,7 +260,7 @@ func (s *PGStore) Apply(ctx context.Context, a *Application) error {
 	if err := a.Validate(); err != nil {
 		return err
 	}
-	p, err := scanPosition(s.pool.QueryRow(ctx, `SELECT `+posCols+` FROM ferp_positions WHERE id=$1`, a.PositionID))
+	p, err := scanPosition(s.pool.QueryRow(ctx, `SELECT `+posCols+` FROM ferp_positions WHERE id=$1 AND entity_id=$2`, a.PositionID, a.EntityID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return identity.ErrNotFound
 	}
@@ -294,8 +294,8 @@ func (s *PGStore) ApplicationsOf(ctx context.Context, positionID int64) ([]Appli
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetApplicationStatus(ctx context.Context, id int64, to ApplicationStatus, rowVersion int64) (Application, error) {
-	a, err := scanApp(s.pool.QueryRow(ctx, `SELECT `+appCols+` FROM ferp_applications WHERE id=$1`, id))
+func (s *PGStore) SetApplicationStatus(ctx context.Context, entityID, id int64, to ApplicationStatus, rowVersion int64) (Application, error) {
+	a, err := scanApp(s.pool.QueryRow(ctx, `SELECT `+appCols+` FROM ferp_applications WHERE id=$1 AND entity_id=$2`, id, entityID))
 	if err != nil {
 		return Application{}, err
 	}
@@ -306,7 +306,7 @@ func (s *PGStore) SetApplicationStatus(ctx context.Context, id int64, to Applica
 		return Application{}, errors.New("events: illegal transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_applications SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
 	if err != nil {
 		return Application{}, err
 	}
@@ -350,11 +350,11 @@ func (m *MemoryStore) CreateEvent(_ context.Context, e *OrgEvent) error {
 	return nil
 }
 
-func (m *MemoryStore) EventByID(_ context.Context, id int64) (OrgEvent, error) {
+func (m *MemoryStore) EventByID(_ context.Context, entityID, id int64) (OrgEvent, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.events[id]
-	if !ok {
+	if !ok || e.EntityID != entityID {
 		return OrgEvent{}, identity.ErrNotFound
 	}
 	return e, nil
@@ -372,11 +372,11 @@ func (m *MemoryStore) ListEvents(_ context.Context, entityID int64) ([]OrgEvent,
 	return out, nil
 }
 
-func (m *MemoryStore) SetEventStatus(_ context.Context, id int64, to OrgEventStatus, rowVersion int64) (OrgEvent, error) {
+func (m *MemoryStore) SetEventStatus(_ context.Context, entityID, id int64, to OrgEventStatus, rowVersion int64) (OrgEvent, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.events[id]
-	if !ok {
+	if !ok || e.EntityID != entityID {
 		return OrgEvent{}, identity.ErrNotFound
 	}
 	if e.RowVersion != rowVersion {
@@ -398,7 +398,7 @@ func (m *MemoryStore) Register(_ context.Context, r *Registration) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.events[r.EventID]
-	if !ok {
+	if !ok || e.EntityID != r.EntityID {
 		return errors.New("events: event not found")
 	}
 	if e.Status != OrgEventPublished {
@@ -430,11 +430,11 @@ func (m *MemoryStore) RegistrationsOf(_ context.Context, eventID int64) ([]Regis
 	return out, nil
 }
 
-func (m *MemoryStore) SetRegistrationStatus(_ context.Context, id int64, to RegistrationStatus) (Registration, error) {
+func (m *MemoryStore) SetRegistrationStatus(_ context.Context, entityID, id int64, to RegistrationStatus) (Registration, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.regs[id]
-	if !ok {
+	if !ok || r.EntityID != entityID {
 		return Registration{}, identity.ErrNotFound
 	}
 	if !r.CanTransition(to) {
@@ -474,11 +474,11 @@ func (m *MemoryStore) ListPositions(_ context.Context, entityID int64) ([]Positi
 	return out, nil
 }
 
-func (m *MemoryStore) SetPositionStatus(_ context.Context, id int64, to PositionStatus, rowVersion int64) (Position, error) {
+func (m *MemoryStore) SetPositionStatus(_ context.Context, entityID, id int64, to PositionStatus, rowVersion int64) (Position, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.poss[id]
-	if !ok {
+	if !ok || p.EntityID != entityID {
 		return Position{}, identity.ErrNotFound
 	}
 	if p.RowVersion != rowVersion {
@@ -500,7 +500,7 @@ func (m *MemoryStore) Apply(_ context.Context, a *Application) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.poss[a.PositionID]
-	if !ok {
+	if !ok || p.EntityID != a.EntityID {
 		return identity.ErrNotFound
 	}
 	if p.Status != PositionOpen {
@@ -524,11 +524,11 @@ func (m *MemoryStore) ApplicationsOf(_ context.Context, positionID int64) ([]App
 	return out, nil
 }
 
-func (m *MemoryStore) SetApplicationStatus(_ context.Context, id int64, to ApplicationStatus, rowVersion int64) (Application, error) {
+func (m *MemoryStore) SetApplicationStatus(_ context.Context, entityID, id int64, to ApplicationStatus, rowVersion int64) (Application, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.apps[id]
-	if !ok {
+	if !ok || a.EntityID != entityID {
 		return Application{}, identity.ErrNotFound
 	}
 	if a.RowVersion != rowVersion {

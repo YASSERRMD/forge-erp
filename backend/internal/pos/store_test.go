@@ -28,14 +28,14 @@ func TestMemoryTerminalSession(t *testing.T) {
 	if err := m.OpenSession(ctx, &Session{EntityID: 1, TerminalID: off.ID, Cashier: "ada"}); err == nil {
 		t.Error("session on inactive terminal accepted")
 	}
-	closed, err := m.CloseSession(ctx, se.ID, se.RowVersion)
+	closed, err := m.CloseSession(ctx, 1, se.ID, se.RowVersion)
 	if err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	if closed.Status != SessionClosed || closed.ClosedAt == nil {
 		t.Error("close did not stamp")
 	}
-	if _, err := m.CloseSession(ctx, se.ID, closed.RowVersion); err == nil {
+	if _, err := m.CloseSession(ctx, 1, se.ID, closed.RowVersion); err == nil {
 		t.Error("double close accepted")
 	}
 	sa := &Sale{EntityID: 1, SessionID: se.ID, Ref: "POS-1", OrgID: 7,
@@ -60,8 +60,45 @@ func TestPGTerminalSession(t *testing.T) {
 	if err := st.OpenSession(ctx, se); err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	closed, err := st.CloseSession(ctx, se.ID, se.RowVersion)
+	closed, err := st.CloseSession(ctx, 1, se.ID, se.RowVersion)
 	if err != nil || closed.Status != SessionClosed {
 		t.Fatalf("close: %+v %v", closed, err)
+	}
+}
+
+func TestMemoryCrossTenant(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemoryStore()
+	term := &Terminal{EntityID: 1, Code: "X1", Label: "Till", WarehouseID: 1, Status: TerminalActive}
+	if err := m.CreateTerminal(ctx, term); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.TerminalByID(ctx, 2, term.ID); err == nil {
+		t.Error("cross-tenant TerminalByID succeeded")
+	}
+	se := &Session{EntityID: 1, TerminalID: term.ID, Cashier: "ada"}
+	if err := m.OpenSession(ctx, se); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.SessionByID(ctx, 2, se.ID); err == nil {
+		t.Error("cross-tenant SessionByID succeeded")
+	}
+	if _, err := m.CloseSession(ctx, 2, se.ID, se.RowVersion); err == nil {
+		t.Error("cross-tenant CloseSession succeeded")
+	}
+	sa := &Sale{EntityID: 1, SessionID: se.ID, Ref: "X-1", OrgID: 7,
+		Lines: []SaleLine{{ProductID: 1, Qty: 1}}, TotalGross: 100,
+		Method: PayCash, Tendered: 100, Status: SaleCompleted}
+	if err := m.CreateSale(ctx, sa); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.SaleByID(ctx, 2, sa.ID); err == nil {
+		t.Error("cross-tenant SaleByID succeeded")
+	}
+	if _, err := m.VoidSale(ctx, 2, sa.ID); err == nil {
+		t.Error("cross-tenant VoidSale succeeded")
+	}
+	if _, err := m.MarkReturned(ctx, 2, sa.ID); err == nil {
+		t.Error("cross-tenant MarkReturned succeeded")
 	}
 }

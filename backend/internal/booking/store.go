@@ -14,12 +14,12 @@ import (
 // Store is the persistence contract for the booking context.
 type Store interface {
 	CreateResource(ctx context.Context, r *Resource) error
-	ResourceByID(ctx context.Context, id int64) (Resource, error)
+	ResourceByID(ctx context.Context, entityID int64, id int64) (Resource, error)
 	ListResources(ctx context.Context, entityID int64) ([]Resource, error)
 	CreateBooking(ctx context.Context, b *Booking) error
-	BookingByID(ctx context.Context, id int64) (Booking, error)
-	BookingsOf(ctx context.Context, resourceID int64, from, to time.Time) ([]Booking, error)
-	SetBookingStatus(ctx context.Context, id int64, to BookingStatus, rowVersion int64) (Booking, error)
+	BookingByID(ctx context.Context, entityID int64, id int64) (Booking, error)
+	BookingsOf(ctx context.Context, entityID int64, resourceID int64, from, to time.Time) ([]Booking, error)
+	SetBookingStatus(ctx context.Context, entityID int64, id int64, to BookingStatus, rowVersion int64) (Booking, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -51,8 +51,8 @@ func (s *PGStore) CreateResource(ctx context.Context, r *Resource) error {
 	).Scan(&r.ID, &r.RowVersion)
 }
 
-func (s *PGStore) ResourceByID(ctx context.Context, id int64) (Resource, error) {
-	return scanResource(s.pool.QueryRow(ctx, `SELECT `+resourceCols+` FROM ferp_resources WHERE id=$1`, id))
+func (s *PGStore) ResourceByID(ctx context.Context, entityID int64, id int64) (Resource, error) {
+	return scanResource(s.pool.QueryRow(ctx, `SELECT `+resourceCols+` FROM ferp_resources WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 func (s *PGStore) ListResources(ctx context.Context, entityID int64) ([]Resource, error) {
@@ -85,10 +85,10 @@ func scanBooking(row pgx.Row) (Booking, error) {
 }
 
 // overlapping returns live bookings intersecting the window.
-func (s *PGStore) overlapping(ctx context.Context, resourceID int64, start, end time.Time) ([]Booking, error) {
+func (s *PGStore) overlapping(ctx context.Context, entityID int64, resourceID int64, start, end time.Time) ([]Booking, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+bookingCols+` FROM ferp_bookings
-		WHERE resource_id=$1 AND status IN (0,1) AND start_at < $3 AND end_at > $2
-		ORDER BY start_at`, resourceID, start, end)
+		WHERE resource_id=$1 AND entity_id=$2 AND status IN (0,1) AND start_at < $4 AND end_at > $3
+		ORDER BY start_at`, resourceID, entityID, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -108,14 +108,14 @@ func (s *PGStore) CreateBooking(ctx context.Context, b *Booking) error {
 	if err := b.Validate(); err != nil {
 		return err
 	}
-	res, err := s.ResourceByID(ctx, b.ResourceID)
+	res, err := s.ResourceByID(ctx, b.EntityID, b.ResourceID)
 	if err != nil {
 		return err
 	}
 	if res.Status != ResourceActive {
 		return errors.New("booking: resource inactive")
 	}
-	live, err := s.overlapping(ctx, b.ResourceID, b.StartAt, b.EndAt)
+	live, err := s.overlapping(ctx, b.EntityID, b.ResourceID, b.StartAt, b.EndAt)
 	if err != nil {
 		return err
 	}
@@ -129,13 +129,13 @@ func (s *PGStore) CreateBooking(ctx context.Context, b *Booking) error {
 	).Scan(&b.ID, &b.RowVersion)
 }
 
-func (s *PGStore) BookingByID(ctx context.Context, id int64) (Booking, error) {
-	return scanBooking(s.pool.QueryRow(ctx, `SELECT `+bookingCols+` FROM ferp_bookings WHERE id=$1`, id))
+func (s *PGStore) BookingByID(ctx context.Context, entityID int64, id int64) (Booking, error) {
+	return scanBooking(s.pool.QueryRow(ctx, `SELECT `+bookingCols+` FROM ferp_bookings WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
-func (s *PGStore) BookingsOf(ctx context.Context, resourceID int64, from, to time.Time) ([]Booking, error) {
+func (s *PGStore) BookingsOf(ctx context.Context, entityID int64, resourceID int64, from, to time.Time) ([]Booking, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+bookingCols+` FROM ferp_bookings
-		WHERE resource_id=$1 AND start_at < $3 AND end_at > $2 ORDER BY start_at`, resourceID, from, to)
+		WHERE resource_id=$1 AND entity_id=$2 AND start_at < $4 AND end_at > $3 ORDER BY start_at`, resourceID, entityID, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -151,8 +151,8 @@ func (s *PGStore) BookingsOf(ctx context.Context, resourceID int64, from, to tim
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetBookingStatus(ctx context.Context, id int64, to BookingStatus, rowVersion int64) (Booking, error) {
-	b, err := s.BookingByID(ctx, id)
+func (s *PGStore) SetBookingStatus(ctx context.Context, entityID int64, id int64, to BookingStatus, rowVersion int64) (Booking, error) {
+	b, err := s.BookingByID(ctx, entityID, id)
 	if err != nil {
 		return Booking{}, err
 	}
@@ -163,7 +163,7 @@ func (s *PGStore) SetBookingStatus(ctx context.Context, id int64, to BookingStat
 		return Booking{}, errors.New("booking: illegal transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_bookings SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND entity_id=$4 AND row_version=$3`, to, id, rowVersion, entityID)
 	if err != nil {
 		return Booking{}, err
 	}
@@ -207,11 +207,11 @@ func (m *MemoryStore) CreateResource(_ context.Context, r *Resource) error {
 	return nil
 }
 
-func (m *MemoryStore) ResourceByID(_ context.Context, id int64) (Resource, error) {
+func (m *MemoryStore) ResourceByID(_ context.Context, entityID int64, id int64) (Resource, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.resources[id]
-	if !ok {
+	if !ok || r.EntityID != entityID {
 		return Resource{}, identity.ErrNotFound
 	}
 	return r, nil
@@ -236,7 +236,7 @@ func (m *MemoryStore) CreateBooking(_ context.Context, b *Booking) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	res, ok := m.resources[b.ResourceID]
-	if !ok {
+	if !ok || res.EntityID != b.EntityID {
 		return errors.New("booking: resource not found")
 	}
 	if res.Status != ResourceActive {
@@ -244,7 +244,7 @@ func (m *MemoryStore) CreateBooking(_ context.Context, b *Booking) error {
 	}
 	var live []Booking
 	for _, o := range m.bookings {
-		if o.ResourceID == b.ResourceID {
+		if o.ResourceID == b.ResourceID && o.EntityID == b.EntityID {
 			live = append(live, o)
 		}
 	}
@@ -257,33 +257,33 @@ func (m *MemoryStore) CreateBooking(_ context.Context, b *Booking) error {
 	return nil
 }
 
-func (m *MemoryStore) BookingByID(_ context.Context, id int64) (Booking, error) {
+func (m *MemoryStore) BookingByID(_ context.Context, entityID int64, id int64) (Booking, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.bookings[id]
-	if !ok {
+	if !ok || b.EntityID != entityID {
 		return Booking{}, identity.ErrNotFound
 	}
 	return b, nil
 }
 
-func (m *MemoryStore) BookingsOf(_ context.Context, resourceID int64, from, to time.Time) ([]Booking, error) {
+func (m *MemoryStore) BookingsOf(_ context.Context, entityID int64, resourceID int64, from, to time.Time) ([]Booking, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Booking
 	for _, b := range m.bookings {
-		if b.ResourceID == resourceID && b.StartAt.Before(to) && from.Before(b.EndAt) {
+		if b.EntityID == entityID && b.ResourceID == resourceID && b.StartAt.Before(to) && from.Before(b.EndAt) {
 			out = append(out, b)
 		}
 	}
 	return out, nil
 }
 
-func (m *MemoryStore) SetBookingStatus(_ context.Context, id int64, to BookingStatus, rowVersion int64) (Booking, error) {
+func (m *MemoryStore) SetBookingStatus(_ context.Context, entityID int64, id int64, to BookingStatus, rowVersion int64) (Booking, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.bookings[id]
-	if !ok {
+	if !ok || b.EntityID != entityID {
 		return Booking{}, identity.ErrNotFound
 	}
 	if b.RowVersion != rowVersion {

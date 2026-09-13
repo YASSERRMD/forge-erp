@@ -141,7 +141,7 @@ func (h *Handler) SetEventStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	e, err := h.deps.Store.SetEventStatus(r.Context(), id, OrgEventStatus(in.Status), in.RowVersion)
+	e, err := h.deps.Store.SetEventStatus(r.Context(), entityOf(r), id, OrgEventStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -200,7 +200,7 @@ func (h *Handler) SetRegistrationStatus(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	reg, err := h.deps.Store.SetRegistrationStatus(r.Context(), id, RegistrationStatus(in.Status))
+	reg, err := h.deps.Store.SetRegistrationStatus(r.Context(), entityOf(r), id, RegistrationStatus(in.Status))
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -247,7 +247,7 @@ func (h *Handler) SetPositionStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	p, err := h.deps.Store.SetPositionStatus(r.Context(), id, PositionStatus(in.Status), in.RowVersion)
+	p, err := h.deps.Store.SetPositionStatus(r.Context(), entityOf(r), id, PositionStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -306,7 +306,7 @@ func (h *Handler) SetApplicationStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a, err := h.deps.Store.SetApplicationStatus(r.Context(), id, ApplicationStatus(in.Status), in.RowVersion)
+	a, err := h.deps.Store.SetApplicationStatus(r.Context(), entityOf(r), id, ApplicationStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

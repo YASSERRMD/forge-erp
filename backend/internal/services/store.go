@@ -13,26 +13,26 @@ import (
 // Store is the persistence contract for the services context.
 type Store interface {
 	CreateProject(ctx context.Context, p *Project) error
-	ProjectByID(ctx context.Context, id int64) (Project, error)
+	ProjectByID(ctx context.Context, entityID int64, id int64) (Project, error)
 	ListProjects(ctx context.Context, entityID int64, limit, offset int) ([]Project, error)
-	SetProjectStatus(ctx context.Context, id int64, to ProjectStatus, rowVersion int64) (Project, error)
+	SetProjectStatus(ctx context.Context, entityID int64, id int64, to ProjectStatus, rowVersion int64) (Project, error)
 	CreateTask(ctx context.Context, t *Task) error
 	TasksOf(ctx context.Context, projectID int64) ([]Task, error)
-	SetTaskStatus(ctx context.Context, id int64, to TaskStatus, rowVersion int64) (Task, error)
+	SetTaskStatus(ctx context.Context, entityID int64, id int64, to TaskStatus, rowVersion int64) (Task, error)
 	AddTime(ctx context.Context, e *TimeEntry) error
 	TaskHours(ctx context.Context, taskID int64) (int64, error)
 	ProjectHours(ctx context.Context, projectID int64) (int64, error)
 	CreateContract(ctx context.Context, c *ServiceContract) error
-	SetContractStatus(ctx context.Context, id int64, to ContractStatus, rowVersion int64) (ServiceContract, error)
+	SetContractStatus(ctx context.Context, entityID int64, id int64, to ContractStatus, rowVersion int64) (ServiceContract, error)
 	ContractsOfOrg(ctx context.Context, orgID int64) ([]ServiceContract, error)
 	ListContracts(ctx context.Context, entityID int64, limit, offset int) ([]ServiceContract, error)
 	CreateIntervention(ctx context.Context, i *Intervention) error
-	SetInterventionStatus(ctx context.Context, id int64, to InterventionStatus, rowVersion int64) (Intervention, error)
+	SetInterventionStatus(ctx context.Context, entityID int64, id int64, to InterventionStatus, rowVersion int64) (Intervention, error)
 	ListInterventions(ctx context.Context, entityID int64, limit, offset int) ([]Intervention, error)
 	CreateTicket(ctx context.Context, t *Ticket) error
-	TicketByID(ctx context.Context, id int64) (Ticket, error)
+	TicketByID(ctx context.Context, entityID int64, id int64) (Ticket, error)
 	ListTickets(ctx context.Context, entityID int64, limit, offset int) ([]Ticket, error)
-	SetTicketStatus(ctx context.Context, id int64, to TicketStatus, rowVersion int64) (Ticket, error)
+	SetTicketStatus(ctx context.Context, entityID int64, id int64, to TicketStatus, rowVersion int64) (Ticket, error)
 	AddMessage(ctx context.Context, m *TicketMessage) error
 	MessagesOf(ctx context.Context, ticketID int64) ([]TicketMessage, error)
 }
@@ -66,8 +66,8 @@ func (s *PGStore) CreateProject(ctx context.Context, p *Project) error {
 	).Scan(&p.ID, &p.RowVersion)
 }
 
-func (s *PGStore) ProjectByID(ctx context.Context, id int64) (Project, error) {
-	return scanProject(s.pool.QueryRow(ctx, `SELECT `+projectCols+` FROM ferp_projects WHERE id=$1`, id))
+func (s *PGStore) ProjectByID(ctx context.Context, entityID int64, id int64) (Project, error) {
+	return scanProject(s.pool.QueryRow(ctx, `SELECT `+projectCols+` FROM ferp_projects WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 func (s *PGStore) ListProjects(ctx context.Context, entityID int64, limit, offset int) ([]Project, error) {
@@ -88,8 +88,8 @@ func (s *PGStore) ListProjects(ctx context.Context, entityID int64, limit, offse
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetProjectStatus(ctx context.Context, id int64, to ProjectStatus, rowVersion int64) (Project, error) {
-	p, err := s.ProjectByID(ctx, id)
+func (s *PGStore) SetProjectStatus(ctx context.Context, entityID int64, id int64, to ProjectStatus, rowVersion int64) (Project, error) {
+	p, err := s.ProjectByID(ctx, entityID, id)
 	if err != nil {
 		return Project{}, err
 	}
@@ -101,7 +101,7 @@ func (s *PGStore) SetProjectStatus(ctx context.Context, id int64, to ProjectStat
 	}
 	p.Status = to
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_projects SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
 	if err != nil {
 		return Project{}, err
 	}
@@ -133,7 +133,7 @@ func (s *PGStore) CreateTask(ctx context.Context, t *Task) error {
 	if err := t.Validate(); err != nil {
 		return err
 	}
-	p, err := s.ProjectByID(ctx, t.ProjectID)
+	p, err := s.ProjectByID(ctx, t.EntityID, t.ProjectID)
 	if err != nil {
 		return err
 	}
@@ -164,12 +164,12 @@ func (s *PGStore) TasksOf(ctx context.Context, projectID int64) ([]Task, error) 
 	return out, rows.Err()
 }
 
-func (s *PGStore) taskByID(ctx context.Context, id int64) (Task, error) {
-	return scanTask(s.pool.QueryRow(ctx, `SELECT `+taskCols+` FROM ferp_project_tasks WHERE id=$1`, id))
+func (s *PGStore) taskByID(ctx context.Context, entityID int64, id int64) (Task, error) {
+	return scanTask(s.pool.QueryRow(ctx, `SELECT `+taskCols+` FROM ferp_project_tasks WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
-func (s *PGStore) SetTaskStatus(ctx context.Context, id int64, to TaskStatus, rowVersion int64) (Task, error) {
-	t, err := s.taskByID(ctx, id)
+func (s *PGStore) SetTaskStatus(ctx context.Context, entityID int64, id int64, to TaskStatus, rowVersion int64) (Task, error) {
+	t, err := s.taskByID(ctx, entityID, id)
 	if err != nil {
 		return Task{}, err
 	}
@@ -181,7 +181,7 @@ func (s *PGStore) SetTaskStatus(ctx context.Context, id int64, to TaskStatus, ro
 	}
 	t.Status = to
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_project_tasks SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
 	if err != nil {
 		return Task{}, err
 	}
@@ -196,14 +196,14 @@ func (s *PGStore) AddTime(ctx context.Context, e *TimeEntry) error {
 	if err := e.Validate(); err != nil {
 		return err
 	}
-	t, err := s.taskByID(ctx, e.TaskID)
+	t, err := s.taskByID(ctx, e.EntityID, e.TaskID)
 	if err != nil {
 		return err
 	}
 	if t.Status == TaskDone || t.Status == TaskCanceled {
 		return errors.New("services: task closed for time entries")
 	}
-	p, err := s.ProjectByID(ctx, e.ProjectID)
+	p, err := s.ProjectByID(ctx, e.EntityID, e.ProjectID)
 	if err != nil {
 		return err
 	}
@@ -258,9 +258,9 @@ func (s *PGStore) CreateContract(ctx context.Context, c *ServiceContract) error 
 	).Scan(&c.ID, &c.RowVersion)
 }
 
-func (s *PGStore) SetContractStatus(ctx context.Context, id int64, to ContractStatus, rowVersion int64) (ServiceContract, error) {
+func (s *PGStore) SetContractStatus(ctx context.Context, entityID int64, id int64, to ContractStatus, rowVersion int64) (ServiceContract, error) {
 	var c ServiceContract
-	err := s.pool.QueryRow(ctx, `SELECT `+contractCols+` FROM ferp_service_contracts WHERE id=$1`, id).Scan(
+	err := s.pool.QueryRow(ctx, `SELECT `+contractCols+` FROM ferp_service_contracts WHERE id=$1 AND entity_id=$2`, id, entityID).Scan(
 		&c.ID, &c.EntityID, &c.Ref, &c.OrgID, &c.Label, &c.Status,
 		&c.StartDate, &c.EndDate, &c.CreatedAt, &c.UpdatedAt, &c.RowVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -276,7 +276,7 @@ func (s *PGStore) SetContractStatus(ctx context.Context, id int64, to ContractSt
 		return ServiceContract{}, errors.New("services: illegal contract transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_service_contracts SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
 	if err != nil {
 		return ServiceContract{}, err
 	}
@@ -364,8 +364,8 @@ func (s *PGStore) CreateIntervention(ctx context.Context, in *Intervention) erro
 	).Scan(&in.ID, &in.RowVersion)
 }
 
-func (s *PGStore) SetInterventionStatus(ctx context.Context, id int64, to InterventionStatus, rowVersion int64) (Intervention, error) {
-	in, err := scanIntervention(s.pool.QueryRow(ctx, `SELECT `+interventionCols+` FROM ferp_interventions WHERE id=$1`, id))
+func (s *PGStore) SetInterventionStatus(ctx context.Context, entityID int64, id int64, to InterventionStatus, rowVersion int64) (Intervention, error) {
+	in, err := scanIntervention(s.pool.QueryRow(ctx, `SELECT `+interventionCols+` FROM ferp_interventions WHERE id=$1 AND entity_id=$2`, id, entityID))
 	if err != nil {
 		return Intervention{}, err
 	}
@@ -376,7 +376,7 @@ func (s *PGStore) SetInterventionStatus(ctx context.Context, id int64, to Interv
 		return Intervention{}, errors.New("services: illegal intervention transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_interventions SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
 	if err != nil {
 		return Intervention{}, err
 	}
@@ -411,8 +411,8 @@ func (s *PGStore) CreateTicket(ctx context.Context, t *Ticket) error {
 	).Scan(&t.ID, &t.RowVersion)
 }
 
-func (s *PGStore) TicketByID(ctx context.Context, id int64) (Ticket, error) {
-	return scanTicket(s.pool.QueryRow(ctx, `SELECT `+ticketCols+` FROM ferp_tickets WHERE id=$1`, id))
+func (s *PGStore) TicketByID(ctx context.Context, entityID int64, id int64) (Ticket, error) {
+	return scanTicket(s.pool.QueryRow(ctx, `SELECT `+ticketCols+` FROM ferp_tickets WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 func (s *PGStore) ListTickets(ctx context.Context, entityID int64, limit, offset int) ([]Ticket, error) {
@@ -433,8 +433,8 @@ func (s *PGStore) ListTickets(ctx context.Context, entityID int64, limit, offset
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetTicketStatus(ctx context.Context, id int64, to TicketStatus, rowVersion int64) (Ticket, error) {
-	t, err := s.TicketByID(ctx, id)
+func (s *PGStore) SetTicketStatus(ctx context.Context, entityID int64, id int64, to TicketStatus, rowVersion int64) (Ticket, error) {
+	t, err := s.TicketByID(ctx, entityID, id)
 	if err != nil {
 		return Ticket{}, err
 	}
@@ -445,7 +445,7 @@ func (s *PGStore) SetTicketStatus(ctx context.Context, id int64, to TicketStatus
 		return Ticket{}, errors.New("services: illegal ticket transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_tickets SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
 	if err != nil {
 		return Ticket{}, err
 	}
@@ -461,7 +461,7 @@ func (s *PGStore) AddMessage(ctx context.Context, m *TicketMessage) error {
 	if err := m.Validate(); err != nil {
 		return err
 	}
-	t, err := s.TicketByID(ctx, m.TicketID)
+	t, err := s.TicketByID(ctx, m.EntityID, m.TicketID)
 	if err != nil {
 		return err
 	}
@@ -534,11 +534,11 @@ func (m *MemoryStore) CreateProject(_ context.Context, p *Project) error {
 	return nil
 }
 
-func (m *MemoryStore) ProjectByID(_ context.Context, id int64) (Project, error) {
+func (m *MemoryStore) ProjectByID(_ context.Context, entityID int64, id int64) (Project, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.projects[id]
-	if !ok {
+	if !ok || p.EntityID != entityID {
 		return Project{}, identity.ErrNotFound
 	}
 	return p, nil
@@ -563,11 +563,11 @@ func (m *MemoryStore) ListProjects(_ context.Context, entityID int64, limit, off
 	return out, nil
 }
 
-func (m *MemoryStore) SetProjectStatus(_ context.Context, id int64, to ProjectStatus, rowVersion int64) (Project, error) {
+func (m *MemoryStore) SetProjectStatus(_ context.Context, entityID int64, id int64, to ProjectStatus, rowVersion int64) (Project, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.projects[id]
-	if !ok {
+	if !ok || p.EntityID != entityID {
 		return Project{}, identity.ErrNotFound
 	}
 	if p.RowVersion != rowVersion {
@@ -613,11 +613,11 @@ func (m *MemoryStore) TasksOf(_ context.Context, projectID int64) ([]Task, error
 	return out, nil
 }
 
-func (m *MemoryStore) SetTaskStatus(_ context.Context, id int64, to TaskStatus, rowVersion int64) (Task, error) {
+func (m *MemoryStore) SetTaskStatus(_ context.Context, entityID int64, id int64, to TaskStatus, rowVersion int64) (Task, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, ok := m.tasks[id]
-	if !ok {
+	if !ok || t.EntityID != entityID {
 		return Task{}, identity.ErrNotFound
 	}
 	if t.RowVersion != rowVersion {
@@ -698,11 +698,11 @@ func (m *MemoryStore) CreateContract(_ context.Context, c *ServiceContract) erro
 	return nil
 }
 
-func (m *MemoryStore) SetContractStatus(_ context.Context, id int64, to ContractStatus, rowVersion int64) (ServiceContract, error) {
+func (m *MemoryStore) SetContractStatus(_ context.Context, entityID int64, id int64, to ContractStatus, rowVersion int64) (ServiceContract, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	c, ok := m.contracts[id]
-	if !ok {
+	if !ok || c.EntityID != entityID {
 		return ServiceContract{}, identity.ErrNotFound
 	}
 	if c.RowVersion != rowVersion {
@@ -784,11 +784,11 @@ func (m *MemoryStore) CreateIntervention(_ context.Context, in *Intervention) er
 	return nil
 }
 
-func (m *MemoryStore) SetInterventionStatus(_ context.Context, id int64, to InterventionStatus, rowVersion int64) (Intervention, error) {
+func (m *MemoryStore) SetInterventionStatus(_ context.Context, entityID int64, id int64, to InterventionStatus, rowVersion int64) (Intervention, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	in, ok := m.intervs[id]
-	if !ok {
+	if !ok || in.EntityID != entityID {
 		return Intervention{}, identity.ErrNotFound
 	}
 	if in.RowVersion != rowVersion {
@@ -820,11 +820,11 @@ func (m *MemoryStore) CreateTicket(_ context.Context, t *Ticket) error {
 	return nil
 }
 
-func (m *MemoryStore) TicketByID(_ context.Context, id int64) (Ticket, error) {
+func (m *MemoryStore) TicketByID(_ context.Context, entityID int64, id int64) (Ticket, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, ok := m.tickets[id]
-	if !ok {
+	if !ok || t.EntityID != entityID {
 		return Ticket{}, identity.ErrNotFound
 	}
 	return t, nil
@@ -849,11 +849,11 @@ func (m *MemoryStore) ListTickets(_ context.Context, entityID int64, limit, offs
 	return out, nil
 }
 
-func (m *MemoryStore) SetTicketStatus(_ context.Context, id int64, to TicketStatus, rowVersion int64) (Ticket, error) {
+func (m *MemoryStore) SetTicketStatus(_ context.Context, entityID int64, id int64, to TicketStatus, rowVersion int64) (Ticket, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, ok := m.tickets[id]
-	if !ok {
+	if !ok || t.EntityID != entityID {
 		return Ticket{}, identity.ErrNotFound
 	}
 	if t.RowVersion != rowVersion {

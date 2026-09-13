@@ -134,7 +134,7 @@ func (s *DirStorage) Delete(_ context.Context, key string) error {
 // Store is the metadata persistence contract.
 type Store interface {
 	Create(ctx context.Context, d *Document) error
-	ByID(ctx context.Context, id int64) (Document, error)
+	ByID(ctx context.Context, entityID int64, id int64) (Document, error)
 	List(ctx context.Context, entityID int64, scope string, objectID int64) ([]Document, error)
 }
 
@@ -194,11 +194,11 @@ func (m *MemoryStore) Create(_ context.Context, d *Document) error {
 	return nil
 }
 
-func (m *MemoryStore) ByID(_ context.Context, id int64) (Document, error) {
+func (m *MemoryStore) ByID(_ context.Context, entityID int64, id int64) (Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, ok := m.docs[id]
-	if !ok {
+	if !ok || d.EntityID != entityID {
 		return Document{}, errors.New("documentsvc: not found")
 	}
 	return d, nil

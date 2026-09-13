@@ -138,7 +138,7 @@ func (h *Handler) SetSurveyStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	s, err := h.deps.Store.SetSurveyStatus(r.Context(), id, SurveyStatus(in.Status), in.RowVersion)
+	s, err := h.deps.Store.SetSurveyStatus(r.Context(), entityOf(r), id, SurveyStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -175,7 +175,7 @@ func (h *Handler) ListQuestions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.QuestionsOf(r.Context(), sid)
+	list, err := h.deps.Store.QuestionsOf(r.Context(), entityOf(r), sid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -212,7 +212,7 @@ func (h *Handler) ListOptions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.OptionsOf(r.Context(), qid)
+	list, err := h.deps.Store.OptionsOf(r.Context(), entityOf(r), qid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -249,7 +249,7 @@ func (h *Handler) Results(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	tally, err := h.deps.Store.Results(r.Context(), qid)
+	tally, err := h.deps.Store.Results(r.Context(), entityOf(r), qid)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

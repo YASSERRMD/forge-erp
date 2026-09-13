@@ -46,6 +46,22 @@ func TestUploadValidation(t *testing.T) {
 	}
 }
 
+func TestCrossTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	svc := &Service{Store: NewMemoryStore(), Storage: NewMemoryStorage()}
+	d, err := svc.Upload(ctx, 1, "sales", 42, "quote.pdf", "application/pdf",
+		bytes.NewReader([]byte("%PDF-hello")), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Store.ByID(ctx, 2, d.ID); err == nil {
+		t.Fatal("cross-tenant ByID accepted")
+	}
+	if got, err := svc.Store.ByID(ctx, 1, d.ID); err != nil || got.ID != d.ID {
+		t.Fatalf("own-entity ByID err=%v doc=%+v", err, got)
+	}
+}
+
 func TestDirStorageRoundtrip(t *testing.T) {
 	ctx := context.Background()
 	st, err := NewDirStorage(t.TempDir())

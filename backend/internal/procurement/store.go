@@ -27,14 +27,14 @@ type SupplierPayment struct {
 // Store is the persistence contract for procurement.
 type Store interface {
 	CreateDoc(ctx context.Context, d *Document, yearMonth string) error
-	DocByID(ctx context.Context, id int64) (Document, error)
+	DocByID(ctx context.Context, entityID, id int64) (Document, error)
 	ListDocs(ctx context.Context, entityID int64, t documents.DocType, limit, offset int) ([]Document, error)
-	SetStatus(ctx context.Context, id int64, to int16) (Document, error)
-	SetApproval(ctx context.Context, id int64, approverID int64) (Document, error)
+	SetStatus(ctx context.Context, entityID, id int64, to int16) (Document, error)
+	SetApproval(ctx context.Context, entityID, id int64, approverID int64) (Document, error)
 	UpsertPrice(ctx context.Context, p *SupplierPrice) error
 	PricesFor(ctx context.Context, entityID, productID, orgID int64) ([]SupplierPrice, error)
 	RecordPayment(ctx context.Context, p *SupplierPayment, invoiceIDs []int64, yearMonth string) ([]int64, error)
-	InvoiceBalance(ctx context.Context, invoiceID int64) (int64, error)
+	InvoiceBalance(ctx context.Context, entityID, invoiceID int64) (int64, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -128,8 +128,8 @@ func (s *PGStore) CreateDoc(ctx context.Context, d *Document, yearMonth string) 
 	return tx.Commit(ctx)
 }
 
-func (s *PGStore) DocByID(ctx context.Context, id int64) (Document, error) {
-	d, err := scanDoc(s.pool.QueryRow(ctx, `SELECT `+docCols+` FROM ferp_supplier_docs WHERE id=$1`, id))
+func (s *PGStore) DocByID(ctx context.Context, entityID, id int64) (Document, error) {
+	d, err := scanDoc(s.pool.QueryRow(ctx, `SELECT `+docCols+` FROM ferp_supplier_docs WHERE id=$1 AND entity_id=$2`, id, entityID))
 	if err != nil {
 		return Document{}, err
 	}
@@ -141,8 +141,8 @@ func (s *PGStore) DocByID(ctx context.Context, id int64) (Document, error) {
 	return d, nil
 }
 
-func (s *PGStore) SetStatus(ctx context.Context, id int64, to int16) (Document, error) {
-	d, err := s.DocByID(ctx, id)
+func (s *PGStore) SetStatus(ctx context.Context, entityID, id int64, to int16) (Document, error) {
+	d, err := s.DocByID(ctx, entityID, id)
 	if err != nil {
 		return Document{}, err
 	}
@@ -154,7 +154,7 @@ func (s *PGStore) SetStatus(ctx context.Context, id int64, to int16) (Document, 
 		return Document{}, errors.New("procurement: order above threshold requires approval")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_supplier_docs SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, d.RowVersion)
+		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, d.RowVersion)
 	if err != nil {
 		return Document{}, err
 	}
@@ -187,8 +187,8 @@ func (s *PGStore) ListDocs(ctx context.Context, entityID int64, t documents.DocT
 }
 
 // SetApproval stamps an approver on an order (unblocks above-threshold validation).
-func (s *PGStore) SetApproval(ctx context.Context, id int64, approverID int64) (Document, error) {
-	d, err := s.DocByID(ctx, id)
+func (s *PGStore) SetApproval(ctx context.Context, entityID, id int64, approverID int64) (Document, error) {
+	d, err := s.DocByID(ctx, entityID, id)
 	if err != nil {
 		return Document{}, err
 	}
@@ -196,7 +196,7 @@ func (s *PGStore) SetApproval(ctx context.Context, id int64, approverID int64) (
 		return Document{}, errors.New("procurement: approval applies to supplier orders")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_supplier_docs SET approved_by=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, approverID, id, d.RowVersion)
+		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, approverID, id, entityID, d.RowVersion)
 	if err != nil {
 		return Document{}, err
 	}
@@ -246,7 +246,7 @@ func (s *PGStore) RecordPayment(ctx context.Context, p *SupplierPayment, invoice
 	balances := make([]int64, len(invoiceIDs))
 	for i, invID := range invoiceIDs {
 		var gross, paid int64
-		err := tx.QueryRow(ctx, `SELECT total_gross FROM ferp_supplier_docs WHERE id=$1 AND type='supplier_invoice'`, invID).Scan(&gross)
+		err := tx.QueryRow(ctx, `SELECT total_gross FROM ferp_supplier_docs WHERE id=$1 AND entity_id=$2 AND type='supplier_invoice'`, invID, p.EntityID).Scan(&gross)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("procurement: invoice %d not found", invID)
 		}
@@ -292,22 +292,22 @@ func (s *PGStore) RecordPayment(ctx context.Context, p *SupplierPayment, invoice
 			return nil, err
 		}
 		var gross, paid int64
-		_ = tx.QueryRow(ctx, `SELECT total_gross FROM ferp_supplier_docs WHERE id=$1`, invID).Scan(&gross)
+		_ = tx.QueryRow(ctx, `SELECT total_gross FROM ferp_supplier_docs WHERE id=$1 AND entity_id=$2`, invID, p.EntityID).Scan(&gross)
 		_ = tx.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0) FROM ferp_supplier_allocations WHERE invoice_id=$1`, invID).Scan(&paid)
 		st := int16(PartPaid)
 		if paid >= gross {
 			st = Paid
 		}
-		if _, err := tx.Exec(ctx, `UPDATE ferp_supplier_docs SET status=$1, updated_at=now() WHERE id=$2`, st, invID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE ferp_supplier_docs SET status=$1, updated_at=now() WHERE id=$2 AND entity_id=$3`, st, invID, p.EntityID); err != nil {
 			return nil, err
 		}
 	}
 	return applied, tx.Commit(ctx)
 }
 
-func (s *PGStore) InvoiceBalance(ctx context.Context, invoiceID int64) (int64, error) {
+func (s *PGStore) InvoiceBalance(ctx context.Context, entityID, invoiceID int64) (int64, error) {
 	var gross, paid int64
-	if err := s.pool.QueryRow(ctx, `SELECT total_gross FROM ferp_supplier_docs WHERE id=$1 AND type='supplier_invoice'`, invoiceID).Scan(&gross); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT total_gross FROM ferp_supplier_docs WHERE id=$1 AND entity_id=$2 AND type='supplier_invoice'`, invoiceID, entityID).Scan(&gross); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, identity.ErrNotFound
 		}
@@ -358,21 +358,21 @@ func (m *MemoryStore) CreateDoc(_ context.Context, d *Document, yearMonth string
 	return nil
 }
 
-func (m *MemoryStore) DocByID(_ context.Context, id int64) (Document, error) {
+func (m *MemoryStore) DocByID(_ context.Context, entityID, id int64) (Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, ok := m.docs[id]
-	if !ok {
+	if !ok || d.EntityID != entityID {
 		return Document{}, identity.ErrNotFound
 	}
 	return d, nil
 }
 
-func (m *MemoryStore) SetStatus(_ context.Context, id int64, to int16) (Document, error) {
+func (m *MemoryStore) SetStatus(_ context.Context, entityID, id int64, to int16) (Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, ok := m.docs[id]
-	if !ok {
+	if !ok || d.EntityID != entityID {
 		return Document{}, identity.ErrNotFound
 	}
 	if err := d.MoveTo(to); err != nil {
@@ -409,11 +409,11 @@ func (m *MemoryStore) ListDocs(_ context.Context, entityID int64, t documents.Do
 }
 
 // SetApproval stamps an approver on an order.
-func (m *MemoryStore) SetApproval(_ context.Context, id int64, approverID int64) (Document, error) {
+func (m *MemoryStore) SetApproval(_ context.Context, entityID, id int64, approverID int64) (Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, ok := m.docs[id]
-	if !ok {
+	if !ok || d.EntityID != entityID {
 		return Document{}, identity.ErrNotFound
 	}
 	if d.Type != documents.TypeSupplierOrder {
@@ -462,7 +462,7 @@ func (m *MemoryStore) RecordPayment(_ context.Context, p *SupplierPayment, invoi
 	balances := make([]int64, len(invoiceIDs))
 	for i, invID := range invoiceIDs {
 		inv, ok := m.docs[invID]
-		if !ok || inv.Type != documents.TypeSupplierInvoice {
+		if !ok || inv.EntityID != p.EntityID || inv.Type != documents.TypeSupplierInvoice {
 			return nil, fmt.Errorf("procurement: invoice %d not found", invID)
 		}
 		balances[i] = inv.Totals.Gross - m.alloc[invID]
@@ -497,11 +497,11 @@ func (m *MemoryStore) RecordPayment(_ context.Context, p *SupplierPayment, invoi
 	return applied, nil
 }
 
-func (m *MemoryStore) InvoiceBalance(_ context.Context, invoiceID int64) (int64, error) {
+func (m *MemoryStore) InvoiceBalance(_ context.Context, entityID, invoiceID int64) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	inv, ok := m.docs[invoiceID]
-	if !ok || inv.Type != documents.TypeSupplierInvoice {
+	if !ok || inv.EntityID != entityID || inv.Type != documents.TypeSupplierInvoice {
 		return 0, identity.ErrNotFound
 	}
 	return inv.Totals.Gross - m.alloc[invoiceID], nil

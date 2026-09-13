@@ -150,7 +150,7 @@ func (h *Handler) UpdateArticle(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a, err := h.deps.Store.UpdateArticle(r.Context(), id, in.Title, in.Body, in.Tags, in.RowVersion)
+	a, err := h.deps.Store.UpdateArticle(r.Context(), entityOf(r), id, in.Title, in.Body, in.Tags, in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -170,7 +170,7 @@ func (h *Handler) SetArticleStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a, err := h.deps.Store.SetArticleStatus(r.Context(), id, ArticleStatus(in.Status), in.RowVersion)
+	a, err := h.deps.Store.SetArticleStatus(r.Context(), entityOf(r), id, ArticleStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

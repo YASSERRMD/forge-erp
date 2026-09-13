@@ -15,16 +15,16 @@ import (
 // Store is the persistence contract for the survey context.
 type Store interface {
 	CreateSurvey(ctx context.Context, s *Survey) error
-	SurveyByID(ctx context.Context, id int64) (Survey, error)
+	SurveyByID(ctx context.Context, entityID int64, id int64) (Survey, error)
 	ListSurveys(ctx context.Context, entityID int64) ([]Survey, error)
-	SetSurveyStatus(ctx context.Context, id int64, to SurveyStatus, rowVersion int64) (Survey, error)
+	SetSurveyStatus(ctx context.Context, entityID int64, id int64, to SurveyStatus, rowVersion int64) (Survey, error)
 	AddQuestion(ctx context.Context, q *Question) error
-	QuestionsOf(ctx context.Context, surveyID int64) ([]Question, error)
+	QuestionsOf(ctx context.Context, entityID int64, surveyID int64) ([]Question, error)
 	AddOption(ctx context.Context, o *Option) error
-	OptionsOf(ctx context.Context, questionID int64) ([]Option, error)
+	OptionsOf(ctx context.Context, entityID int64, questionID int64) ([]Option, error)
 	CastVote(ctx context.Context, v *Vote) error
-	VotesOf(ctx context.Context, questionID int64) ([]Vote, error)
-	Results(ctx context.Context, questionID int64) ([]Tally, error)
+	VotesOf(ctx context.Context, entityID int64, questionID int64) ([]Vote, error)
+	Results(ctx context.Context, entityID int64, questionID int64) ([]Tally, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -56,8 +56,8 @@ func (s *PGStore) CreateSurvey(ctx context.Context, sv *Survey) error {
 	).Scan(&sv.ID, &sv.RowVersion)
 }
 
-func (s *PGStore) SurveyByID(ctx context.Context, id int64) (Survey, error) {
-	return scanSurvey(s.pool.QueryRow(ctx, `SELECT `+surveyCols+` FROM ferp_surveys WHERE id=$1`, id))
+func (s *PGStore) SurveyByID(ctx context.Context, entityID int64, id int64) (Survey, error) {
+	return scanSurvey(s.pool.QueryRow(ctx, `SELECT `+surveyCols+` FROM ferp_surveys WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 func (s *PGStore) ListSurveys(ctx context.Context, entityID int64) ([]Survey, error) {
@@ -77,8 +77,8 @@ func (s *PGStore) ListSurveys(ctx context.Context, entityID int64) ([]Survey, er
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetSurveyStatus(ctx context.Context, id int64, to SurveyStatus, rowVersion int64) (Survey, error) {
-	sv, err := s.SurveyByID(ctx, id)
+func (s *PGStore) SetSurveyStatus(ctx context.Context, entityID int64, id int64, to SurveyStatus, rowVersion int64) (Survey, error) {
+	sv, err := s.SurveyByID(ctx, entityID, id)
 	if err != nil {
 		return Survey{}, err
 	}
@@ -89,7 +89,7 @@ func (s *PGStore) SetSurveyStatus(ctx context.Context, id int64, to SurveyStatus
 		return Survey{}, errors.New("survey: illegal transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_surveys SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND entity_id=$4 AND row_version=$3`, to, id, rowVersion, entityID)
 	if err != nil {
 		return Survey{}, err
 	}
@@ -105,7 +105,7 @@ func (s *PGStore) AddQuestion(ctx context.Context, q *Question) error {
 	if err := q.Validate(); err != nil {
 		return err
 	}
-	sv, err := s.SurveyByID(ctx, q.SurveyID)
+	sv, err := s.SurveyByID(ctx, q.EntityID, q.SurveyID)
 	if err != nil {
 		return err
 	}
@@ -119,9 +119,10 @@ func (s *PGStore) AddQuestion(ctx context.Context, q *Question) error {
 	).Scan(&q.ID)
 }
 
-func (s *PGStore) QuestionsOf(ctx context.Context, surveyID int64) ([]Question, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, survey_id, text, multi, position
-		FROM ferp_survey_questions WHERE survey_id=$1 ORDER BY position, id`, surveyID)
+func (s *PGStore) QuestionsOf(ctx context.Context, entityID int64, surveyID int64) ([]Question, error) {
+	rows, err := s.pool.Query(ctx, `SELECT q.id, q.entity_id, q.survey_id, q.text, q.multi, q.position
+		FROM ferp_survey_questions q JOIN ferp_surveys sv ON sv.id=q.survey_id
+		WHERE q.survey_id=$1 AND sv.entity_id=$2 ORDER BY q.position, q.id`, surveyID, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -137,8 +138,26 @@ func (s *PGStore) QuestionsOf(ctx context.Context, surveyID int64) ([]Question, 
 	return out, rows.Err()
 }
 
+// questionByID fetches one question within its tenant.
+func (s *PGStore) questionByID(ctx context.Context, entityID int64, questionID int64) (Question, error) {
+	var q Question
+	err := s.pool.QueryRow(ctx, `SELECT id, entity_id, survey_id, text, multi, position
+		FROM ferp_survey_questions WHERE id=$1 AND entity_id=$2`, questionID, entityID).Scan(
+		&q.ID, &q.EntityID, &q.SurveyID, &q.Text, &q.Multi, &q.Position)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Question{}, identity.ErrNotFound
+	}
+	if err != nil {
+		return Question{}, err
+	}
+	return q, nil
+}
+
 func (s *PGStore) AddOption(ctx context.Context, o *Option) error {
 	if err := o.Validate(); err != nil {
+		return err
+	}
+	if _, err := s.questionByID(ctx, o.EntityID, o.QuestionID); err != nil {
 		return err
 	}
 	return s.pool.QueryRow(ctx, `INSERT INTO ferp_survey_options
@@ -148,9 +167,9 @@ func (s *PGStore) AddOption(ctx context.Context, o *Option) error {
 	).Scan(&o.ID)
 }
 
-func (s *PGStore) OptionsOf(ctx context.Context, questionID int64) ([]Option, error) {
+func (s *PGStore) OptionsOf(ctx context.Context, entityID int64, questionID int64) ([]Option, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, question_id, label, position
-		FROM ferp_survey_options WHERE question_id=$1 ORDER BY position, id`, questionID)
+		FROM ferp_survey_options WHERE question_id=$1 AND entity_id=$2 ORDER BY position, id`, questionID, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -171,24 +190,18 @@ func (s *PGStore) CastVote(ctx context.Context, v *Vote) error {
 	if err := v.Validate(); err != nil {
 		return err
 	}
-	var q Question
-	err := s.pool.QueryRow(ctx, `SELECT id, entity_id, survey_id, text, multi, position
-		FROM ferp_survey_questions WHERE id=$1`, v.QuestionID).Scan(
-		&q.ID, &q.EntityID, &q.SurveyID, &q.Text, &q.Multi, &q.Position)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return identity.ErrNotFound
-	}
+	q, err := s.questionByID(ctx, v.EntityID, v.QuestionID)
 	if err != nil {
 		return err
 	}
-	sv, err := s.SurveyByID(ctx, q.SurveyID)
+	sv, err := s.SurveyByID(ctx, v.EntityID, q.SurveyID)
 	if err != nil {
 		return err
 	}
 	if sv.Status != SurveyOpen {
 		return errors.New("survey: voting open on open surveys only")
 	}
-	opts, err := s.OptionsOf(ctx, q.ID)
+	opts, err := s.OptionsOf(ctx, v.EntityID, q.ID)
 	if err != nil {
 		return err
 	}
@@ -213,9 +226,9 @@ func (s *PGStore) CastVote(ctx context.Context, v *Vote) error {
 		v.EntityID, v.QuestionID, v.UserLogin).Scan(&v.ID)
 }
 
-func (s *PGStore) VotesOf(ctx context.Context, questionID int64) ([]Vote, error) {
+func (s *PGStore) VotesOf(ctx context.Context, entityID int64, questionID int64) ([]Vote, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, question_id, user_login, option_ids, created_at
-		FROM ferp_survey_votes WHERE question_id=$1 ORDER BY id`, questionID)
+		FROM ferp_survey_votes WHERE question_id=$1 AND entity_id=$2 ORDER BY id`, questionID, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -231,12 +244,12 @@ func (s *PGStore) VotesOf(ctx context.Context, questionID int64) ([]Vote, error)
 	return out, rows.Err()
 }
 
-func (s *PGStore) Results(ctx context.Context, questionID int64) ([]Tally, error) {
-	opts, err := s.OptionsOf(ctx, questionID)
+func (s *PGStore) Results(ctx context.Context, entityID int64, questionID int64) ([]Tally, error) {
+	opts, err := s.OptionsOf(ctx, entityID, questionID)
 	if err != nil {
 		return nil, err
 	}
-	votes, err := s.VotesOf(ctx, questionID)
+	votes, err := s.VotesOf(ctx, entityID, questionID)
 	if err != nil {
 		return nil, err
 	}
@@ -280,11 +293,11 @@ func (m *MemoryStore) CreateSurvey(_ context.Context, s *Survey) error {
 	return nil
 }
 
-func (m *MemoryStore) SurveyByID(_ context.Context, id int64) (Survey, error) {
+func (m *MemoryStore) SurveyByID(_ context.Context, entityID int64, id int64) (Survey, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.surveys[id]
-	if !ok {
+	if !ok || s.EntityID != entityID {
 		return Survey{}, identity.ErrNotFound
 	}
 	return s, nil
@@ -302,11 +315,11 @@ func (m *MemoryStore) ListSurveys(_ context.Context, entityID int64) ([]Survey, 
 	return out, nil
 }
 
-func (m *MemoryStore) SetSurveyStatus(_ context.Context, id int64, to SurveyStatus, rowVersion int64) (Survey, error) {
+func (m *MemoryStore) SetSurveyStatus(_ context.Context, entityID int64, id int64, to SurveyStatus, rowVersion int64) (Survey, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.surveys[id]
-	if !ok {
+	if !ok || s.EntityID != entityID {
 		return Survey{}, identity.ErrNotFound
 	}
 	if s.RowVersion != rowVersion {
@@ -328,7 +341,7 @@ func (m *MemoryStore) AddQuestion(_ context.Context, q *Question) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sv, ok := m.surveys[q.SurveyID]
-	if !ok {
+	if !ok || sv.EntityID != q.EntityID {
 		return errors.New("survey: survey not found")
 	}
 	if sv.Status != SurveyDraft {
@@ -339,12 +352,16 @@ func (m *MemoryStore) AddQuestion(_ context.Context, q *Question) error {
 	return nil
 }
 
-func (m *MemoryStore) QuestionsOf(_ context.Context, surveyID int64) ([]Question, error) {
+func (m *MemoryStore) QuestionsOf(_ context.Context, entityID int64, surveyID int64) ([]Question, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	sv, ok := m.surveys[surveyID]
+	if !ok || sv.EntityID != entityID {
+		return nil, nil
+	}
 	var out []Question
 	for _, q := range m.questions {
-		if q.SurveyID == surveyID {
+		if q.SurveyID == surveyID && q.EntityID == entityID {
 			out = append(out, q)
 		}
 	}
@@ -357,17 +374,21 @@ func (m *MemoryStore) AddOption(_ context.Context, o *Option) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	q, ok := m.questions[o.QuestionID]
+	if !ok || q.EntityID != o.EntityID {
+		return identity.ErrNotFound
+	}
 	o.ID = m.next()
 	m.options[o.ID] = *o
 	return nil
 }
 
-func (m *MemoryStore) OptionsOf(_ context.Context, questionID int64) ([]Option, error) {
+func (m *MemoryStore) OptionsOf(_ context.Context, entityID int64, questionID int64) ([]Option, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Option
 	for _, o := range m.options {
-		if o.QuestionID == questionID {
+		if o.QuestionID == questionID && o.EntityID == entityID {
 			out = append(out, o)
 		}
 	}
@@ -387,16 +408,16 @@ func (m *MemoryStore) CastVote(_ context.Context, v *Vote) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	q, ok := m.questions[v.QuestionID]
-	if !ok {
+	if !ok || q.EntityID != v.EntityID {
 		return identity.ErrNotFound
 	}
 	sv, ok := m.surveys[q.SurveyID]
-	if !ok || sv.Status != SurveyOpen {
+	if !ok || sv.EntityID != v.EntityID || sv.Status != SurveyOpen {
 		return errors.New("survey: voting open on open surveys only")
 	}
 	valid := map[int64]bool{}
 	for _, o := range m.options {
-		if o.QuestionID == q.ID {
+		if o.QuestionID == q.ID && o.EntityID == v.EntityID {
 			valid[o.ID] = true
 		}
 	}
@@ -413,30 +434,30 @@ func (m *MemoryStore) CastVote(_ context.Context, v *Vote) error {
 	return nil
 }
 
-func (m *MemoryStore) VotesOf(_ context.Context, questionID int64) ([]Vote, error) {
+func (m *MemoryStore) VotesOf(_ context.Context, entityID int64, questionID int64) ([]Vote, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Vote
 	for _, v := range m.votes {
-		if v.QuestionID == questionID {
+		if v.QuestionID == questionID && v.EntityID == entityID {
 			out = append(out, v)
 		}
 	}
 	return out, nil
 }
 
-func (m *MemoryStore) Results(_ context.Context, questionID int64) ([]Tally, error) {
+func (m *MemoryStore) Results(_ context.Context, entityID int64, questionID int64) ([]Tally, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var opts []Option
 	for _, o := range m.options {
-		if o.QuestionID == questionID {
+		if o.QuestionID == questionID && o.EntityID == entityID {
 			opts = append(opts, o)
 		}
 	}
 	var votes []Vote
 	for _, v := range m.votes {
-		if v.QuestionID == questionID {
+		if v.QuestionID == questionID && v.EntityID == entityID {
 			votes = append(votes, v)
 		}
 	}

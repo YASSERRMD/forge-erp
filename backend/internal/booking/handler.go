@@ -154,7 +154,7 @@ func (h *Handler) ListBookings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "valid from/to (RFC3339) required")
 		return
 	}
-	list, err := h.deps.Store.BookingsOf(r.Context(), resID, from, to)
+	list, err := h.deps.Store.BookingsOf(r.Context(), entityOf(r), resID, from, to)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -174,7 +174,7 @@ func (h *Handler) SetBookingStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	b, err := h.deps.Store.SetBookingStatus(r.Context(), id, BookingStatus(in.Status), in.RowVersion)
+	b, err := h.deps.Store.SetBookingStatus(r.Context(), entityOf(r), id, BookingStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

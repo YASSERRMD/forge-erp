@@ -4,8 +4,33 @@ import (
 	"context"
 	"testing"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
+
+func TestCrossTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	st := NewMemoryStore()
+
+	p := &Product{EntityID: 1, SKU: "X-TENANT", Name: "X", Type: ProductGoods,
+		NetPrice: 100, Status: ProductActive}
+	if err := st.CreateProduct(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ProductByID(ctx, 2, p.ID); err != identity.ErrNotFound {
+		t.Fatalf("cross-tenant ProductByID: %v", err)
+	}
+	w := &Warehouse{EntityID: 1, Code: "XWH", Label: "X", Status: 1}
+	if err := st.CreateWarehouse(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.WarehouseByID(ctx, 2, w.ID); err != identity.ErrNotFound {
+		t.Fatalf("cross-tenant WarehouseByID: %v", err)
+	}
+	if _, err := st.ProductByID(ctx, 1, p.ID); err != nil {
+		t.Fatalf("own-tenant ProductByID: %v", err)
+	}
+}
 
 func TestMemoryStoreProductAndStock(t *testing.T) {
 	ctx := context.Background()

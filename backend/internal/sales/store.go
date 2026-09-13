@@ -185,7 +185,7 @@ func (s *PGStore) SetStatus(ctx context.Context, entityID, id int64, to int16) (
 		return Document{}, err
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_documents SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, d.RowVersion)
+		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, d.RowVersion)
 	if err != nil {
 		return Document{}, err
 	}
@@ -303,13 +303,13 @@ func (s *PGStore) RecordPayment(ctx context.Context, p *Payment, invoiceIDs []in
 			return nil, err
 		}
 		var gross, paid int64
-		_ = tx.QueryRow(ctx, `SELECT total_gross FROM ferp_documents WHERE id=$1`, invID).Scan(&gross)
+		_ = tx.QueryRow(ctx, `SELECT total_gross FROM ferp_documents WHERE id=$1 AND entity_id=$2`, invID, p.EntityID).Scan(&gross)
 		_ = tx.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0) FROM ferp_payment_allocations WHERE invoice_id=$1`, invID).Scan(&paid)
 		st := int16(InvoicePartPaid)
 		if paid >= gross {
 			st = InvoicePaid
 		}
-		if _, err := tx.Exec(ctx, `UPDATE ferp_documents SET status=$1, updated_at=now() WHERE id=$2`, st, invID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE ferp_documents SET status=$1, updated_at=now() WHERE id=$2 AND entity_id=$3`, st, invID, p.EntityID); err != nil {
 			return nil, err
 		}
 	}
@@ -488,7 +488,7 @@ func (m *MemoryStore) RecordPayment(_ context.Context, p *Payment, invoiceIDs []
 	balances := make([]int64, len(invoiceIDs))
 	for i, invID := range invoiceIDs {
 		inv, ok := m.docs[invID]
-		if !ok || inv.Type != documents.TypeInvoice {
+		if !ok || inv.EntityID != p.EntityID || inv.Type != documents.TypeInvoice {
 			return nil, fmt.Errorf("sales: invoice %d not found", invID)
 		}
 		balances[i] = inv.Totals.Gross - m.alloc[invID] - m.credited[invID]

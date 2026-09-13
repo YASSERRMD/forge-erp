@@ -141,7 +141,7 @@ func (h *Handler) GetBOM(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	b, err := h.deps.Store.BOMByID(r.Context(), id)
+	b, err := h.deps.Store.BOMByID(r.Context(), entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -161,7 +161,7 @@ func (h *Handler) SetBOMStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	b, err := h.deps.Store.SetBOMStatus(r.Context(), id, BOMStatus(in.Status), in.RowVersion)
+	b, err := h.deps.Store.SetBOMStatus(r.Context(), entityOf(r), id, BOMStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -246,7 +246,7 @@ func (h *Handler) GetMO(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	mo, err := h.deps.Store.MOByID(r.Context(), id)
+	mo, err := h.deps.Store.MOByID(r.Context(), entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -266,7 +266,7 @@ func (h *Handler) SetMOStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	mo, err := h.deps.Store.SetMOStatus(r.Context(), id, MOStatus(in.Status), in.RowVersion)
+	mo, err := h.deps.Store.SetMOStatus(r.Context(), entityOf(r), id, MOStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -282,7 +282,7 @@ func (h *Handler) Produce(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	mo, err := h.deps.Store.MOByID(r.Context(), id)
+	mo, err := h.deps.Store.MOByID(r.Context(), entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -297,7 +297,7 @@ func (h *Handler) Produce(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	done, err := h.deps.Store.MarkProduced(r.Context(), mo.ID, mo.RowVersion)
+	done, err := h.deps.Store.MarkProduced(r.Context(), entityOf(r), mo.ID, mo.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

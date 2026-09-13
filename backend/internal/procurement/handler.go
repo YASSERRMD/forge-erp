@@ -133,7 +133,7 @@ func (h *Handler) load(w http.ResponseWriter, r *http.Request) (Document, bool) 
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return Document{}, false
 	}
-	d, err := h.deps.Store.DocByID(r.Context(), id)
+	d, err := h.deps.Store.DocByID(r.Context(), entityOf(r), id)
 	if err != nil || d.EntityID != entityOf(r) {
 		writeErr(w, http.StatusNotFound, "document not found")
 		return Document{}, false
@@ -155,7 +155,7 @@ func (h *Handler) SetStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	d, err := h.deps.Store.SetStatus(r.Context(), id, req.To)
+	d, err := h.deps.Store.SetStatus(r.Context(), entityOf(r), id, req.To)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -197,7 +197,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, _ := identity.AuthUser(r)
-	updated, err := h.deps.Store.SetApproval(r.Context(), d.ID, u.ID)
+	updated, err := h.deps.Store.SetApproval(r.Context(), entityOf(r), d.ID, u.ID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -295,7 +295,7 @@ func (h *Handler) Receive(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	closed, err := h.deps.Store.SetStatus(r.Context(), d.ID, Stage2) // reception: validated → closed
+	closed, err := h.deps.Store.SetStatus(r.Context(), entityOf(r), d.ID, Stage2) // reception: validated → closed
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

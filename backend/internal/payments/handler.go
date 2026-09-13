@@ -139,7 +139,7 @@ func (h *Handler) CreateIntent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Provider == ProviderManual {
-		settled, err := h.deps.Store.SetAttemptStatus(r.Context(), a.ID, AttemptSucceeded, a.RowVersion)
+		settled, err := h.deps.Store.SetAttemptStatus(r.Context(), entityOf(r), a.ID, AttemptSucceeded, a.RowVersion)
 		if err != nil {
 			writeErr(w, storeErrorCode(err), err.Error())
 			return
@@ -182,7 +182,7 @@ func (h *Handler) SetAttemptStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a, err := h.deps.Store.SetAttemptStatus(r.Context(), id, AttemptStatus(in.Status), in.RowVersion)
+	a, err := h.deps.Store.SetAttemptStatus(r.Context(), entityOf(r), id, AttemptStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -218,7 +218,7 @@ func (h *Handler) StripeWebhook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad event")
 		return
 	}
-	a, err := h.deps.Store.AttemptByID(r.Context(), ev.AttemptID)
+	a, err := h.deps.Store.AttemptByID(r.Context(), entityOf(r), ev.AttemptID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -237,7 +237,7 @@ func (h *Handler) StripeWebhook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "payments: unhandled event type")
 		return
 	}
-	upd, err := h.deps.Store.SetAttemptStatus(r.Context(), a.ID, to, a.RowVersion)
+	upd, err := h.deps.Store.SetAttemptStatus(r.Context(), entityOf(r), a.ID, to, a.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

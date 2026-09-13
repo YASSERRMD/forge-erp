@@ -28,7 +28,7 @@ func (w *Worker) RunOnce(ctx context.Context) (int, error) {
 	}
 	sent := 0
 	for _, e := range due {
-		if err := w.Store.MarkReminded(ctx, e.ID); err != nil {
+		if err := w.Store.MarkReminded(ctx, e.EntityID, e.ID); err != nil {
 			if w.Logger != nil {
 				w.Logger.Printf("agenda: reminder %d failed: %v", e.ID, err)
 			}

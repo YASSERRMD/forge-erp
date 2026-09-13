@@ -28,6 +28,12 @@ jobs:
           go build ./...
           go vet ./...
           go test -race ./...
+      - working-directory: backend
+        name: tenant-scoping guard
+        run: |
+          if grep -rn 'WHERE id=\$[0-9]' internal --include='*.go' --exclude='*_test.go' | grep -v 'entity_id'; then
+            echo "tenant-less id lookup detected (Phase 0 task 3)"; exit 1;
+          fi
 
   frontend:
     runs-on: ubuntu-latest

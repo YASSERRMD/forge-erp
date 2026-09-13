@@ -162,7 +162,7 @@ func (h *Handler) SetLeaveStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	l, err := h.deps.Store.SetLeaveStatus(r.Context(), id, LeaveStatus(in.Status), in.RowVersion)
+	l, err := h.deps.Store.SetLeaveStatus(r.Context(), entityOf(r), id, LeaveStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -233,7 +233,7 @@ func (h *Handler) SetExpenseStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	rep, err := h.deps.Store.SetExpenseStatus(r.Context(), id, ExpenseStatus(in.Status), in.RowVersion)
+	rep, err := h.deps.Store.SetExpenseStatus(r.Context(), entityOf(r), id, ExpenseStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -270,14 +270,14 @@ func (h *Handler) PayExpense(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "hr: journal, expense and bank accounts required")
 		return
 	}
-	paid, err := h.deps.Store.SetExpenseStatus(r.Context(), id, ExpensePaid, in.RowVersion)
+	paid, err := h.deps.Store.SetExpenseStatus(r.Context(), entityOf(r), id, ExpensePaid, in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	total, err := h.deps.Store.ExpenseTotal(r.Context(), id)
+	total, err := h.deps.Store.ExpenseTotal(r.Context(), entityOf(r), id)
 	if err != nil {
-		_, _ = h.deps.Store.SetExpenseStatus(r.Context(), id, ExpenseApproved, paid.RowVersion)
+		_, _ = h.deps.Store.SetExpenseStatus(r.Context(), entityOf(r), id, ExpenseApproved, paid.RowVersion)
 		writeErr(w, http.StatusInternalServerError, "total failed")
 		return
 	}
@@ -288,7 +288,7 @@ func (h *Handler) PayExpense(w http.ResponseWriter, r *http.Request) {
 			{AccountID: in.BankAccount, Label: "Expense " + paid.Ref, Credit: total},
 		}}
 	if err := h.deps.Finance.PostEntry(r.Context(), entry); err != nil {
-		_, _ = h.deps.Store.SetExpenseStatus(r.Context(), id, ExpenseApproved, paid.RowVersion)
+		_, _ = h.deps.Store.SetExpenseStatus(r.Context(), entityOf(r), id, ExpenseApproved, paid.RowVersion)
 		writeErr(w, http.StatusBadGateway, "ledger posting failed; report reverted to approved")
 		return
 	}
@@ -336,7 +336,7 @@ func (h *Handler) SetSalaryStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	s, err := h.deps.Store.SetSalaryStatus(r.Context(), id, SalaryStatus(in.Status), in.RowVersion)
+	s, err := h.deps.Store.SetSalaryStatus(r.Context(), entityOf(r), id, SalaryStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

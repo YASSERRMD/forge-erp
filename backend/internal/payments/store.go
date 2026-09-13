@@ -13,10 +13,10 @@ import (
 // Store is the persistence contract for payment attempts.
 type Store interface {
 	CreateAttempt(ctx context.Context, a *PaymentAttempt) error
-	AttemptByID(ctx context.Context, id int64) (PaymentAttempt, error)
+	AttemptByID(ctx context.Context, entityID int64, id int64) (PaymentAttempt, error)
 	AttemptByWebhook(ctx context.Context, entityID int64, key string) (PaymentAttempt, bool)
 	ListAttempts(ctx context.Context, entityID int64, limit, offset int) ([]PaymentAttempt, error)
-	SetAttemptStatus(ctx context.Context, id int64, to AttemptStatus, rowVersion int64) (PaymentAttempt, error)
+	SetAttemptStatus(ctx context.Context, entityID int64, id int64, to AttemptStatus, rowVersion int64) (PaymentAttempt, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -49,8 +49,8 @@ func (s *PGStore) CreateAttempt(ctx context.Context, a *PaymentAttempt) error {
 	).Scan(&a.ID, &a.RowVersion)
 }
 
-func (s *PGStore) AttemptByID(ctx context.Context, id int64) (PaymentAttempt, error) {
-	return scanAttempt(s.pool.QueryRow(ctx, `SELECT `+attemptCols+` FROM ferp_payment_attempts WHERE id=$1`, id))
+func (s *PGStore) AttemptByID(ctx context.Context, entityID int64, id int64) (PaymentAttempt, error) {
+	return scanAttempt(s.pool.QueryRow(ctx, `SELECT `+attemptCols+` FROM ferp_payment_attempts WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 func (s *PGStore) AttemptByWebhook(ctx context.Context, entityID int64, key string) (PaymentAttempt, bool) {
@@ -80,8 +80,8 @@ func (s *PGStore) ListAttempts(ctx context.Context, entityID int64, limit, offse
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetAttemptStatus(ctx context.Context, id int64, to AttemptStatus, rowVersion int64) (PaymentAttempt, error) {
-	a, err := s.AttemptByID(ctx, id)
+func (s *PGStore) SetAttemptStatus(ctx context.Context, entityID int64, id int64, to AttemptStatus, rowVersion int64) (PaymentAttempt, error) {
+	a, err := s.AttemptByID(ctx, entityID, id)
 	if err != nil {
 		return PaymentAttempt{}, err
 	}
@@ -92,7 +92,7 @@ func (s *PGStore) SetAttemptStatus(ctx context.Context, id int64, to AttemptStat
 		return PaymentAttempt{}, errors.New("payments: illegal attempt transition")
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_payment_attempts SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+		WHERE id=$2 AND row_version=$3 AND entity_id=$4`, to, id, rowVersion, entityID)
 	if err != nil {
 		return PaymentAttempt{}, err
 	}
@@ -138,11 +138,11 @@ func (m *MemoryStore) CreateAttempt(_ context.Context, a *PaymentAttempt) error 
 	return nil
 }
 
-func (m *MemoryStore) AttemptByID(_ context.Context, id int64) (PaymentAttempt, error) {
+func (m *MemoryStore) AttemptByID(_ context.Context, entityID int64, id int64) (PaymentAttempt, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.attempts[id]
-	if !ok {
+	if !ok || a.EntityID != entityID {
 		return PaymentAttempt{}, identity.ErrNotFound
 	}
 	return a, nil
@@ -178,11 +178,11 @@ func (m *MemoryStore) ListAttempts(_ context.Context, entityID int64, limit, off
 	return out, nil
 }
 
-func (m *MemoryStore) SetAttemptStatus(_ context.Context, id int64, to AttemptStatus, rowVersion int64) (PaymentAttempt, error) {
+func (m *MemoryStore) SetAttemptStatus(_ context.Context, entityID int64, id int64, to AttemptStatus, rowVersion int64) (PaymentAttempt, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.attempts[id]
-	if !ok {
+	if !ok || a.EntityID != entityID {
 		return PaymentAttempt{}, identity.ErrNotFound
 	}
 	if a.RowVersion != rowVersion {

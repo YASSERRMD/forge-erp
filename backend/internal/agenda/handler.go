@@ -153,7 +153,7 @@ func (h *Handler) SetEventStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	e, err := h.deps.Store.SetEventStatus(r.Context(), id, EventStatus(in.Status), in.RowVersion)
+	e, err := h.deps.Store.SetEventStatus(r.Context(), entityOf(r), id, EventStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -172,7 +172,7 @@ func (h *Handler) DispatchReminders(w http.ResponseWriter, r *http.Request) {
 	}
 	sent := 0
 	for _, e := range due {
-		if err := h.deps.Store.MarkReminded(r.Context(), e.ID); err != nil {
+		if err := h.deps.Store.MarkReminded(r.Context(), entityOf(r), e.ID); err != nil {
 			continue
 		}
 		h.publish(r.Context(), entityOf(r), "forgeerp.agenda.reminder.due.v1", "event", e.ID)

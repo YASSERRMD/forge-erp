@@ -176,7 +176,7 @@ func (h *Handler) GetSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	se, err := h.deps.Store.SessionByID(r.Context(), id)
+	se, err := h.deps.Store.SessionByID(r.Context(), entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -200,7 +200,7 @@ func (h *Handler) CloseSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	se, err := h.deps.Store.CloseSession(r.Context(), id, in.RowVersion)
+	se, err := h.deps.Store.CloseSession(r.Context(), entityOf(r), id, in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -226,7 +226,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	se, err := h.deps.Store.SessionByID(ctx, in.SessionID)
+	se, err := h.deps.Store.SessionByID(ctx, entityOf(r), in.SessionID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -235,7 +235,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "pos: session closed")
 		return
 	}
-	term, err := h.deps.Store.TerminalByID(ctx, se.TerminalID)
+	term, err := h.deps.Store.TerminalByID(ctx, entityOf(r), se.TerminalID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -402,7 +402,7 @@ func (h *Handler) VoidSale(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	sa, err := h.deps.Store.VoidSale(r.Context(), id)
+	sa, err := h.deps.Store.VoidSale(r.Context(), entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -417,7 +417,7 @@ func (h *Handler) GetSale(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	sa, err := h.deps.Store.SaleByID(r.Context(), id)
+	sa, err := h.deps.Store.SaleByID(r.Context(), entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -440,7 +440,7 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "sale_id required")
 		return
 	}
-	sa, err := h.deps.Store.SaleByID(ctx, in.SaleID)
+	sa, err := h.deps.Store.SaleByID(ctx, entityOf(r), in.SaleID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -449,12 +449,12 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "pos: only completed sales can be returned")
 		return
 	}
-	se, err := h.deps.Store.SessionByID(ctx, sa.SessionID)
+	se, err := h.deps.Store.SessionByID(ctx, entityOf(r), sa.SessionID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	term, err := h.deps.Store.TerminalByID(ctx, se.TerminalID)
+	term, err := h.deps.Store.TerminalByID(ctx, entityOf(r), se.TerminalID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -564,7 +564,7 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 	done := sa
 	if fully {
 		var err error
-		done, err = h.deps.Store.MarkReturned(ctx, sa.ID)
+		done, err = h.deps.Store.MarkReturned(ctx, entityOf(r), sa.ID)
 		if err != nil {
 			writeErr(w, storeErrorCode(err), err.Error())
 			return

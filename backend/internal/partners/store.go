@@ -17,7 +17,7 @@ type Store interface {
 	OrgByID(ctx context.Context, entityID, id int64) (Organization, error)
 	ListOrgs(ctx context.Context, entityID int64, limit, offset int) ([]Organization, error)
 	UpdateOrg(ctx context.Context, o *Organization) error
-	ParentOf(ctx context.Context, id int64) (*int64, bool)
+	ParentOf(ctx context.Context, entityID, id int64) (*int64, bool)
 	CreateContact(ctx context.Context, c *Contact) error
 	ContactsOf(ctx context.Context, orgID int64) ([]Contact, error)
 	CreateCategory(ctx context.Context, c *Category) error
@@ -108,10 +108,10 @@ func (s *PGStore) UpdateOrg(ctx context.Context, o *Organization) error {
 		customer_code=NULLIF($9,''), supplier_code=NULLIF($10,''), email=$11, phone=$12,
 		address=$13, acct_customer=$14, acct_supplier=$15, custom_fields=$16,
 		updated_at=now(), updated_by=$17, row_version=row_version+1
-		WHERE id=$18 AND row_version=$19`,
+		WHERE id=$18 AND entity_id=$20 AND row_version=$19`,
 		o.Name, o.Alias, o.RefExt, o.ParentID, o.Status, o.IsCustomer, o.IsSupplier, o.IsProspect,
 		o.CustomerCode, o.SupplierCode, o.Email, o.Phone, addr, o.AcctCustomer, o.AcctSupplier,
-		custom, o.UpdatedBy, o.ID, o.RowVersion)
+		custom, o.UpdatedBy, o.ID, o.RowVersion, o.EntityID)
 	if err != nil {
 		return err
 	}
@@ -122,9 +122,9 @@ func (s *PGStore) UpdateOrg(ctx context.Context, o *Organization) error {
 	return nil
 }
 
-func (s *PGStore) ParentOf(ctx context.Context, id int64) (*int64, bool) {
+func (s *PGStore) ParentOf(ctx context.Context, entityID, id int64) (*int64, bool) {
 	var parent *int64
-	err := s.pool.QueryRow(ctx, `SELECT parent_id FROM ferp_organizations WHERE id=$1`, id).Scan(&parent)
+	err := s.pool.QueryRow(ctx, `SELECT parent_id FROM ferp_organizations WHERE id=$1 AND entity_id=$2`, id, entityID).Scan(&parent)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false
 	}
@@ -257,7 +257,7 @@ func (m *MemoryStore) UpdateOrg(_ context.Context, o *Organization) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cur, ok := m.orgs[o.ID]
-	if !ok {
+	if !ok || cur.EntityID != o.EntityID {
 		return identity.ErrNotFound
 	}
 	if cur.RowVersion != o.RowVersion {
@@ -268,11 +268,11 @@ func (m *MemoryStore) UpdateOrg(_ context.Context, o *Organization) error {
 	return nil
 }
 
-func (m *MemoryStore) ParentOf(_ context.Context, id int64) (*int64, bool) {
+func (m *MemoryStore) ParentOf(_ context.Context, entityID, id int64) (*int64, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	o, ok := m.orgs[id]
-	if !ok {
+	if !ok || o.EntityID != entityID {
 		return nil, false
 	}
 	return o.ParentID, true

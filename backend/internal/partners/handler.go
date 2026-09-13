@@ -81,7 +81,7 @@ func (h *Handler) CreateOrg(w http.ResponseWriter, r *http.Request) {
 	}
 	if o.ParentID != nil {
 		if err := CheckNoCycle(0, o.ParentID, func(id int64) (*int64, bool) {
-			return h.deps.Store.ParentOf(r.Context(), id)
+			return h.deps.Store.ParentOf(r.Context(), entityOf(r), id)
 		}); err != nil {
 			writeErr(w, http.StatusUnprocessableEntity, err.Error())
 			return
@@ -145,7 +145,7 @@ func (h *Handler) UpdateOrg(w http.ResponseWriter, r *http.Request) {
 	}
 	if o.ParentID != nil {
 		if err := CheckNoCycle(o.ID, o.ParentID, func(pid int64) (*int64, bool) {
-			return h.deps.Store.ParentOf(r.Context(), pid)
+			return h.deps.Store.ParentOf(r.Context(), entityOf(r), pid)
 		}); err != nil {
 			writeErr(w, http.StatusUnprocessableEntity, err.Error())
 			return

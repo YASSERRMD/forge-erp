@@ -30,7 +30,7 @@ type Store interface {
 	TrialBalance(ctx context.Context, entityID int64) (map[int64][2]int64, error)
 	CreateBankAccount(ctx context.Context, a *BankAccount) error
 	RecordTransaction(ctx context.Context, t *BankTransaction) error
-	Reconcile(ctx context.Context, txID int64, at time.Time) error
+	Reconcile(ctx context.Context, entityID, txID int64, at time.Time) error
 	AccountBalance(ctx context.Context, accountID int64) (int64, error)
 	CreateLoan(ctx context.Context, l *Loan) error
 }
@@ -266,9 +266,9 @@ func (s *PGStore) RecordTransaction(ctx context.Context, t *BankTransaction) err
 		t.EntityID, t.AccountID, t.Amount, t.Label, t.ValueDate).Scan(&t.ID)
 }
 
-func (s *PGStore) Reconcile(ctx context.Context, txID int64, at time.Time) error {
+func (s *PGStore) Reconcile(ctx context.Context, entityID, txID int64, at time.Time) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_bank_transactions SET reconciled=TRUE, reconciled_at=$1
-		WHERE id=$2 AND reconciled=FALSE`, at, txID)
+		WHERE id=$2 AND entity_id=$3 AND reconciled=FALSE`, at, txID, entityID)
 	if err != nil {
 		return err
 	}
@@ -466,11 +466,14 @@ func (m *MemoryStore) RecordTransaction(_ context.Context, t *BankTransaction) e
 	return nil
 }
 
-func (m *MemoryStore) Reconcile(_ context.Context, txID int64, at time.Time) error {
+func (m *MemoryStore) Reconcile(_ context.Context, entityID, txID int64, at time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, ok := m.txs[txID]
-	if !ok || t.Reconciled {
+	if !ok || t.EntityID != entityID {
+		return ErrNotFound
+	}
+	if t.Reconciled {
 		return errors.New("finance: transaction already reconciled or missing")
 	}
 	t.Reconciled = true

@@ -27,7 +27,7 @@ type Store interface {
 	UserByEmail(ctx context.Context, entityID int64, email string) (User, error)
 	ListUsers(ctx context.Context, entityID int64, limit, offset int) ([]User, error)
 	ListGroups(ctx context.Context, entityID int64) ([]Group, error)
-	UpdateUser(ctx context.Context, u *User) error
+	UpdateUser(ctx context.Context, entityID int64, u *User) error
 	CreateGroup(ctx context.Context, g *Group) error
 	AddMember(ctx context.Context, groupID, userID int64) error
 	UserGroups(ctx context.Context, userID int64) ([]Group, error)
@@ -119,13 +119,13 @@ func (s *PGStore) UserByEmail(ctx context.Context, entityID int64, email string)
 	return scanUser(s.pool.QueryRow(ctx, `SELECT `+userCols+` FROM ferp_users WHERE entity_id=$1 AND email=$2`, entityID, email))
 }
 
-func (s *PGStore) UpdateUser(ctx context.Context, u *User) error {
+func (s *PGStore) UpdateUser(ctx context.Context, entityID int64, u *User) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE ferp_users SET email=$1, first_name=$2, last_name=$3,
 		status=$4, password_hash=$5, is_admin=$6, failed_attempts=$7, locked_until=$8,
 		updated_at=now(), updated_by=$9, row_version=row_version+1
-		WHERE id=$10 AND row_version=$11`,
+		WHERE id=$10 AND entity_id=$12 AND row_version=$11`,
 		u.Email, u.FirstName, u.LastName, u.Status, u.PasswordHash, u.IsAdmin,
-		u.FailedAttempts, u.LockedUntil, u.UpdatedBy, u.ID, u.RowVersion)
+		u.FailedAttempts, u.LockedUntil, u.UpdatedBy, u.ID, u.RowVersion, entityID)
 	if err != nil {
 		return err
 	}
@@ -339,11 +339,11 @@ func (m *MemoryStore) UserByEmail(_ context.Context, entityID int64, email strin
 	return User{}, ErrNotFound
 }
 
-func (m *MemoryStore) UpdateUser(_ context.Context, u *User) error {
+func (m *MemoryStore) UpdateUser(_ context.Context, entityID int64, u *User) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cur, ok := m.users[u.ID]
-	if !ok {
+	if !ok || cur.EntityID != entityID {
 		return ErrNotFound
 	}
 	if cur.RowVersion != u.RowVersion {

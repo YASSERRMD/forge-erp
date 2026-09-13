@@ -41,7 +41,7 @@ func TestBallotRulesAndTally(t *testing.T) {
 		UserLogin: "ada", OptionIDs: []int64{optIDs[0]}}); err == nil {
 		t.Error("vote on draft accepted")
 	}
-	upd, err := m.SetSurveyStatus(ctx, sv.ID, SurveyOpen, sv.RowVersion)
+	upd, err := m.SetSurveyStatus(ctx, 1, sv.ID, SurveyOpen, sv.RowVersion)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestBallotRulesAndTally(t *testing.T) {
 			t.Fatalf("vote: %v", err)
 		}
 	}
-	tally, err := m.Results(ctx, q.ID)
+	tally, err := m.Results(ctx, 1, q.ID)
 	if err != nil {
 		t.Fatalf("results: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestBallotRulesAndTally(t *testing.T) {
 		t.Fatalf("tally=%+v want Tacos 0 / Sushi 2", tally)
 	}
 	// Closed survey rejects votes.
-	upd, _ = m.SetSurveyStatus(ctx, sv.ID, SurveyClosed, upd.RowVersion)
+	upd, _ = m.SetSurveyStatus(ctx, 1, sv.ID, SurveyClosed, upd.RowVersion)
 	_ = upd
 	if err := m.CastVote(ctx, &Vote{EntityID: 1, QuestionID: q.ID,
 		UserLogin: "cid", OptionIDs: []int64{optIDs[0]}}); err == nil {
@@ -151,6 +151,41 @@ func TestSurveyAPI(t *testing.T) {
 	}
 }
 
+func TestCrossTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemoryStore()
+	sv := &Survey{EntityID: 1, Title: "Tenant A poll"}
+	if err := m.CreateSurvey(ctx, sv); err != nil {
+		t.Fatalf("survey: %v", err)
+	}
+	if _, err := m.SurveyByID(ctx, 2, sv.ID); err == nil {
+		t.Error("cross-tenant SurveyByID accepted")
+	}
+	if _, err := m.SetSurveyStatus(ctx, 2, sv.ID, SurveyOpen, sv.RowVersion); err == nil {
+		t.Error("cross-tenant SetSurveyStatus accepted")
+	}
+	q := &Question{EntityID: 1, SurveyID: sv.ID, Text: "Q?"}
+	if err := m.AddQuestion(ctx, q); err != nil {
+		t.Fatalf("question: %v", err)
+	}
+	if qs, _ := m.QuestionsOf(ctx, 2, sv.ID); len(qs) != 0 {
+		t.Fatalf("cross-tenant QuestionsOf=%d want empty", len(qs))
+	}
+	o := &Option{EntityID: 1, QuestionID: q.ID, Label: "Yes"}
+	if err := m.AddOption(ctx, o); err != nil {
+		t.Fatalf("option: %v", err)
+	}
+	if os, _ := m.OptionsOf(ctx, 2, q.ID); len(os) != 0 {
+		t.Fatalf("cross-tenant OptionsOf=%d want empty", len(os))
+	}
+	if vs, _ := m.VotesOf(ctx, 2, q.ID); len(vs) != 0 {
+		t.Fatalf("cross-tenant VotesOf=%d want empty", len(vs))
+	}
+	if err := m.AddOption(ctx, &Option{EntityID: 2, QuestionID: q.ID, Label: "X"}); err == nil {
+		t.Error("cross-tenant AddOption accepted")
+	}
+}
+
 func TestPGSurveyFlow(t *testing.T) {
 	ctx := context.Background()
 	st := NewPGStore(pgtest.Pool(t))
@@ -166,14 +201,14 @@ func TestPGSurveyFlow(t *testing.T) {
 	if err := st.AddOption(ctx, o); err != nil {
 		t.Fatalf("option: %v", err)
 	}
-	if _, err := st.SetSurveyStatus(ctx, sv.ID, SurveyOpen, sv.RowVersion); err != nil {
+	if _, err := st.SetSurveyStatus(ctx, 1, sv.ID, SurveyOpen, sv.RowVersion); err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	if err := st.CastVote(ctx, &Vote{EntityID: 1, QuestionID: q.ID,
 		UserLogin: "ada", OptionIDs: []int64{o.ID}}); err != nil {
 		t.Fatalf("vote: %v", err)
 	}
-	tally, err := st.Results(ctx, q.ID)
+	tally, err := st.Results(ctx, 1, q.ID)
 	if err != nil || len(tally) != 1 || tally[0].Votes != 1 {
 		t.Fatalf("tally=%+v err=%v", tally, err)
 	}

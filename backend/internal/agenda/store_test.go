@@ -53,14 +53,14 @@ func TestReminderDispatchOnce(t *testing.T) {
 	if err != nil || len(due) != 1 {
 		t.Fatalf("due=%d err=%v", len(due), err)
 	}
-	if err := m.MarkReminded(ctx, e.ID); err != nil {
+	if err := m.MarkReminded(ctx, 1, e.ID); err != nil {
 		t.Fatalf("mark: %v", err)
 	}
 	due, _ = m.DueReminders(ctx, 1, now, 50)
 	if len(due) != 0 {
 		t.Fatalf("re-notified: %d", len(due))
 	}
-	if err := m.MarkReminded(ctx, e.ID); err == nil {
+	if err := m.MarkReminded(ctx, 1, e.ID); err == nil {
 		t.Error("double mark accepted")
 	}
 }
@@ -125,6 +125,26 @@ func TestWorkerRunOnce(t *testing.T) {
 	}
 }
 
+func TestCrossTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemoryStore()
+	now := time.Now().UTC().Truncate(time.Second)
+	e := &Event{EntityID: 1, Title: "Tenant A", OwnerLogin: "ada",
+		StartAt: now.Add(time.Hour), EndAt: now.Add(2 * time.Hour)}
+	if err := m.CreateEvent(ctx, e); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := m.EventByID(ctx, 2, e.ID); err == nil {
+		t.Error("cross-tenant EventByID accepted")
+	}
+	if _, err := m.SetEventStatus(ctx, 2, e.ID, EventDone, e.RowVersion); err == nil {
+		t.Error("cross-tenant SetEventStatus accepted")
+	}
+	if err := m.MarkReminded(ctx, 2, e.ID); err == nil {
+		t.Error("cross-tenant MarkReminded accepted")
+	}
+}
+
 func TestPGEventFlow(t *testing.T) {
 	ctx := context.Background()
 	st := NewPGStore(pgtest.Pool(t))
@@ -142,7 +162,7 @@ func TestPGEventFlow(t *testing.T) {
 	if err != nil || len(due) != 1 {
 		t.Fatalf("due=%d err=%v", len(due), err)
 	}
-	if err := st.MarkReminded(ctx, e.ID); err != nil {
+	if err := st.MarkReminded(ctx, 1, e.ID); err != nil {
 		t.Fatalf("mark: %v", err)
 	}
 }

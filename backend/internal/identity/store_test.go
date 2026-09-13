@@ -32,10 +32,10 @@ func TestMemoryStoreCRUD(t *testing.T) {
 	// Optimistic locking.
 	stale := got
 	got.Email = "new@example.com"
-	if err := st.UpdateUser(ctx, &got); err != nil {
+	if err := st.UpdateUser(ctx, 1, &got); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpdateUser(ctx, &stale); err != ErrVersionConflict {
+	if err := st.UpdateUser(ctx, 1, &stale); err != ErrVersionConflict {
 		t.Fatal("stale write should conflict")
 	}
 

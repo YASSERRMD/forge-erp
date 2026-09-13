@@ -2,9 +2,11 @@ package manufacturing
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
+	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
@@ -82,11 +84,11 @@ func TestProduceBalances(t *testing.T) {
 	if err := m.CreateMO(ctx, bad); err == nil {
 		t.Error("product/BOM mismatch accepted")
 	}
-	upd, err := m.SetMOStatus(ctx, mo.ID, MOValidated, mo.RowVersion)
+	upd, err := m.SetMOStatus(ctx, 1, mo.ID, MOValidated, mo.RowVersion)
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	upd, err = m.SetMOStatus(ctx, mo.ID, MOInProgress, upd.RowVersion)
+	upd, err = m.SetMOStatus(ctx, 1, mo.ID, MOInProgress, upd.RowVersion)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -98,7 +100,7 @@ func TestProduceBalances(t *testing.T) {
 	if len(plan.Consumes) != 2 || plan.Produce.Qty != 10 {
 		t.Fatalf("plan=%+v", plan)
 	}
-	if _, err := m.MarkProduced(ctx, mo.ID, upd.RowVersion); err != nil {
+	if _, err := m.MarkProduced(ctx, 1, mo.ID, upd.RowVersion); err != nil {
 		t.Fatalf("mark produced: %v", err)
 	}
 	lvl2, _ := ledger.Level(ctx, 2, 1)
@@ -127,8 +129,8 @@ func TestProduceInsufficientStock(t *testing.T) {
 	if err := m.CreateMO(ctx, mo); err != nil {
 		t.Fatalf("create MO: %v", err)
 	}
-	upd, _ := m.SetMOStatus(ctx, mo.ID, MOValidated, mo.RowVersion)
-	upd, _ = m.SetMOStatus(ctx, mo.ID, MOInProgress, upd.RowVersion)
+	upd, _ := m.SetMOStatus(ctx, 1, mo.ID, MOValidated, mo.RowVersion)
+	upd, _ = m.SetMOStatus(ctx, 1, mo.ID, MOInProgress, upd.RowVersion)
 	lines, _ := m.LinesOf(ctx, bom.ID)
 	if _, err := PostProduce(ctx, upd, lines, ledger); err == nil {
 		t.Error("over-consumption accepted")
@@ -189,15 +191,40 @@ func TestPGMOProduce(t *testing.T) {
 	if err := st.CreateMO(ctx, mo); err != nil {
 		t.Fatalf("mo: %v", err)
 	}
-	upd, err := st.SetMOStatus(ctx, mo.ID, MOValidated, mo.RowVersion)
+	upd, err := st.SetMOStatus(ctx, 1, mo.ID, MOValidated, mo.RowVersion)
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	if _, err := st.SetMOStatus(ctx, mo.ID, MOInProgress, upd.RowVersion); err != nil {
+	if _, err := st.SetMOStatus(ctx, 1, mo.ID, MOInProgress, upd.RowVersion); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	lines, err := st.LinesOf(ctx, bom.ID)
 	if err != nil || len(lines) != 1 {
 		t.Fatalf("lines=%d err=%v", len(lines), err)
+	}
+}
+
+func TestCrossTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemoryStore()
+	bom := &BOM{EntityID: 1, Ref: "BOM-X", ProductID: 1, Label: "X"}
+	if err := m.CreateBOM(ctx, bom); err != nil {
+		t.Fatalf("create BOM: %v", err)
+	}
+	if _, err := m.BOMByID(ctx, 2, bom.ID); !errors.Is(err, identity.ErrNotFound) {
+		t.Fatalf("cross-tenant BOMByID err=%v want not-found", err)
+	}
+	if _, err := m.SetBOMStatus(ctx, 2, bom.ID, BOMActive, bom.RowVersion); !errors.Is(err, identity.ErrNotFound) {
+		t.Fatalf("cross-tenant SetBOMStatus err=%v want not-found", err)
+	}
+	mo := &ManufacturingOrder{EntityID: 1, Ref: "MO-X", BOMID: bom.ID, ProductID: 1, WarehouseID: 1, Qty: 1}
+	if err := m.CreateMO(ctx, mo); err != nil {
+		t.Fatalf("create MO: %v", err)
+	}
+	if _, err := m.MOByID(ctx, 2, mo.ID); !errors.Is(err, identity.ErrNotFound) {
+		t.Fatalf("cross-tenant MOByID err=%v want not-found", err)
+	}
+	if _, err := m.SetMOStatus(ctx, 2, mo.ID, MOValidated, mo.RowVersion); !errors.Is(err, identity.ErrNotFound) {
+		t.Fatalf("cross-tenant SetMOStatus err=%v want not-found", err)
 	}
 }
