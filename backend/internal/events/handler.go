@@ -89,11 +89,11 @@ func pathID(r *http.Request, name string) (int64, bool) {
 	return id, true
 }
 
-func (h *Handler) publish(ctx context.Context, subject, entity string, id int64) {
+func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
 	if h.deps.Bus == nil {
 		return
 	}
-	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, ID: id})
+	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, EntityID: entityID, ID: id})
 }
 
 type statusIn struct {
@@ -115,7 +115,7 @@ func (h *Handler) CreateEvent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.events.created.v1", "event", e.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.events.created.v1", "event", e.ID)
 	writeJSON(w, http.StatusCreated, e)
 }
 
@@ -169,7 +169,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.events.registered.v1", "registration", reg.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.events.registered.v1", "registration", reg.ID)
 	writeJSON(w, http.StatusCreated, reg)
 }
 
@@ -275,7 +275,7 @@ func (h *Handler) Apply(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.events.application.received.v1", "application", a.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.events.application.received.v1", "application", a.ID)
 	writeJSON(w, http.StatusCreated, a)
 }
 

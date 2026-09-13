@@ -89,11 +89,11 @@ func pathID(r *http.Request, name string) (int64, bool) {
 	return id, true
 }
 
-func (h *Handler) publish(ctx context.Context, subject, entity string, id int64) {
+func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
 	if h.deps.Bus == nil {
 		return
 	}
-	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, ID: id})
+	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, EntityID: entityID, ID: id})
 }
 
 type statusIn struct {
@@ -115,7 +115,7 @@ func (h *Handler) CreateBOM(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.manufacturing.bom.created.v1", "bom", b.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.manufacturing.bom.created.v1", "bom", b.ID)
 	writeJSON(w, http.StatusCreated, b)
 }
 
@@ -220,7 +220,7 @@ func (h *Handler) CreateMO(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.manufacturing.mo.created.v1", "mo", mo.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.manufacturing.mo.created.v1", "mo", mo.ID)
 	writeJSON(w, http.StatusCreated, mo)
 }
 
@@ -302,6 +302,6 @@ func (h *Handler) Produce(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.manufacturing.mo.produced.v1", "mo", done.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.manufacturing.mo.produced.v1", "mo", done.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"mo": done, "plan": plan})
 }

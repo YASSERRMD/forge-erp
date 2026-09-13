@@ -100,11 +100,11 @@ func page(r *http.Request) (int, int) {
 	return limit, offset
 }
 
-func (h *Handler) publish(ctx context.Context, subject, entity string, id int64) {
+func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
 	if h.deps.Bus == nil {
 		return
 	}
-	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, ID: id})
+	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, EntityID: entityID, ID: id})
 }
 
 type statusIn struct {
@@ -152,7 +152,7 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.members.created.v1", "member", m.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.members.created.v1", "member", m.ID)
 	writeJSON(w, http.StatusCreated, m)
 }
 
@@ -259,7 +259,7 @@ func (h *Handler) CreateDonation(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.donation.created.v1", "donation", d.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.donation.created.v1", "donation", d.ID)
 	writeJSON(w, http.StatusCreated, d)
 }
 

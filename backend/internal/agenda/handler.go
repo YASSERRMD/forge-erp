@@ -90,11 +90,11 @@ func pathID(r *http.Request, name string) (int64, bool) {
 	return id, true
 }
 
-func (h *Handler) publish(ctx context.Context, subject, entity string, id int64) {
+func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
 	if h.deps.Bus == nil {
 		return
 	}
-	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, ID: id})
+	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, EntityID: entityID, ID: id})
 }
 
 type statusIn struct {
@@ -116,7 +116,7 @@ func (h *Handler) CreateEvent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.agenda.event.created.v1", "event", e.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.agenda.event.created.v1", "event", e.ID)
 	writeJSON(w, http.StatusCreated, e)
 }
 
@@ -175,7 +175,7 @@ func (h *Handler) DispatchReminders(w http.ResponseWriter, r *http.Request) {
 		if err := h.deps.Store.MarkReminded(r.Context(), e.ID); err != nil {
 			continue
 		}
-		h.publish(r.Context(), "forgeerp.agenda.reminder.due.v1", "event", e.ID)
+		h.publish(r.Context(), entityOf(r), "forgeerp.agenda.reminder.due.v1", "event", e.ID)
 		sent++
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"dispatched": sent, "events": due})

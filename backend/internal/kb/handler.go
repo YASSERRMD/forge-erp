@@ -90,11 +90,11 @@ func page(r *http.Request) (int, int) {
 	return limit, offset
 }
 
-func (h *Handler) publish(ctx context.Context, subject, entity string, id int64) {
+func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
 	if h.deps.Bus == nil {
 		return
 	}
-	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, ID: id})
+	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, EntityID: entityID, ID: id})
 }
 
 type statusIn struct {
@@ -175,7 +175,7 @@ func (h *Handler) SetArticleStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.kb.article.status.v1", "article", a.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.kb.article.status.v1", "article", a.ID)
 	writeJSON(w, http.StatusOK, a)
 }
 

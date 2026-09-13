@@ -109,11 +109,11 @@ func page(r *http.Request) (limit int, offset int, user string) {
 	return limit, offset, user
 }
 
-func (h *Handler) publish(ctx context.Context, subject, entity string, id int64) {
+func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
 	if h.deps.Bus == nil {
 		return
 	}
-	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, ID: id})
+	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, EntityID: entityID, ID: id})
 }
 
 type statusIn struct {
@@ -135,7 +135,7 @@ func (h *Handler) CreateLeave(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.hr.leave.created.v1", "leave", l.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.hr.leave.created.v1", "leave", l.ID)
 	writeJSON(w, http.StatusCreated, l)
 }
 
@@ -184,7 +184,7 @@ func (h *Handler) CreateExpense(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.hr.expense.created.v1", "expense", rep.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.hr.expense.created.v1", "expense", rep.ID)
 	writeJSON(w, http.StatusCreated, rep)
 }
 
@@ -292,7 +292,7 @@ func (h *Handler) PayExpense(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, "ledger posting failed; report reverted to approved")
 		return
 	}
-	h.publish(r.Context(), "forgeerp.hr.expense.paid.v1", "expense", paid.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.hr.expense.paid.v1", "expense", paid.ID)
 	writeJSON(w, http.StatusOK, paid)
 }
 // CreateSalary records a draft salary line (net must equal gross minus charges).
@@ -309,7 +309,7 @@ func (h *Handler) CreateSalary(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.hr.salary.created.v1", "salary", s.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.hr.salary.created.v1", "salary", s.ID)
 	writeJSON(w, http.StatusCreated, s)
 }
 

@@ -268,11 +268,11 @@ func storeErrorCode(err error) int {
 	}
 }
 
-func (h *Handler) publish(ctx context.Context, subject, entity string, id int64) {
+func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
 	if h.deps.Bus == nil {
 		return
 	}
-	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, ID: id})
+	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, EntityID: entityID, ID: id})
 }
 
 // UpsertMailbox registers or updates a fetch source.
@@ -344,6 +344,6 @@ func (h *Handler) Receive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = h.deps.Store.RecordFetch(r.Context(), tk.EntityID, mb.Code, now, "")
-	h.publish(r.Context(), "forgeerp.inbound.ticketed.v1", "ticket", tk.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.inbound.ticketed.v1", "ticket", tk.ID)
 	writeJSON(w, http.StatusCreated, tk)
 }

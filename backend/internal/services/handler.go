@@ -112,11 +112,11 @@ func page(r *http.Request) (int, int) {
 	return limit, offset
 }
 
-func (h *Handler) publish(ctx context.Context, subject, entity string, id int64) {
+func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
 	if h.deps.Bus == nil {
 		return
 	}
-	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, ID: id})
+	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, EntityID: entityID, ID: id})
 }
 
 type statusIn struct {
@@ -138,7 +138,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.services.project.created.v1", "project", p.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.services.project.created.v1", "project", p.ID)
 	writeJSON(w, http.StatusCreated, p)
 }
 
@@ -185,7 +185,7 @@ func (h *Handler) SetProjectStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.services.project.status.v1", "project", p.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.services.project.status.v1", "project", p.ID)
 	writeJSON(w, http.StatusOK, p)
 }
 
@@ -209,7 +209,7 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.services.task.created.v1", "task", t.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.services.task.created.v1", "task", t.ID)
 	writeJSON(w, http.StatusCreated, t)
 }
 
@@ -314,7 +314,7 @@ func (h *Handler) CreateContract(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.services.contract.created.v1", "contract", c.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.services.contract.created.v1", "contract", c.ID)
 	writeJSON(w, http.StatusCreated, c)
 }
 
@@ -378,7 +378,7 @@ func (h *Handler) CreateIntervention(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.services.intervention.created.v1", "intervention", in.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.services.intervention.created.v1", "intervention", in.ID)
 	writeJSON(w, http.StatusCreated, in)
 }
 
@@ -427,7 +427,7 @@ func (h *Handler) CreateTicket(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	h.publish(r.Context(), "forgeerp.services.ticket.created.v1", "ticket", t.ID)
+	h.publish(r.Context(), entityOf(r), "forgeerp.services.ticket.created.v1", "ticket", t.ID)
 	writeJSON(w, http.StatusCreated, t)
 }
 
