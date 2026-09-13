@@ -19,20 +19,20 @@ import (
 
 // Catalog abstracts the product/ledger reads and postings used at checkout.
 type Catalog interface {
-	ProductByID(ctx context.Context, entityID, id int64) (catalog.Product, error)
-	Level(ctx context.Context, productID, warehouseID int64) (catalog.StockLevel, error)
-	AppendMovement(ctx context.Context, m *catalog.StockMovement, allowNegative bool) (catalog.StockLevel, error)
+	ProductByID(ctx context.Context, db platform.DBTX, entityID, id int64) (catalog.Product, error)
+	Level(ctx context.Context, db platform.DBTX, productID, warehouseID int64) (catalog.StockLevel, error)
+	AppendMovement(ctx context.Context, db platform.DBTX, m *catalog.StockMovement, allowNegative bool) (catalog.StockLevel, error)
 }
 
 // Sales abstracts the invoice/payment postings used at checkout.
 type Sales interface {
-	CreateDoc(ctx context.Context, d *sales.Document, yearMonth string) error
-	DocByID(ctx context.Context, entityID, id int64) (sales.Document, error)
-	ListDocs(ctx context.Context, entityID int64, t documents.DocType, limit, offset int) ([]sales.Document, error)
-	SetStatus(ctx context.Context, entityID, id int64, to int16) (sales.Document, error)
-	RecordPayment(ctx context.Context, p *sales.Payment, invoiceIDs []int64, yearMonth string) ([]int64, error)
-	ApplyCredit(ctx context.Context, entityID, invoiceID, creditID, amount int64) error
-	InvoiceBalance(ctx context.Context, entityID, invoiceID int64) (int64, error)
+	CreateDoc(ctx context.Context, db platform.DBTX, d *sales.Document, yearMonth string) error
+	DocByID(ctx context.Context, db platform.DBTX, entityID, id int64) (sales.Document, error)
+	ListDocs(ctx context.Context, db platform.DBTX, entityID int64, t documents.DocType, limit, offset int) ([]sales.Document, error)
+	SetStatus(ctx context.Context, db platform.DBTX, entityID, id int64, to int16) (sales.Document, error)
+	RecordPayment(ctx context.Context, db platform.DBTX, p *sales.Payment, invoiceIDs []int64, yearMonth string) ([]int64, error)
+	ApplyCredit(ctx context.Context, db platform.DBTX, entityID, invoiceID, creditID, amount int64) error
+	InvoiceBalance(ctx context.Context, db platform.DBTX, entityID, invoiceID int64) (int64, error)
 }
 
 // Deps wires handlers to persistence, the catalog/sales seams, and the bus.
@@ -42,6 +42,7 @@ type Deps struct {
 	Sales     Sales
 	WalkinOrg int64 // FERP_POS_WALKIN_ORG: default customer for anonymous sales (0 = require org)
 	Bus       platform.Bus
+	DB        platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -129,7 +130,7 @@ func (h *Handler) CreateTerminal(w http.ResponseWriter, r *http.Request) {
 	t.ID = 0
 	t.EntityID = entityOf(r)
 	t.Status = TerminalActive
-	if err := h.deps.Store.CreateTerminal(r.Context(), &t); err != nil {
+	if err := h.deps.Store.CreateTerminal(r.Context(), h.deps.DB, &t); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -138,7 +139,7 @@ func (h *Handler) CreateTerminal(w http.ResponseWriter, r *http.Request) {
 
 // ListTerminals lists tills within the caller's entity.
 func (h *Handler) ListTerminals(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListTerminals(r.Context(), entityOf(r))
+	list, err := h.deps.Store.ListTerminals(r.Context(), h.deps.DB, entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -161,7 +162,7 @@ func (h *Handler) OpenSession(w http.ResponseWriter, r *http.Request) {
 	}
 	se := &Session{EntityID: entityOf(r), TerminalID: in.TerminalID,
 		Cashier: in.Cashier, OpeningFloat: in.OpeningFloat}
-	if err := h.deps.Store.OpenSession(r.Context(), se); err != nil {
+	if err := h.deps.Store.OpenSession(r.Context(), h.deps.DB, se); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -176,7 +177,7 @@ func (h *Handler) GetSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	se, err := h.deps.Store.SessionByID(r.Context(), entityOf(r), id)
+	se, err := h.deps.Store.SessionByID(r.Context(), h.deps.DB, entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -200,7 +201,7 @@ func (h *Handler) CloseSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	se, err := h.deps.Store.CloseSession(r.Context(), entityOf(r), id, in.RowVersion)
+	se, err := h.deps.Store.CloseSession(r.Context(), h.deps.DB, entityOf(r), id, in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -226,7 +227,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	se, err := h.deps.Store.SessionByID(ctx, entityOf(r), in.SessionID)
+	se, err := h.deps.Store.SessionByID(ctx, h.deps.DB, entityOf(r), in.SessionID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -235,7 +236,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "pos: session closed")
 		return
 	}
-	term, err := h.deps.Store.TerminalByID(ctx, entityOf(r), se.TerminalID)
+	term, err := h.deps.Store.TerminalByID(ctx, h.deps.DB, entityOf(r), se.TerminalID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -256,7 +257,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
-		p, err := h.deps.Catalog.ProductByID(ctx, entity, l.ProductID)
+		p, err := h.deps.Catalog.ProductByID(ctx, h.deps.DB, entity, l.ProductID)
 		if err != nil {
 			writeErr(w, storeErrorCode(err), err.Error())
 			return
@@ -268,7 +269,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 		dlines = append(dlines, documents.Line{ProductID: p.ID, Label: p.Name,
 			Qty: l.Qty, UnitNet: p.NetPrice, VATRateBps: int(p.VATRateBps)})
 		if p.Type == catalog.ProductGoods && p.StockTracked {
-			lvl, err := h.deps.Catalog.Level(ctx, p.ID, term.WarehouseID)
+			lvl, err := h.deps.Catalog.Level(ctx, h.deps.DB, p.ID, term.WarehouseID)
 			if err != nil {
 				writeErr(w, http.StatusInternalServerError, "stock check failed")
 				return
@@ -331,11 +332,11 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 	ym := time.Now().UTC().Format("200601")
 	inv := &sales.Document{EntityID: entity, Type: documents.TypeInvoice, OrgID: orgID,
 		Currency: "USD", RateToBase: 1000000, Lines: dlines}
-	if err := h.deps.Sales.CreateDoc(ctx, inv, ym); err != nil {
+	if err := h.deps.Sales.CreateDoc(ctx, h.deps.DB, inv, ym); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	validated, err := h.deps.Sales.SetStatus(ctx, entity, inv.ID, sales.InvoiceValidated)
+	validated, err := h.deps.Sales.SetStatus(ctx, h.deps.DB, entity, inv.ID, sales.InvoiceValidated)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -353,7 +354,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 		}
 		pay := &sales.Payment{EntityID: entity, OrgID: orgID, Amount: alloc,
 			Currency: "USD", Method: leg.Method, PaidAt: time.Now().UTC()}
-		if _, err := h.deps.Sales.RecordPayment(ctx, pay, []int64{inv.ID}, ym); err != nil {
+		if _, err := h.deps.Sales.RecordPayment(ctx, h.deps.DB, pay, []int64{inv.ID}, ym); err != nil {
 			writeErr(w, storeErrorCode(err), err.Error())
 			return
 		}
@@ -361,7 +362,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, n := range needs {
 		qty := n.qty
-		if _, err := h.deps.Catalog.AppendMovement(ctx, &catalog.StockMovement{
+		if _, err := h.deps.Catalog.AppendMovement(ctx, h.deps.DB, &catalog.StockMovement{
 			EntityID: entity, ProductID: n.productID, WarehouseID: term.WarehouseID,
 			Qty: -qty, Reason: catalog.ReasonShipment, Ref: inv.Ref}, false); err != nil {
 			writeErr(w, storeErrorCode(err), err.Error())
@@ -371,7 +372,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 	rec := &Sale{EntityID: entity, SessionID: se.ID, Ref: inv.Ref, OrgID: orgID,
 		Lines: in.Lines, TotalGross: tot.Gross, Method: method, Tendered: tendered,
 		Change: tendered - tot.Gross, Status: SaleCompleted, InvoiceID: inv.ID}
-	if err := h.deps.Store.CreateSale(ctx, rec); err != nil {
+	if err := h.deps.Store.CreateSale(ctx, h.deps.DB, rec); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -386,7 +387,7 @@ func (h *Handler) SalesOfSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.SalesOfSession(r.Context(), id)
+	list, err := h.deps.Store.SalesOfSession(r.Context(), h.deps.DB, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -402,7 +403,7 @@ func (h *Handler) VoidSale(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	sa, err := h.deps.Store.VoidSale(r.Context(), entityOf(r), id)
+	sa, err := h.deps.Store.VoidSale(r.Context(), h.deps.DB, entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -417,7 +418,7 @@ func (h *Handler) GetSale(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	sa, err := h.deps.Store.SaleByID(r.Context(), entityOf(r), id)
+	sa, err := h.deps.Store.SaleByID(r.Context(), h.deps.DB, entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -440,7 +441,7 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "sale_id required")
 		return
 	}
-	sa, err := h.deps.Store.SaleByID(ctx, entityOf(r), in.SaleID)
+	sa, err := h.deps.Store.SaleByID(ctx, h.deps.DB, entityOf(r), in.SaleID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -449,17 +450,17 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "pos: only completed sales can be returned")
 		return
 	}
-	se, err := h.deps.Store.SessionByID(ctx, entityOf(r), sa.SessionID)
+	se, err := h.deps.Store.SessionByID(ctx, h.deps.DB, entityOf(r), sa.SessionID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	term, err := h.deps.Store.TerminalByID(ctx, entityOf(r), se.TerminalID)
+	term, err := h.deps.Store.TerminalByID(ctx, h.deps.DB, entityOf(r), se.TerminalID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	inv, err := h.deps.Sales.DocByID(ctx, sa.EntityID, sa.InvoiceID)
+	inv, err := h.deps.Sales.DocByID(ctx, h.deps.DB, sa.EntityID, sa.InvoiceID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -471,7 +472,7 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 		remaining[l.ProductID] += l.Qty
 		priceOf[l.ProductID] = l
 	}
-	credits, err := h.deps.Sales.ListDocs(ctx, sa.EntityID, documents.TypeCreditNote, 500, 0)
+	credits, err := h.deps.Sales.ListDocs(ctx, h.deps.DB, sa.EntityID, documents.TypeCreditNote, 500, 0)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -480,7 +481,7 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 		if c.SourceID != inv.ID || c.Status == 9 {
 			continue
 		}
-		full, err := h.deps.Sales.DocByID(ctx, sa.EntityID, c.ID)
+		full, err := h.deps.Sales.DocByID(ctx, h.deps.DB, sa.EntityID, c.ID)
 		if err != nil {
 			continue
 		}
@@ -514,35 +515,35 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 	cn := &sales.Document{EntityID: sa.EntityID, Type: documents.TypeCreditNote,
 		OrgID: inv.OrgID, Currency: inv.Currency, RateToBase: inv.RateToBase,
 		SourceType: documents.TypeInvoice, SourceID: inv.ID, Lines: creditLines}
-	if err := h.deps.Sales.CreateDoc(ctx, cn, ym); err != nil {
+	if err := h.deps.Sales.CreateDoc(ctx, h.deps.DB, cn, ym); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	validated, err := h.deps.Sales.SetStatus(ctx, sa.EntityID, cn.ID, 1)
+	validated, err := h.deps.Sales.SetStatus(ctx, h.deps.DB, sa.EntityID, cn.ID, 1)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
 	cn = &validated
-	if bal, err := h.deps.Sales.InvoiceBalance(ctx, sa.EntityID, inv.ID); err == nil && bal > 0 {
+	if bal, err := h.deps.Sales.InvoiceBalance(ctx, h.deps.DB, sa.EntityID, inv.ID); err == nil && bal > 0 {
 		apply := cn.Totals.Gross
 		if apply > bal {
 			apply = bal
 		}
-		if err := h.deps.Sales.ApplyCredit(ctx, sa.EntityID, inv.ID, cn.ID, apply); err != nil {
+		if err := h.deps.Sales.ApplyCredit(ctx, h.deps.DB, sa.EntityID, inv.ID, cn.ID, apply); err != nil {
 			writeErr(w, storeErrorCode(err), err.Error())
 			return
 		}
 	}
 	for _, l := range creditLines {
-		p, err := h.deps.Catalog.ProductByID(ctx, sa.EntityID, l.ProductID)
+		p, err := h.deps.Catalog.ProductByID(ctx, h.deps.DB, sa.EntityID, l.ProductID)
 		if err != nil {
 			continue // service/unknown lines simply have no stock effect
 		}
 		if p.Type != catalog.ProductGoods || !p.StockTracked {
 			continue
 		}
-		if _, err := h.deps.Catalog.AppendMovement(ctx, &catalog.StockMovement{
+		if _, err := h.deps.Catalog.AppendMovement(ctx, h.deps.DB, &catalog.StockMovement{
 			EntityID: sa.EntityID, ProductID: p.ID, WarehouseID: term.WarehouseID,
 			Qty: l.Qty, Reason: catalog.ReasonReceipt, Ref: cn.Ref}, false); err != nil {
 			writeErr(w, storeErrorCode(err), err.Error())
@@ -564,7 +565,7 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 	done := sa
 	if fully {
 		var err error
-		done, err = h.deps.Store.MarkReturned(ctx, entityOf(r), sa.ID)
+		done, err = h.deps.Store.MarkReturned(ctx, h.deps.DB, entityOf(r), sa.ID)
 		if err != nil {
 			writeErr(w, storeErrorCode(err), err.Error())
 			return

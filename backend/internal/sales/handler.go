@@ -19,6 +19,7 @@ type Deps struct {
 	Store   Store
 	Catalog catalog.Store // nil disables fulfillment validation of stock effects
 	Bus     platform.Bus
+	DB      platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates.
@@ -80,7 +81,7 @@ func (h *Handler) CreateDoc(w http.ResponseWriter, r *http.Request) {
 	if d.RateToBase == 0 {
 		d.RateToBase = 1000000
 	}
-	if err := h.deps.Store.CreateDoc(r.Context(), &d, yearMonth()); err != nil {
+	if err := h.deps.Store.CreateDoc(r.Context(), h.deps.DB, &d, yearMonth()); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -95,7 +96,7 @@ func (h *Handler) ListDocs(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	list, err := h.deps.Store.ListDocs(r.Context(), entityOf(r), t, limit, offset)
+	list, err := h.deps.Store.ListDocs(r.Context(), h.deps.DB, entityOf(r), t, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -129,7 +130,7 @@ func (h *Handler) UpdateDoc(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	upd, err := h.deps.Store.UpdateDocLines(r.Context(), entityOf(r), d.ID, body.Lines)
+	upd, err := h.deps.Store.UpdateDocLines(r.Context(), h.deps.DB, entityOf(r), d.ID, body.Lines)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -143,7 +144,7 @@ func (h *Handler) load(w http.ResponseWriter, r *http.Request) (Document, bool) 
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return Document{}, false
 	}
-	d, err := h.deps.Store.DocByID(r.Context(), entityOf(r), id)
+	d, err := h.deps.Store.DocByID(r.Context(), h.deps.DB, entityOf(r), id)
 	if err != nil || d.EntityID != entityOf(r) {
 		writeErr(w, http.StatusNotFound, "document not found")
 		return Document{}, false
@@ -165,7 +166,7 @@ func (h *Handler) SetStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	d, err := h.deps.Store.SetStatus(r.Context(), entityOf(r), id, req.To)
+	d, err := h.deps.Store.SetStatus(r.Context(), h.deps.DB, entityOf(r), id, req.To)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -197,7 +198,7 @@ func (h *Handler) ConvertDoc(w http.ResponseWriter, r *http.Request) {
 	}
 	next.EntityID = entityOf(r)
 	out := &next
-	if err := h.deps.Store.CreateDoc(r.Context(), out, yearMonth()); err != nil {
+	if err := h.deps.Store.CreateDoc(r.Context(), h.deps.DB, out, yearMonth()); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -227,7 +228,7 @@ func (h *Handler) RecordPayment(w http.ResponseWriter, r *http.Request) {
 	}
 	p := &Payment{EntityID: entityOf(r), OrgID: req.OrgID, Amount: req.Amount,
 		Currency: req.Currency, Method: req.Method, PaidAt: time.Now().UTC()}
-	applied, err := h.deps.Store.RecordPayment(r.Context(), p, req.InvoiceIDs, yearMonth())
+	applied, err := h.deps.Store.RecordPayment(r.Context(), h.deps.DB, p, req.InvoiceIDs, yearMonth())
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -270,12 +271,12 @@ func (h *Handler) Fulfill(w http.ResponseWriter, r *http.Request) {
 	for _, l := range req.Lines {
 		m := catalog.StockMovement{EntityID: entityOf(r), ProductID: l.ProductID,
 			WarehouseID: l.WarehouseID, Qty: -l.Qty, Reason: catalog.ReasonShipment, Ref: d.Ref}
-		if _, err := h.deps.Catalog.AppendMovement(r.Context(), &m, false); err != nil {
+		if _, err := h.deps.Catalog.AppendMovement(r.Context(), h.deps.DB, &m, false); err != nil {
 			writeErr(w, storeErrorCode(err), err.Error())
 			return
 		}
 	}
-	closed, err := h.deps.Store.SetStatus(r.Context(), entityOf(r), d.ID, ShipmentClosed)
+	closed, err := h.deps.Store.SetStatus(r.Context(), h.deps.DB, entityOf(r), d.ID, ShipmentClosed)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -309,7 +310,7 @@ func (h *Handler) CreateCreditNote(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invoice_id required")
 		return
 	}
-	src, err := h.deps.Store.DocByID(r.Context(), entityOf(r), req.InvoiceID)
+	src, err := h.deps.Store.DocByID(r.Context(), h.deps.DB, entityOf(r), req.InvoiceID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -321,7 +322,7 @@ func (h *Handler) CreateCreditNote(w http.ResponseWriter, r *http.Request) {
 	credit := &Document{EntityID: src.EntityID, Type: documents.TypeCreditNote,
 		OrgID: src.OrgID, Currency: src.Currency, RateToBase: src.RateToBase,
 		SourceType: documents.TypeInvoice, SourceID: src.ID, Lines: src.Lines}
-	if err := h.deps.Store.CreateDoc(r.Context(), credit, yearMonth()); err != nil {
+	if err := h.deps.Store.CreateDoc(r.Context(), h.deps.DB, credit, yearMonth()); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -343,11 +344,11 @@ func (h *Handler) ApplyCredit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invoice_id and amount required")
 		return
 	}
-	if err := h.deps.Store.ApplyCredit(r.Context(), entityOf(r), req.InvoiceID, id, req.Amount); err != nil {
+	if err := h.deps.Store.ApplyCredit(r.Context(), h.deps.DB, entityOf(r), req.InvoiceID, id, req.Amount); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	bal, err := h.deps.Store.InvoiceBalance(r.Context(), entityOf(r), req.InvoiceID)
+	bal, err := h.deps.Store.InvoiceBalance(r.Context(), h.deps.DB, entityOf(r), req.InvoiceID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

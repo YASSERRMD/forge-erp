@@ -8,21 +8,22 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // Store is the persistence contract for the hr context.
 type Store interface {
-	CreateLeave(ctx context.Context, l *LeaveRequest) error
-	LeavesOf(ctx context.Context, entityID int64, userLogin string, limit, offset int) ([]LeaveRequest, error)
-	SetLeaveStatus(ctx context.Context, entityID int64, id int64, to LeaveStatus, rowVersion int64) (LeaveRequest, error)
-	CreateExpense(ctx context.Context, r *ExpenseReport) error
-	AddExpenseLine(ctx context.Context, l *ExpenseLine) error
-	ExpenseTotal(ctx context.Context, entityID int64, reportID int64) (int64, error)
-	SetExpenseStatus(ctx context.Context, entityID int64, id int64, to ExpenseStatus, rowVersion int64) (ExpenseReport, error)
-	ExpensesOf(ctx context.Context, entityID int64, userLogin string, limit, offset int) ([]ExpenseReport, error)
-	CreateSalary(ctx context.Context, s *Salary) error
-	SetSalaryStatus(ctx context.Context, entityID int64, id int64, to SalaryStatus, rowVersion int64) (Salary, error)
-	SalariesOf(ctx context.Context, entityID int64, userLogin string) ([]Salary, error)
+	CreateLeave(ctx context.Context, db platform.DBTX, l *LeaveRequest) error
+	LeavesOf(ctx context.Context, db platform.DBTX, entityID int64, userLogin string, limit, offset int) ([]LeaveRequest, error)
+	SetLeaveStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to LeaveStatus, rowVersion int64) (LeaveRequest, error)
+	CreateExpense(ctx context.Context, db platform.DBTX, r *ExpenseReport) error
+	AddExpenseLine(ctx context.Context, db platform.DBTX, l *ExpenseLine) error
+	ExpenseTotal(ctx context.Context, db platform.DBTX, entityID int64, reportID int64) (int64, error)
+	SetExpenseStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to ExpenseStatus, rowVersion int64) (ExpenseReport, error)
+	ExpensesOf(ctx context.Context, db platform.DBTX, entityID int64, userLogin string, limit, offset int) ([]ExpenseReport, error)
+	CreateSalary(ctx context.Context, db platform.DBTX, s *Salary) error
+	SetSalaryStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to SalaryStatus, rowVersion int64) (Salary, error)
+	SalariesOf(ctx context.Context, db platform.DBTX, entityID int64, userLogin string) ([]Salary, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -43,20 +44,20 @@ func scanLeave(row pgx.Row) (LeaveRequest, error) {
 	return l, err
 }
 
-func (s *PGStore) CreateLeave(ctx context.Context, l *LeaveRequest) error {
+func (s *PGStore) CreateLeave(ctx context.Context, db platform.DBTX, l *LeaveRequest) error {
 	if err := l.Validate(); err != nil {
 		return err
 	}
 	l.Days = LeaveDays(l.StartDate, l.EndDate)
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_leave_requests
+	return db.QueryRow(ctx, `INSERT INTO ferp_leave_requests
 		(entity_id, user_login, type, start_date, end_date, days, status, comment)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, row_version`,
 		l.EntityID, l.UserLogin, l.Type, l.StartDate, l.EndDate, l.Days, l.Status, l.Comment,
 	).Scan(&l.ID, &l.RowVersion)
 }
 
-func (s *PGStore) LeavesOf(ctx context.Context, entityID int64, userLogin string, limit, offset int) ([]LeaveRequest, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+leaveCols+` FROM ferp_leave_requests
+func (s *PGStore) LeavesOf(ctx context.Context, db platform.DBTX, entityID int64, userLogin string, limit, offset int) ([]LeaveRequest, error) {
+	rows, err := db.Query(ctx, `SELECT `+leaveCols+` FROM ferp_leave_requests
 		WHERE entity_id=$1 AND ($2='' OR user_login=$2) ORDER BY start_date LIMIT $3 OFFSET $4`,
 		entityID, userLogin, limit, offset)
 	if err != nil {
@@ -74,9 +75,9 @@ func (s *PGStore) LeavesOf(ctx context.Context, entityID int64, userLogin string
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetLeaveStatus(ctx context.Context, entityID int64, id int64, to LeaveStatus, rowVersion int64) (LeaveRequest, error) {
+func (s *PGStore) SetLeaveStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to LeaveStatus, rowVersion int64) (LeaveRequest, error) {
 	var l LeaveRequest
-	err := s.pool.QueryRow(ctx, `SELECT `+leaveCols+` FROM ferp_leave_requests WHERE id=$1 AND entity_id=$2`, id, entityID).Scan(
+	err := db.QueryRow(ctx, `SELECT `+leaveCols+` FROM ferp_leave_requests WHERE id=$1 AND entity_id=$2`, id, entityID).Scan(
 		&l.ID, &l.EntityID, &l.UserLogin, &l.Type, &l.StartDate, &l.EndDate,
 		&l.Days, &l.Status, &l.Comment, &l.CreatedAt, &l.UpdatedAt, &l.RowVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -91,7 +92,7 @@ func (s *PGStore) SetLeaveStatus(ctx context.Context, entityID int64, id int64, 
 	if !l.CanTransition(to) {
 		return LeaveRequest{}, errors.New("hr: illegal leave transition")
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_leave_requests SET status=$1, updated_at=now(), row_version=row_version+1
+	tag, err := db.Exec(ctx, `UPDATE ferp_leave_requests SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND row_version=$3 AND entity_id=$4`, to, id, rowVersion, entityID)
 	if err != nil {
 		return LeaveRequest{}, err
@@ -116,22 +117,22 @@ func scanExpense(row pgx.Row) (ExpenseReport, error) {
 	return r, err
 }
 
-func (s *PGStore) CreateExpense(ctx context.Context, r *ExpenseReport) error {
+func (s *PGStore) CreateExpense(ctx context.Context, db platform.DBTX, r *ExpenseReport) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_expense_reports
+	return db.QueryRow(ctx, `INSERT INTO ferp_expense_reports
 		(entity_id, ref, user_login, status) VALUES ($1,$2,$3,$4) RETURNING id, total, row_version`,
 		r.EntityID, r.Ref, r.UserLogin, r.Status,
 	).Scan(&r.ID, &r.Total, &r.RowVersion)
 }
 
-func (s *PGStore) AddExpenseLine(ctx context.Context, l *ExpenseLine) error {
+func (s *PGStore) AddExpenseLine(ctx context.Context, db platform.DBTX, l *ExpenseLine) error {
 	if err := l.Validate(); err != nil {
 		return err
 	}
 	var st ExpenseStatus
-	err := s.pool.QueryRow(ctx, `SELECT status FROM ferp_expense_reports WHERE id=$1 AND entity_id=$2`, l.ReportID, l.EntityID).Scan(&st)
+	err := db.QueryRow(ctx, `SELECT status FROM ferp_expense_reports WHERE id=$1 AND entity_id=$2`, l.ReportID, l.EntityID).Scan(&st)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return identity.ErrNotFound
 	}
@@ -141,14 +142,14 @@ func (s *PGStore) AddExpenseLine(ctx context.Context, l *ExpenseLine) error {
 	if st != ExpenseDraft {
 		return errors.New("hr: lines editable on draft reports only")
 	}
-	if err := s.pool.QueryRow(ctx, `INSERT INTO ferp_expense_lines
+	if err := db.QueryRow(ctx, `INSERT INTO ferp_expense_lines
 		(entity_id, report_id, date, label, amount, vat_bps)
 		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
 		l.EntityID, l.ReportID, l.Date, l.Label, l.Amount, l.VATBps).Scan(&l.ID); err != nil {
 		return err
 	}
 	var total int64
-	if err := s.pool.QueryRow(ctx, `UPDATE ferp_expense_reports SET total=(
+	if err := db.QueryRow(ctx, `UPDATE ferp_expense_reports SET total=(
 		SELECT COALESCE(SUM(amount),0) FROM ferp_expense_lines WHERE report_id=$1
 	), updated_at=now() WHERE id=$1 AND entity_id=$2 RETURNING total`, l.ReportID, l.EntityID).Scan(&total); err != nil {
 		return err
@@ -156,17 +157,17 @@ func (s *PGStore) AddExpenseLine(ctx context.Context, l *ExpenseLine) error {
 	return nil
 }
 
-func (s *PGStore) ExpenseTotal(ctx context.Context, entityID int64, reportID int64) (int64, error) {
+func (s *PGStore) ExpenseTotal(ctx context.Context, db platform.DBTX, entityID int64, reportID int64) (int64, error) {
 	var total int64
-	err := s.pool.QueryRow(ctx, `SELECT total FROM ferp_expense_reports WHERE id=$1 AND entity_id=$2`, reportID, entityID).Scan(&total)
+	err := db.QueryRow(ctx, `SELECT total FROM ferp_expense_reports WHERE id=$1 AND entity_id=$2`, reportID, entityID).Scan(&total)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, identity.ErrNotFound
 	}
 	return total, err
 }
 
-func (s *PGStore) SetExpenseStatus(ctx context.Context, entityID int64, id int64, to ExpenseStatus, rowVersion int64) (ExpenseReport, error) {
-	r, err := scanExpense(s.pool.QueryRow(ctx, `SELECT `+expenseCols+` FROM ferp_expense_reports WHERE id=$1 AND entity_id=$2`, id, entityID))
+func (s *PGStore) SetExpenseStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to ExpenseStatus, rowVersion int64) (ExpenseReport, error) {
+	r, err := scanExpense(db.QueryRow(ctx, `SELECT `+expenseCols+` FROM ferp_expense_reports WHERE id=$1 AND entity_id=$2`, id, entityID))
 	if err != nil {
 		return ExpenseReport{}, err
 	}
@@ -176,7 +177,7 @@ func (s *PGStore) SetExpenseStatus(ctx context.Context, entityID int64, id int64
 	if !r.CanTransition(to) {
 		return ExpenseReport{}, errors.New("hr: illegal expense transition")
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_expense_reports SET status=$1, updated_at=now(), row_version=row_version+1
+	tag, err := db.Exec(ctx, `UPDATE ferp_expense_reports SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND row_version=$3 AND entity_id=$4`, to, id, rowVersion, entityID)
 	if err != nil {
 		return ExpenseReport{}, err
@@ -189,8 +190,8 @@ func (s *PGStore) SetExpenseStatus(ctx context.Context, entityID int64, id int64
 	return r, nil
 }
 
-func (s *PGStore) ExpensesOf(ctx context.Context, entityID int64, userLogin string, limit, offset int) ([]ExpenseReport, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+expenseCols+` FROM ferp_expense_reports
+func (s *PGStore) ExpensesOf(ctx context.Context, db platform.DBTX, entityID int64, userLogin string, limit, offset int) ([]ExpenseReport, error) {
+	rows, err := db.Query(ctx, `SELECT `+expenseCols+` FROM ferp_expense_reports
 		WHERE entity_id=$1 AND ($2='' OR user_login=$2) ORDER BY id LIMIT $3 OFFSET $4`,
 		entityID, userLogin, limit, offset)
 	if err != nil {
@@ -220,19 +221,19 @@ func scanSalary(row pgx.Row) (Salary, error) {
 	return sal, err
 }
 
-func (s *PGStore) CreateSalary(ctx context.Context, sal *Salary) error {
+func (s *PGStore) CreateSalary(ctx context.Context, db platform.DBTX, sal *Salary) error {
 	if err := sal.Validate(); err != nil {
 		return err
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_salaries
+	return db.QueryRow(ctx, `INSERT INTO ferp_salaries
 		(entity_id, user_login, period, gross, charges, net, status)
 		VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, row_version`,
 		sal.EntityID, sal.UserLogin, sal.Period, sal.Gross, sal.Charges, sal.Net, sal.Status,
 	).Scan(&sal.ID, &sal.RowVersion)
 }
 
-func (s *PGStore) SetSalaryStatus(ctx context.Context, entityID int64, id int64, to SalaryStatus, rowVersion int64) (Salary, error) {
-	sal, err := scanSalary(s.pool.QueryRow(ctx, `SELECT `+salaryCols+` FROM ferp_salaries WHERE id=$1 AND entity_id=$2`, id, entityID))
+func (s *PGStore) SetSalaryStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to SalaryStatus, rowVersion int64) (Salary, error) {
+	sal, err := scanSalary(db.QueryRow(ctx, `SELECT `+salaryCols+` FROM ferp_salaries WHERE id=$1 AND entity_id=$2`, id, entityID))
 	if err != nil {
 		return Salary{}, err
 	}
@@ -242,7 +243,7 @@ func (s *PGStore) SetSalaryStatus(ctx context.Context, entityID int64, id int64,
 	if !sal.CanTransition(to) {
 		return Salary{}, errors.New("hr: illegal salary transition")
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_salaries SET status=$1, updated_at=now(), row_version=row_version+1
+	tag, err := db.Exec(ctx, `UPDATE ferp_salaries SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND row_version=$3 AND entity_id=$4`, to, id, rowVersion, entityID)
 	if err != nil {
 		return Salary{}, err
@@ -255,8 +256,8 @@ func (s *PGStore) SetSalaryStatus(ctx context.Context, entityID int64, id int64,
 	return sal, nil
 }
 
-func (s *PGStore) SalariesOf(ctx context.Context, entityID int64, userLogin string) ([]Salary, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+salaryCols+` FROM ferp_salaries
+func (s *PGStore) SalariesOf(ctx context.Context, db platform.DBTX, entityID int64, userLogin string) ([]Salary, error) {
+	rows, err := db.Query(ctx, `SELECT `+salaryCols+` FROM ferp_salaries
 		WHERE entity_id=$1 AND ($2='' OR user_login=$2) ORDER BY period`, entityID, userLogin)
 	if err != nil {
 		return nil, err
@@ -293,7 +294,7 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
-func (m *MemoryStore) CreateLeave(_ context.Context, l *LeaveRequest) error {
+func (m *MemoryStore) CreateLeave(_ context.Context, _ platform.DBTX, l *LeaveRequest) error {
 	if err := l.Validate(); err != nil {
 		return err
 	}
@@ -306,7 +307,7 @@ func (m *MemoryStore) CreateLeave(_ context.Context, l *LeaveRequest) error {
 	return nil
 }
 
-func (m *MemoryStore) LeavesOf(_ context.Context, entityID int64, userLogin string, limit, offset int) ([]LeaveRequest, error) {
+func (m *MemoryStore) LeavesOf(_ context.Context, _ platform.DBTX, entityID int64, userLogin string, limit, offset int) ([]LeaveRequest, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []LeaveRequest
@@ -325,7 +326,7 @@ func (m *MemoryStore) LeavesOf(_ context.Context, entityID int64, userLogin stri
 	return out, nil
 }
 
-func (m *MemoryStore) SetLeaveStatus(_ context.Context, entityID int64, id int64, to LeaveStatus, rowVersion int64) (LeaveRequest, error) {
+func (m *MemoryStore) SetLeaveStatus(_ context.Context, _ platform.DBTX, entityID int64, id int64, to LeaveStatus, rowVersion int64) (LeaveRequest, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	l, ok := m.leaves[id]
@@ -344,7 +345,7 @@ func (m *MemoryStore) SetLeaveStatus(_ context.Context, entityID int64, id int64
 	return l, nil
 }
 
-func (m *MemoryStore) CreateExpense(_ context.Context, r *ExpenseReport) error {
+func (m *MemoryStore) CreateExpense(_ context.Context, _ platform.DBTX, r *ExpenseReport) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
@@ -361,7 +362,7 @@ func (m *MemoryStore) CreateExpense(_ context.Context, r *ExpenseReport) error {
 	return nil
 }
 
-func (m *MemoryStore) AddExpenseLine(_ context.Context, l *ExpenseLine) error {
+func (m *MemoryStore) AddExpenseLine(_ context.Context, _ platform.DBTX, l *ExpenseLine) error {
 	if err := l.Validate(); err != nil {
 		return err
 	}
@@ -387,7 +388,7 @@ func (m *MemoryStore) AddExpenseLine(_ context.Context, l *ExpenseLine) error {
 	return nil
 }
 
-func (m *MemoryStore) ExpenseTotal(_ context.Context, entityID int64, reportID int64) (int64, error) {
+func (m *MemoryStore) ExpenseTotal(_ context.Context, _ platform.DBTX, entityID int64, reportID int64) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.expenses[reportID]
@@ -397,7 +398,7 @@ func (m *MemoryStore) ExpenseTotal(_ context.Context, entityID int64, reportID i
 	return r.Total, nil
 }
 
-func (m *MemoryStore) SetExpenseStatus(_ context.Context, entityID int64, id int64, to ExpenseStatus, rowVersion int64) (ExpenseReport, error) {
+func (m *MemoryStore) SetExpenseStatus(_ context.Context, _ platform.DBTX, entityID int64, id int64, to ExpenseStatus, rowVersion int64) (ExpenseReport, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.expenses[id]
@@ -416,7 +417,7 @@ func (m *MemoryStore) SetExpenseStatus(_ context.Context, entityID int64, id int
 	return r, nil
 }
 
-func (m *MemoryStore) ExpensesOf(_ context.Context, entityID int64, userLogin string, limit, offset int) ([]ExpenseReport, error) {
+func (m *MemoryStore) ExpensesOf(_ context.Context, _ platform.DBTX, entityID int64, userLogin string, limit, offset int) ([]ExpenseReport, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []ExpenseReport
@@ -435,7 +436,7 @@ func (m *MemoryStore) ExpensesOf(_ context.Context, entityID int64, userLogin st
 	return out, nil
 }
 
-func (m *MemoryStore) CreateSalary(_ context.Context, s *Salary) error {
+func (m *MemoryStore) CreateSalary(_ context.Context, _ platform.DBTX, s *Salary) error {
 	if err := s.Validate(); err != nil {
 		return err
 	}
@@ -452,7 +453,7 @@ func (m *MemoryStore) CreateSalary(_ context.Context, s *Salary) error {
 	return nil
 }
 
-func (m *MemoryStore) SetSalaryStatus(_ context.Context, entityID int64, id int64, to SalaryStatus, rowVersion int64) (Salary, error) {
+func (m *MemoryStore) SetSalaryStatus(_ context.Context, _ platform.DBTX, entityID int64, id int64, to SalaryStatus, rowVersion int64) (Salary, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.salaries[id]
@@ -471,7 +472,7 @@ func (m *MemoryStore) SetSalaryStatus(_ context.Context, entityID int64, id int6
 	return s, nil
 }
 
-func (m *MemoryStore) SalariesOf(_ context.Context, entityID int64, userLogin string) ([]Salary, error) {
+func (m *MemoryStore) SalariesOf(_ context.Context, _ platform.DBTX, entityID int64, userLogin string) ([]Salary, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Salary

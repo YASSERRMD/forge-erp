@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // Deps wires report handlers to the ledger, billing and stock seams.
@@ -15,6 +16,7 @@ type Deps struct {
 	Billing Billing
 	Stock   Stock
 	Orgs    Orgs
+	DB      platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -53,7 +55,7 @@ func entityOf(r *http.Request) int64 {
 
 // PNL serves profit & loss over all posted entries.
 func (h *Handler) PNL(w http.ResponseWriter, r *http.Request) {
-	pnl, err := BuildPNL(r.Context(), entityOf(r), h.deps.Ledger)
+	pnl, err := BuildPNL(r.Context(), h.deps.DB, entityOf(r), h.deps.Ledger)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "report failed")
 		return
@@ -63,7 +65,7 @@ func (h *Handler) PNL(w http.ResponseWriter, r *http.Request) {
 
 // Receivables serves validated invoices with outstanding balances.
 func (h *Handler) Receivables(w http.ResponseWriter, r *http.Request) {
-	rows, total, err := Receivables(r.Context(), entityOf(r), h.deps.Billing)
+	rows, total, err := Receivables(r.Context(), h.deps.DB, entityOf(r), h.deps.Billing)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "report failed")
 		return
@@ -73,7 +75,7 @@ func (h *Handler) Receivables(w http.ResponseWriter, r *http.Request) {
 
 // IntraEU serves intra-EU dispatches by destination country (?home=FR).
 func (h *Handler) IntraEU(w http.ResponseWriter, r *http.Request) {
-	rows, err := IntraEU(r.Context(), entityOf(r), r.URL.Query().Get("home"), h.deps.Billing, h.deps.Orgs)
+	rows, err := IntraEU(r.Context(), h.deps.DB, entityOf(r), r.URL.Query().Get("home"), h.deps.Billing, h.deps.Orgs)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "report failed")
 		return
@@ -83,7 +85,7 @@ func (h *Handler) IntraEU(w http.ResponseWriter, r *http.Request) {
 
 // Monthly serves the 12-month invoice revenue series.
 func (h *Handler) Monthly(w http.ResponseWriter, r *http.Request) {
-	points, err := SalesMonthly(r.Context(), entityOf(r), h.deps.Billing)
+	points, err := SalesMonthly(r.Context(), h.deps.DB, entityOf(r), h.deps.Billing)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "report failed")
 		return
@@ -93,7 +95,7 @@ func (h *Handler) Monthly(w http.ResponseWriter, r *http.Request) {
 
 // Margins serves per-product sales margins.
 func (h *Handler) Margins(w http.ResponseWriter, r *http.Request) {
-	rows, err := ProductMargins(r.Context(), entityOf(r), h.deps.Billing, h.deps.Stock)
+	rows, err := ProductMargins(r.Context(), h.deps.DB, entityOf(r), h.deps.Billing, h.deps.Stock)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "report failed")
 		return
@@ -108,7 +110,7 @@ func (h *Handler) Valuation(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "warehouse_id required")
 		return
 	}
-	rows, total, err := StockValuation(r.Context(), entityOf(r), wh, h.deps.Stock)
+	rows, total, err := StockValuation(r.Context(), h.deps.DB, entityOf(r), wh, h.deps.Stock)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "report failed")
 		return

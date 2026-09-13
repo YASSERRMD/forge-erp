@@ -17,6 +17,7 @@ import (
 // Deps wires handlers to persistence and the event bus.
 type Deps struct {
 	Store Store
+	DB    platform.DBTX
 	Bus   platform.Bus
 }
 
@@ -100,7 +101,7 @@ func (h *Handler) CreateBatch(w http.ResponseWriter, r *http.Request) {
 	b.ID = 0
 	b.EntityID = entityOf(r)
 	b.Status = BatchDraft
-	if err := h.deps.Store.CreateBatch(r.Context(), &b); err != nil {
+	if err := h.deps.Store.CreateBatch(r.Context(), h.deps.DB, &b); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -109,7 +110,7 @@ func (h *Handler) CreateBatch(w http.ResponseWriter, r *http.Request) {
 
 // ListBatches lists batches.
 func (h *Handler) ListBatches(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListBatches(r.Context(), entityOf(r))
+	list, err := h.deps.Store.ListBatches(r.Context(), h.deps.DB, entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -129,7 +130,7 @@ func (h *Handler) SetBatchStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	b, err := h.deps.Store.SetBatchStatus(r.Context(), entityOf(r), id, BatchStatus(in.Status), in.RowVersion)
+	b, err := h.deps.Store.SetBatchStatus(r.Context(), h.deps.DB, entityOf(r), id, BatchStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -145,7 +146,7 @@ func (h *Handler) ExportXML(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	b, err := h.deps.Store.BatchByID(r.Context(), entityOf(r), id)
+	b, err := h.deps.Store.BatchByID(r.Context(), h.deps.DB, entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

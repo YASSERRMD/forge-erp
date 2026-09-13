@@ -33,7 +33,7 @@ func seedUser(t *testing.T, st *MemoryStore, login, pw string, admin bool) User 
 	}
 	u := &User{EntityID: 1, Login: login, Email: login + "@example.com", Status: UserActive,
 		PasswordHash: hash, IsAdmin: admin}
-	if err := st.CreateUser(context.Background(), u); err != nil {
+	if err := st.CreateUser(context.Background(), nil, u); err != nil {
 		t.Fatal(err)
 	}
 	return *u
@@ -55,9 +55,9 @@ func TestLoginSuccessAndMe(t *testing.T) {
 	h := testRouter(d)
 	seedUser(t, st, "yassine", "supersecret-99", false)
 	// Grant identity.user.read so /auth/me passes Require.
-	u, _ := st.UserByLogin(context.Background(), 1, "yassine")
+	u, _ := st.UserByLogin(context.Background(), nil, 1, "yassine")
 	id := u.ID
-	_ = st.Grant(context.Background(), 1, &id, nil, Right{Module: "identity", Entity: "user", Action: "read"})
+	_ = st.Grant(context.Background(), nil, 1, &id, nil, Right{Module: "identity", Entity: "user", Action: "read"})
 
 	code, out := doLogin(t, h, "yassine", "supersecret-99")
 	if code != http.StatusOK || out["access_token"] == nil || out["refresh_token"] == nil {
@@ -84,7 +84,7 @@ func TestLoginWrongPassword401AndLockout(t *testing.T) {
 			t.Fatalf("attempt %d: code=%d want 401", i, code)
 		}
 	}
-	u, _ := st.UserByLogin(context.Background(), 1, "layla")
+	u, _ := st.UserByLogin(context.Background(), nil, 1, "layla")
 	if u.Status != UserLocked {
 		t.Fatalf("expected lockout, status=%d attempts=%d", u.Status, u.FailedAttempts)
 	}
@@ -211,7 +211,7 @@ func TestOIDCLoginFlows(t *testing.T) {
 	if code, out := sso("tok-new"); code != http.StatusOK || out["access_token"] == nil {
 		t.Fatalf("JIT SSO: code=%d out=%v", code, out)
 	}
-	u, err := st.UserByEmail(context.Background(), 1, "newcomer@example.com")
+	u, err := st.UserByEmail(context.Background(), nil, 1, "newcomer@example.com")
 	if err != nil || u.IsAdmin || u.PasswordHash != "" {
 		t.Fatalf("provisioned: %+v err=%v", u, err)
 	}
@@ -238,18 +238,18 @@ func TestListAndUpdateUsers(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	// Unauthenticated listing requires rights; seed admin rights instead.
 	_ = rec
-	u, _ := st.UserByLogin(context.Background(), 1, "listee")
-	list, err := st.ListUsers(context.Background(), 1, 50, 0)
+	u, _ := st.UserByLogin(context.Background(), nil, 1, "listee")
+	list, err := st.ListUsers(context.Background(), nil, 1, 50, 0)
 	if err != nil || len(list) != 1 || list[0].PasswordHash != "" {
 		t.Fatalf("list=%+v err=%v", list, err)
 	}
 	upd := u
 	upd.FirstName = "List"
 	upd.LastName = "Ee"
-	if err := st.UpdateUser(context.Background(), 1, &upd); err != nil {
+	if err := st.UpdateUser(context.Background(), nil, 1, &upd); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	groups, err := st.ListGroups(context.Background(), 1)
+	groups, err := st.ListGroups(context.Background(), nil, 1)
 	if err != nil {
 		t.Fatalf("groups: %v", err)
 	}

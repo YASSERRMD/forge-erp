@@ -45,12 +45,12 @@ func seedGoods(t *testing.T, ledger *catalog.MemoryStore) {
 	p := &catalog.Product{EntityID: 1, SKU: "WID-001", Name: "Widget",
 		Type: catalog.ProductGoods, Unit: "unit", NetPrice: 1000, VATRateBps: 2000,
 		Status: catalog.ProductActive, StockTracked: true}
-	if err := ledger.CreateProduct(ctx, p); err != nil {
+	if err := ledger.CreateProduct(ctx, nil, p); err != nil {
 		t.Fatalf("create product: %v", err)
 	}
 	mv := &catalog.StockMovement{EntityID: 1, ProductID: p.ID, WarehouseID: 1,
 		Qty: 10, Reason: catalog.ReasonReceipt, Ref: "OPEN"}
-	if _, err := ledger.AppendMovement(ctx, mv, false); err != nil {
+	if _, err := ledger.AppendMovement(ctx, nil, mv, false); err != nil {
 		t.Fatalf("seed stock: %v", err)
 	}
 }
@@ -92,7 +92,7 @@ func TestCheckoutFlow(t *testing.T) {
 	if sa.TotalGross != 2400 || sa.Change != 600 || sa.InvoiceID == 0 {
 		t.Fatalf("sale=%+v want gross 2400 change 600 + invoice", sa)
 	}
-	lvl, _ := ledger.Level(context.Background(), 1, 1)
+	lvl, _ := ledger.Level(context.Background(), nil, 1, 1)
 	if lvl.Qty != 8 {
 		t.Fatalf("stock=%d want 8", lvl.Qty)
 	}
@@ -230,7 +230,7 @@ func TestReturnSaleFlow(t *testing.T) {
 	}
 	var sa Sale
 	_ = json.NewDecoder(rec.Body).Decode(&sa)
-	lvl, _ := ledger.Level(context.Background(), 1, 1)
+	lvl, _ := ledger.Level(context.Background(), nil, 1, 1)
 	if lvl.Qty != 8 {
 		t.Fatalf("after sale stock=%d want 8", lvl.Qty)
 	}
@@ -254,7 +254,7 @@ func TestReturnSaleFlow(t *testing.T) {
 	if out.CreditNote.Totals.Gross != 2400 {
 		t.Fatalf("credit gross=%d want 2400", out.CreditNote.Totals.Gross)
 	}
-	lvl, _ = ledger.Level(context.Background(), 1, 1)
+	lvl, _ = ledger.Level(context.Background(), nil, 1, 1)
 	if lvl.Qty != 10 {
 		t.Fatalf("after return stock=%d want 10", lvl.Qty)
 	}
@@ -293,7 +293,7 @@ func TestPartialReturnFlow(t *testing.T) {
 	if part.FullyReturned || part.Sale.Status != SaleCompleted {
 		t.Fatalf("partial=%+v", part)
 	}
-	lvl, _ := ledger.Level(context.Background(), 1, 1)
+	lvl, _ := ledger.Level(context.Background(), nil, 1, 1)
 	if lvl.Qty != 7 {
 		t.Fatalf("stock=%d want 7", lvl.Qty)
 	}
@@ -315,7 +315,7 @@ func TestPartialReturnFlow(t *testing.T) {
 	if !part.FullyReturned || part.Sale.Status != SaleReturned {
 		t.Fatalf("final=%+v", part)
 	}
-	lvl, _ = ledger.Level(context.Background(), 1, 1)
+	lvl, _ = ledger.Level(context.Background(), nil, 1, 1)
 	if lvl.Qty != 10 {
 		t.Fatalf("stock=%d want 10", lvl.Qty)
 	}

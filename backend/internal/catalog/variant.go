@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // Variant is one sellable product variation.
@@ -72,8 +73,8 @@ func CheckBarcode(code string) error {
 
 // VariantStore is the persistence contract for variants.
 type VariantStore interface {
-	CreateVariant(ctx context.Context, v *Variant) error
-	VariantsOf(ctx context.Context, productID int64) ([]Variant, error)
+	CreateVariant(ctx context.Context, db platform.DBTX, v *Variant) error
+	VariantsOf(ctx context.Context, db platform.DBTX, productID int64) ([]Variant, error)
 }
 
 const variantCols = `id, entity_id, product_id, sku, attributes, price_delta, COALESCE(barcode,''), row_version`
@@ -94,7 +95,7 @@ func scanVariant(row pgx.Row) (Variant, error) {
 }
 
 // CreateVariant persists a variant on the PG store.
-func (s *PGStore) CreateVariant(ctx context.Context, v *Variant) error {
+func (s *PGStore) CreateVariant(ctx context.Context, db platform.DBTX, v *Variant) error {
 	if err := v.Validate(); err != nil {
 		return err
 	}
@@ -102,7 +103,7 @@ func (s *PGStore) CreateVariant(ctx context.Context, v *Variant) error {
 	if attrs == nil {
 		attrs = []byte("{}")
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_product_variants
+	return db.QueryRow(ctx, `INSERT INTO ferp_product_variants
 		(entity_id, product_id, sku, attributes, price_delta, barcode)
 		VALUES ($1,$2,$3,$4,$5,NULLIF($6,'')) RETURNING id, row_version`,
 		v.EntityID, v.ProductID, v.SKU, attrs, v.PriceDelta, v.Barcode,
@@ -110,8 +111,8 @@ func (s *PGStore) CreateVariant(ctx context.Context, v *Variant) error {
 }
 
 // VariantsOf lists a product's variants on the PG store.
-func (s *PGStore) VariantsOf(ctx context.Context, productID int64) ([]Variant, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+variantCols+` FROM ferp_product_variants
+func (s *PGStore) VariantsOf(ctx context.Context, db platform.DBTX, productID int64) ([]Variant, error) {
+	rows, err := db.Query(ctx, `SELECT `+variantCols+` FROM ferp_product_variants
 		WHERE product_id=$1 ORDER BY sku`, productID)
 	if err != nil {
 		return nil, err
@@ -129,7 +130,7 @@ func (s *PGStore) VariantsOf(ctx context.Context, productID int64) ([]Variant, e
 }
 
 // CreateVariant persists a variant on the memory fake.
-func (m *MemoryStore) CreateVariant(_ context.Context, v *Variant) error {
+func (m *MemoryStore) CreateVariant(_ context.Context, _ platform.DBTX, v *Variant) error {
 	if err := v.Validate(); err != nil {
 		return err
 	}
@@ -147,7 +148,7 @@ func (m *MemoryStore) CreateVariant(_ context.Context, v *Variant) error {
 }
 
 // VariantsOf lists a product's variants on the memory fake.
-func (m *MemoryStore) VariantsOf(_ context.Context, productID int64) ([]Variant, error) {
+func (m *MemoryStore) VariantsOf(_ context.Context, _ platform.DBTX, productID int64) ([]Variant, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Variant

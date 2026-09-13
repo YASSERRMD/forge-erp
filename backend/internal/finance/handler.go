@@ -9,11 +9,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // Deps wires handlers to persistence.
 type Deps struct {
 	Store Store
+	DB    platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates.
@@ -70,7 +72,7 @@ func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.ID, a.EntityID = 0, entityOf(r)
-	if err := h.deps.Store.CreateAccount(r.Context(), &a); err != nil {
+	if err := h.deps.Store.CreateAccount(r.Context(), h.deps.DB, &a); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -85,7 +87,7 @@ func (h *Handler) CreateJournal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	j.ID, j.EntityID = 0, entityOf(r)
-	if err := h.deps.Store.CreateJournal(r.Context(), &j); err != nil {
+	if err := h.deps.Store.CreateJournal(r.Context(), h.deps.DB, &j); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -113,7 +115,7 @@ func (h *Handler) PostEntry(w http.ResponseWriter, r *http.Request) {
 	u, _ := identity.AuthUser(r)
 	e := &Entry{EntityID: entityOf(r), JournalID: req.JournalID, Ref: req.Ref,
 		Date: req.Date, Memo: req.Memo, Lines: req.Lines, CreatedBy: &u.ID}
-	if err := h.deps.Store.PostEntry(r.Context(), e); err != nil {
+	if err := h.deps.Store.PostEntry(r.Context(), h.deps.DB, e); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -122,7 +124,7 @@ func (h *Handler) PostEntry(w http.ResponseWriter, r *http.Request) {
 
 // ListAccounts lists the chart of accounts within the caller's entity.
 func (h *Handler) ListAccounts(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.Accounts(r.Context(), entityOf(r))
+	list, err := h.deps.Store.Accounts(r.Context(), h.deps.DB, entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -132,7 +134,7 @@ func (h *Handler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 
 // ListJournals lists journals.
 func (h *Handler) ListJournals(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListJournals(r.Context(), entityOf(r))
+	list, err := h.deps.Store.ListJournals(r.Context(), h.deps.DB, entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -142,7 +144,7 @@ func (h *Handler) ListJournals(w http.ResponseWriter, r *http.Request) {
 
 // ListBankAccounts lists bank accounts.
 func (h *Handler) ListBankAccounts(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListBankAccounts(r.Context(), entityOf(r))
+	list, err := h.deps.Store.ListBankAccounts(r.Context(), h.deps.DB, entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -152,7 +154,7 @@ func (h *Handler) ListBankAccounts(w http.ResponseWriter, r *http.Request) {
 
 // ListLoans lists loans.
 func (h *Handler) ListLoans(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListLoans(r.Context(), entityOf(r))
+	list, err := h.deps.Store.ListLoans(r.Context(), h.deps.DB, entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -162,7 +164,7 @@ func (h *Handler) ListLoans(w http.ResponseWriter, r *http.Request) {
 
 // TrialBalance returns per-account sums; callers assert debits == credits.
 func (h *Handler) TrialBalance(w http.ResponseWriter, r *http.Request) {
-	tb, err := h.deps.Store.TrialBalance(r.Context(), entityOf(r))
+	tb, err := h.deps.Store.TrialBalance(r.Context(), h.deps.DB, entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "trial failed")
 		return
@@ -184,7 +186,7 @@ func (h *Handler) VerifyChain(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "journal_id required")
 		return
 	}
-	ents, err := h.deps.Store.EntriesByJournal(r.Context(), jid)
+	ents, err := h.deps.Store.EntriesByJournal(r.Context(), h.deps.DB, jid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "load failed")
 		return
@@ -204,7 +206,7 @@ func (h *Handler) CreateBankAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.ID, a.EntityID = 0, entityOf(r)
-	if err := h.deps.Store.CreateBankAccount(r.Context(), &a); err != nil {
+	if err := h.deps.Store.CreateBankAccount(r.Context(), h.deps.DB, &a); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -222,7 +224,7 @@ func (h *Handler) RecordTransaction(w http.ResponseWriter, r *http.Request) {
 	if t.ValueDate.IsZero() {
 		t.ValueDate = time.Now().UTC()
 	}
-	if err := h.deps.Store.RecordTransaction(r.Context(), &t); err != nil {
+	if err := h.deps.Store.RecordTransaction(r.Context(), h.deps.DB, &t); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -236,7 +238,7 @@ func (h *Handler) Reconcile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	if err := h.deps.Store.Reconcile(r.Context(), entityOf(r), id, time.Now().UTC()); err != nil {
+	if err := h.deps.Store.Reconcile(r.Context(), h.deps.DB, entityOf(r), id, time.Now().UTC()); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -263,7 +265,7 @@ func (h *Handler) CreateLoan(w http.ResponseWriter, r *http.Request) {
 	}
 	l := &Loan{EntityID: entityOf(r), Label: req.Label, Principal: req.Principal,
 		RateBps: req.RateBps, Start: req.Start, Periods: req.Periods}
-	if err := h.deps.Store.CreateLoan(r.Context(), l); err != nil {
+	if err := h.deps.Store.CreateLoan(r.Context(), h.deps.DB, l); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}

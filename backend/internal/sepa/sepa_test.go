@@ -125,21 +125,22 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
 func TestPGBatchFlow(t *testing.T) {
 	ctx := context.Background()
-	st := NewPGStore(pgtest.Pool(t))
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
 	b := &Batch{EntityID: 1, Ref: "PG-SEPA", CreditorName: "C",
 		CreditorIBAN: "FR1420041010050500013M02606", CreditorBIC: "AGRIFRPP",
 		CreditorID: "ID", Sequence: "RCUR", RequestedAt: time.Now().UTC().Add(24 * time.Hour),
 		Transactions: []Transaction{{DebtorName: "D", IBAN: "DE89370400440532013000",
 			Amount: 100, Remittance: "R", EndToEndID: "PG-E2E"}}}
-	if err := st.CreateBatch(ctx, b); err != nil {
+	if err := st.CreateBatch(ctx, pool, b); err != nil {
 		t.Fatalf("batch: %v", err)
 	}
-	upd, err := st.SetBatchStatus(ctx, 1, b.ID, BatchValidated, b.RowVersion)
+	upd, err := st.SetBatchStatus(ctx, pool, 1, b.ID, BatchValidated, b.RowVersion)
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 	_ = upd
-	list, err := st.ListBatches(ctx, 1)
+	list, err := st.ListBatches(ctx, pool, 1)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list=%d err=%v", len(list), err)
 	}
@@ -153,13 +154,13 @@ func TestCrossTenantIsolation(t *testing.T) {
 		CreditorID: "ID", Sequence: "RCUR", RequestedAt: time.Now().UTC().Add(24 * time.Hour),
 		Transactions: []Transaction{{DebtorName: "D", IBAN: "DE89370400440532013000",
 			Amount: 100, Remittance: "R", EndToEndID: "X-E2E"}}}
-	if err := m.CreateBatch(ctx, b); err != nil {
+	if err := m.CreateBatch(ctx, nil, b); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := m.BatchByID(ctx, 2, b.ID); !isNotFound(err) {
+	if _, err := m.BatchByID(ctx, nil, 2, b.ID); !isNotFound(err) {
 		t.Fatalf("cross-tenant BatchByID err=%v want not-found", err)
 	}
-	if _, err := m.SetBatchStatus(ctx, 2, b.ID, BatchValidated, b.RowVersion); !isNotFound(err) {
+	if _, err := m.SetBatchStatus(ctx, nil, 2, b.ID, BatchValidated, b.RowVersion); !isNotFound(err) {
 		t.Fatalf("cross-tenant SetBatchStatus err=%v want not-found", err)
 	}
 }

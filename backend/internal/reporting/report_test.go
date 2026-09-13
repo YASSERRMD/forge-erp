@@ -20,18 +20,18 @@ func TestBuildPNL(t *testing.T) {
 		{EntityID: 1, Code: "607000", Label: "Purchases", Type: "expense"},
 	} {
 		a := a
-		if err := ledger.CreateAccount(ctx, &a); err != nil {
+		if err := ledger.CreateAccount(ctx, nil, &a); err != nil {
 			t.Fatalf("account: %v", err)
 		}
 	}
 	j := &finance.Journal{EntityID: 1, Code: "VEN", Label: "Sales"}
-	if err := ledger.CreateJournal(ctx, j); err != nil {
+	if err := ledger.CreateJournal(ctx, nil, j); err != nil {
 		t.Fatalf("journal: %v", err)
 	}
-	if err := ledger.CreateFiscalYear(ctx, &finance.FiscalYear{EntityID: 1, Label: "FY"}); err != nil {
+	if err := ledger.CreateFiscalYear(ctx, nil, &finance.FiscalYear{EntityID: 1, Label: "FY"}); err != nil {
 		t.Fatalf("fy: %v", err)
 	}
-	accts, _ := ledger.Accounts(ctx, 1)
+	accts, _ := ledger.Accounts(ctx, nil, 1)
 	byCode := map[string]int64{}
 	for _, a := range accts {
 		byCode[a.Code] = a.ID
@@ -50,11 +50,11 @@ func TestBuildPNL(t *testing.T) {
 			{AccountID: byCode["512000"], Credit: 4000},
 		}},
 	} {
-		if err := ledger.PostEntry(ctx, e); err != nil {
+		if err := ledger.PostEntry(ctx, nil, e); err != nil {
 			t.Fatalf("post: %v", err)
 		}
 	}
-	pnl, err := BuildPNL(ctx, 1, ledger)
+	pnl, err := BuildPNL(ctx, nil, 1, ledger)
 	if err != nil {
 		t.Fatalf("pnl: %v", err)
 	}
@@ -69,13 +69,13 @@ func TestReceivablesAndValuation(t *testing.T) {
 	d := &sales.Document{EntityID: 1, Type: documents.TypeInvoice, OrgID: 7,
 		Currency: "USD", RateToBase: 1000000,
 		Lines: []documents.Line{{ProductID: 1, Label: "x", Qty: 1, UnitNet: 1200, VATRateBps: 2000}}}
-	if err := billing.CreateDoc(ctx, d, "202609"); err != nil {
+	if err := billing.CreateDoc(ctx, nil, d, "202609"); err != nil {
 		t.Fatalf("invoice: %v", err)
 	}
-	if _, err := billing.SetStatus(ctx, d.EntityID, d.ID, sales.InvoiceValidated); err != nil {
+	if _, err := billing.SetStatus(ctx, nil, d.EntityID, d.ID, sales.InvoiceValidated); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	got, total, err := Receivables(ctx, 1, billing)
+	got, total, err := Receivables(ctx, nil, 1, billing)
 	if err != nil {
 		t.Fatalf("receivables: %v", err)
 	}
@@ -86,15 +86,15 @@ func TestReceivablesAndValuation(t *testing.T) {
 	stock := catalog.NewMemoryStore()
 	p := &catalog.Product{EntityID: 1, SKU: "W-1", Name: "W", Type: catalog.ProductGoods,
 		Status: catalog.ProductActive, StockTracked: true}
-	if err := stock.CreateProduct(ctx, p); err != nil {
+	if err := stock.CreateProduct(ctx, nil, p); err != nil {
 		t.Fatalf("product: %v", err)
 	}
 	mv := &catalog.StockMovement{EntityID: 1, ProductID: p.ID, WarehouseID: 1,
 		Qty: 5, UnitCost: 200, Reason: catalog.ReasonReceipt, Ref: "OPEN"}
-	if _, err := stock.AppendMovement(ctx, mv, false); err != nil {
+	if _, err := stock.AppendMovement(ctx, nil, mv, false); err != nil {
 		t.Fatalf("receipt: %v", err)
 	}
-	lines, vtotal, err := StockValuation(ctx, 1, 1, stock)
+	lines, vtotal, err := StockValuation(ctx, nil, 1, 1, stock)
 	if err != nil {
 		t.Fatalf("valuation: %v", err)
 	}

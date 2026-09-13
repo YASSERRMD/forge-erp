@@ -23,14 +23,14 @@ import (
 
 // OrgStore abstracts organization persistence for exchange.
 type OrgStore interface {
-	CreateOrg(ctx context.Context, o *partners.Organization) error
-	ListOrgs(ctx context.Context, entityID int64, limit, offset int) ([]partners.Organization, error)
+	CreateOrg(ctx context.Context, db platform.DBTX, o *partners.Organization) error
+	ListOrgs(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]partners.Organization, error)
 }
 
 // ProductStore abstracts product persistence for exchange.
 type ProductStore interface {
-	CreateProduct(ctx context.Context, p *catalog.Product) error
-	ListProducts(ctx context.Context, entityID int64, limit, offset int) ([]catalog.Product, error)
+	CreateProduct(ctx context.Context, db platform.DBTX, p *catalog.Product) error
+	ListProducts(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]catalog.Product, error)
 }
 
 // Deps wires handlers to the owning stores.
@@ -38,6 +38,7 @@ type Deps struct {
 	Orgs     OrgStore
 	Products ProductStore
 	Bus      platform.Bus
+	DB       platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -102,7 +103,7 @@ func (h *Handler) ExportOrgs(w http.ResponseWriter, r *http.Request) {
 	defer cw.Flush()
 	_ = cw.Write(orgHeader)
 	for offset := 0; ; offset += 500 {
-		batch, err := h.deps.Orgs.ListOrgs(r.Context(), entityOf(r), 500, offset)
+		batch, err := h.deps.Orgs.ListOrgs(r.Context(), h.deps.DB, entityOf(r), 500, offset)
 		if err != nil {
 			return // headers already sent; truncated export beats a broken one
 		}
@@ -126,7 +127,7 @@ func (h *Handler) ExportProducts(w http.ResponseWriter, r *http.Request) {
 	defer cw.Flush()
 	_ = cw.Write(productHeader)
 	for offset := 0; ; offset += 500 {
-		batch, err := h.deps.Products.ListProducts(r.Context(), entityOf(r), 500, offset)
+		batch, err := h.deps.Products.ListProducts(r.Context(), h.deps.DB, entityOf(r), 500, offset)
 		if err != nil {
 			return
 		}
@@ -199,7 +200,7 @@ func (h *Handler) ImportOrgs(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		o.Status = partners.OrgActive
-		if err := h.deps.Orgs.CreateOrg(r.Context(), o); err != nil {
+		if err := h.deps.Orgs.CreateOrg(r.Context(), h.deps.DB, o); err != nil {
 			res.Skipped++
 			res.Errors = capErr(res.Errors, i+2, err)
 			continue
@@ -251,7 +252,7 @@ func (h *Handler) ImportProducts(w http.ResponseWriter, r *http.Request) {
 			Name: strings.TrimSpace(c[1]), Type: catalog.ProductType(pt), Unit: strings.TrimSpace(c[3]),
 			NetPrice: int64(price*100 + 0.5), VATRateBps: vat, Status: catalog.ProductActive,
 			StockTracked: tracked}
-		if err := h.deps.Products.CreateProduct(r.Context(), p); err != nil {
+		if err := h.deps.Products.CreateProduct(r.Context(), h.deps.DB, p); err != nil {
 			fail(err)
 			continue
 		}

@@ -54,9 +54,9 @@ func Convert(amount int64, from, to Rate) int64 {
 
 // Store is the persistence contract for rates.
 type Store interface {
-	SetRate(ctx context.Context, r *Rate) error
-	RateByCode(ctx context.Context, entityID int64, code string) (Rate, error)
-	ListRates(ctx context.Context, entityID int64) ([]Rate, error)
+	SetRate(ctx context.Context, db platform.DBTX, r *Rate) error
+	RateByCode(ctx context.Context, db platform.DBTX, entityID int64, code string) (Rate, error)
+	ListRates(ctx context.Context, db platform.DBTX, entityID int64) ([]Rate, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -65,20 +65,20 @@ type PGStore struct{ pool *pgxpool.Pool }
 // NewPGStore wraps a pool.
 func NewPGStore(pool *pgxpool.Pool) *PGStore { return &PGStore{pool: pool} }
 
-func (s *PGStore) SetRate(ctx context.Context, r *Rate) error {
+func (s *PGStore) SetRate(ctx context.Context, db platform.DBTX, r *Rate) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
 	r.Code = strings.ToUpper(strings.TrimSpace(r.Code))
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_fx_rates (entity_id, code, rate_to_base)
+	return db.QueryRow(ctx, `INSERT INTO ferp_fx_rates (entity_id, code, rate_to_base)
 		VALUES ($1,$2,$3)
 		ON CONFLICT (entity_id, code) DO UPDATE SET rate_to_base=EXCLUDED.rate_to_base, updated_at=now()
 		RETURNING updated_at`, r.EntityID, r.Code, r.RateToBase).Scan(&r.UpdatedAt)
 }
 
-func (s *PGStore) RateByCode(ctx context.Context, entityID int64, code string) (Rate, error) {
+func (s *PGStore) RateByCode(ctx context.Context, db platform.DBTX, entityID int64, code string) (Rate, error) {
 	var r Rate
-	err := s.pool.QueryRow(ctx, `SELECT entity_id, code, rate_to_base, updated_at
+	err := db.QueryRow(ctx, `SELECT entity_id, code, rate_to_base, updated_at
 		FROM ferp_fx_rates WHERE entity_id=$1 AND code=$2`,
 		entityID, strings.ToUpper(strings.TrimSpace(code))).Scan(
 		&r.EntityID, &r.Code, &r.RateToBase, &r.UpdatedAt)
@@ -88,8 +88,8 @@ func (s *PGStore) RateByCode(ctx context.Context, entityID int64, code string) (
 	return r, err
 }
 
-func (s *PGStore) ListRates(ctx context.Context, entityID int64) ([]Rate, error) {
-	rows, err := s.pool.Query(ctx, `SELECT entity_id, code, rate_to_base, updated_at
+func (s *PGStore) ListRates(ctx context.Context, db platform.DBTX, entityID int64) ([]Rate, error) {
+	rows, err := db.Query(ctx, `SELECT entity_id, code, rate_to_base, updated_at
 		FROM ferp_fx_rates WHERE entity_id=$1 ORDER BY code`, entityID)
 	if err != nil {
 		return nil, err
@@ -123,7 +123,7 @@ func rateKey(entityID int64, code string) string {
 	return fmt.Sprintf("%d/%s", entityID, strings.ToUpper(strings.TrimSpace(code)))
 }
 
-func (m *MemoryStore) SetRate(_ context.Context, r *Rate) error {
+func (m *MemoryStore) SetRate(_ context.Context, _ platform.DBTX, r *Rate) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
@@ -135,7 +135,7 @@ func (m *MemoryStore) SetRate(_ context.Context, r *Rate) error {
 	return nil
 }
 
-func (m *MemoryStore) RateByCode(_ context.Context, entityID int64, code string) (Rate, error) {
+func (m *MemoryStore) RateByCode(_ context.Context, _ platform.DBTX, entityID int64, code string) (Rate, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.rates[rateKey(entityID, code)]
@@ -145,7 +145,7 @@ func (m *MemoryStore) RateByCode(_ context.Context, entityID int64, code string)
 	return r, nil
 }
 
-func (m *MemoryStore) ListRates(_ context.Context, entityID int64) ([]Rate, error) {
+func (m *MemoryStore) ListRates(_ context.Context, _ platform.DBTX, entityID int64) ([]Rate, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Rate
@@ -161,6 +161,7 @@ func (m *MemoryStore) ListRates(_ context.Context, entityID int64) ([]Rate, erro
 type Deps struct {
 	Store Store
 	Bus   platform.Bus
+	DB    platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates.
@@ -210,7 +211,7 @@ func storeErrorCode(err error) int {
 
 // ListRates lists board rates.
 func (h *Handler) ListRates(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListRates(r.Context(), entityOf(r))
+	list, err := h.deps.Store.ListRates(r.Context(), h.deps.DB, entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -226,7 +227,7 @@ func (h *Handler) SetRate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rate.EntityID = entityOf(r)
-	if err := h.deps.Store.SetRate(r.Context(), &rate); err != nil {
+	if err := h.deps.Store.SetRate(r.Context(), h.deps.DB, &rate); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -241,8 +242,8 @@ func (h *Handler) Convert(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "amount required")
 		return
 	}
-	from, err1 := h.deps.Store.RateByCode(r.Context(), entityOf(r), q.Get("from"))
-	to, err2 := h.deps.Store.RateByCode(r.Context(), entityOf(r), q.Get("to"))
+	from, err1 := h.deps.Store.RateByCode(r.Context(), h.deps.DB, entityOf(r), q.Get("from"))
+	to, err2 := h.deps.Store.RateByCode(r.Context(), h.deps.DB, entityOf(r), q.Get("to"))
 	if err1 != nil || err2 != nil {
 		writeErr(w, http.StatusUnprocessableEntity, "fx: unknown currency")
 		return

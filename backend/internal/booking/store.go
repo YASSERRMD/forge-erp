@@ -6,20 +6,21 @@ import (
 	"sync"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 )
 
 // Store is the persistence contract for the booking context.
 type Store interface {
-	CreateResource(ctx context.Context, r *Resource) error
-	ResourceByID(ctx context.Context, entityID int64, id int64) (Resource, error)
-	ListResources(ctx context.Context, entityID int64) ([]Resource, error)
-	CreateBooking(ctx context.Context, b *Booking) error
-	BookingByID(ctx context.Context, entityID int64, id int64) (Booking, error)
-	BookingsOf(ctx context.Context, entityID int64, resourceID int64, from, to time.Time) ([]Booking, error)
-	SetBookingStatus(ctx context.Context, entityID int64, id int64, to BookingStatus, rowVersion int64) (Booking, error)
+	CreateResource(ctx context.Context, db platform.DBTX, r *Resource) error
+	ResourceByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Resource, error)
+	ListResources(ctx context.Context, db platform.DBTX, entityID int64) ([]Resource, error)
+	CreateBooking(ctx context.Context, db platform.DBTX, b *Booking) error
+	BookingByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Booking, error)
+	BookingsOf(ctx context.Context, db platform.DBTX, entityID int64, resourceID int64, from, to time.Time) ([]Booking, error)
+	SetBookingStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to BookingStatus, rowVersion int64) (Booking, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -40,23 +41,23 @@ func scanResource(row pgx.Row) (Resource, error) {
 	return r, err
 }
 
-func (s *PGStore) CreateResource(ctx context.Context, r *Resource) error {
+func (s *PGStore) CreateResource(ctx context.Context, db platform.DBTX, r *Resource) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_resources
+	return db.QueryRow(ctx, `INSERT INTO ferp_resources
 		(entity_id, code, label, capacity, status)
 		VALUES ($1,$2,$3,$4,$5) RETURNING id, row_version`,
 		r.EntityID, r.Code, r.Label, r.Capacity, r.Status,
 	).Scan(&r.ID, &r.RowVersion)
 }
 
-func (s *PGStore) ResourceByID(ctx context.Context, entityID int64, id int64) (Resource, error) {
-	return scanResource(s.pool.QueryRow(ctx, `SELECT `+resourceCols+` FROM ferp_resources WHERE id=$1 AND entity_id=$2`, id, entityID))
+func (s *PGStore) ResourceByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Resource, error) {
+	return scanResource(db.QueryRow(ctx, `SELECT `+resourceCols+` FROM ferp_resources WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
-func (s *PGStore) ListResources(ctx context.Context, entityID int64) ([]Resource, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+resourceCols+` FROM ferp_resources WHERE entity_id=$1 ORDER BY code`, entityID)
+func (s *PGStore) ListResources(ctx context.Context, db platform.DBTX, entityID int64) ([]Resource, error) {
+	rows, err := db.Query(ctx, `SELECT `+resourceCols+` FROM ferp_resources WHERE entity_id=$1 ORDER BY code`, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -85,8 +86,8 @@ func scanBooking(row pgx.Row) (Booking, error) {
 }
 
 // overlapping returns live bookings intersecting the window.
-func (s *PGStore) overlapping(ctx context.Context, entityID int64, resourceID int64, start, end time.Time) ([]Booking, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+bookingCols+` FROM ferp_bookings
+func (s *PGStore) overlapping(ctx context.Context, db platform.DBTX, entityID int64, resourceID int64, start, end time.Time) ([]Booking, error) {
+	rows, err := db.Query(ctx, `SELECT `+bookingCols+` FROM ferp_bookings
 		WHERE resource_id=$1 AND entity_id=$2 AND status IN (0,1) AND start_at < $4 AND end_at > $3
 		ORDER BY start_at`, resourceID, entityID, start, end)
 	if err != nil {
@@ -104,37 +105,37 @@ func (s *PGStore) overlapping(ctx context.Context, entityID int64, resourceID in
 	return out, rows.Err()
 }
 
-func (s *PGStore) CreateBooking(ctx context.Context, b *Booking) error {
+func (s *PGStore) CreateBooking(ctx context.Context, db platform.DBTX, b *Booking) error {
 	if err := b.Validate(); err != nil {
 		return err
 	}
-	res, err := s.ResourceByID(ctx, b.EntityID, b.ResourceID)
+	res, err := s.ResourceByID(ctx, db, b.EntityID, b.ResourceID)
 	if err != nil {
 		return err
 	}
 	if res.Status != ResourceActive {
 		return errors.New("booking: resource inactive")
 	}
-	live, err := s.overlapping(ctx, b.EntityID, b.ResourceID, b.StartAt, b.EndAt)
+	live, err := s.overlapping(ctx, db, b.EntityID, b.ResourceID, b.StartAt, b.EndAt)
 	if err != nil {
 		return err
 	}
 	if err := FitsCapacity(res.Capacity, live, *b); err != nil {
 		return err
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_bookings
+	return db.QueryRow(ctx, `INSERT INTO ferp_bookings
 		(entity_id, resource_id, org_id, user_login, start_at, end_at, seats, status)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, row_version`,
 		b.EntityID, b.ResourceID, b.OrgID, b.UserLogin, b.StartAt, b.EndAt, b.Seats, b.Status,
 	).Scan(&b.ID, &b.RowVersion)
 }
 
-func (s *PGStore) BookingByID(ctx context.Context, entityID int64, id int64) (Booking, error) {
-	return scanBooking(s.pool.QueryRow(ctx, `SELECT `+bookingCols+` FROM ferp_bookings WHERE id=$1 AND entity_id=$2`, id, entityID))
+func (s *PGStore) BookingByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Booking, error) {
+	return scanBooking(db.QueryRow(ctx, `SELECT `+bookingCols+` FROM ferp_bookings WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
-func (s *PGStore) BookingsOf(ctx context.Context, entityID int64, resourceID int64, from, to time.Time) ([]Booking, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+bookingCols+` FROM ferp_bookings
+func (s *PGStore) BookingsOf(ctx context.Context, db platform.DBTX, entityID int64, resourceID int64, from, to time.Time) ([]Booking, error) {
+	rows, err := db.Query(ctx, `SELECT `+bookingCols+` FROM ferp_bookings
 		WHERE resource_id=$1 AND entity_id=$2 AND start_at < $4 AND end_at > $3 ORDER BY start_at`, resourceID, entityID, from, to)
 	if err != nil {
 		return nil, err
@@ -151,8 +152,8 @@ func (s *PGStore) BookingsOf(ctx context.Context, entityID int64, resourceID int
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetBookingStatus(ctx context.Context, entityID int64, id int64, to BookingStatus, rowVersion int64) (Booking, error) {
-	b, err := s.BookingByID(ctx, entityID, id)
+func (s *PGStore) SetBookingStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to BookingStatus, rowVersion int64) (Booking, error) {
+	b, err := s.BookingByID(ctx, db, entityID, id)
 	if err != nil {
 		return Booking{}, err
 	}
@@ -162,7 +163,7 @@ func (s *PGStore) SetBookingStatus(ctx context.Context, entityID int64, id int64
 	if !b.CanTransition(to) {
 		return Booking{}, errors.New("booking: illegal transition")
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_bookings SET status=$1, updated_at=now(), row_version=row_version+1
+	tag, err := db.Exec(ctx, `UPDATE ferp_bookings SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$4 AND row_version=$3`, to, id, rowVersion, entityID)
 	if err != nil {
 		return Booking{}, err
@@ -190,7 +191,7 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
-func (m *MemoryStore) CreateResource(_ context.Context, r *Resource) error {
+func (m *MemoryStore) CreateResource(_ context.Context, _ platform.DBTX, r *Resource) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
@@ -207,7 +208,7 @@ func (m *MemoryStore) CreateResource(_ context.Context, r *Resource) error {
 	return nil
 }
 
-func (m *MemoryStore) ResourceByID(_ context.Context, entityID int64, id int64) (Resource, error) {
+func (m *MemoryStore) ResourceByID(_ context.Context, _ platform.DBTX, entityID int64, id int64) (Resource, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.resources[id]
@@ -217,7 +218,7 @@ func (m *MemoryStore) ResourceByID(_ context.Context, entityID int64, id int64) 
 	return r, nil
 }
 
-func (m *MemoryStore) ListResources(_ context.Context, entityID int64) ([]Resource, error) {
+func (m *MemoryStore) ListResources(_ context.Context, _ platform.DBTX, entityID int64) ([]Resource, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Resource
@@ -229,7 +230,7 @@ func (m *MemoryStore) ListResources(_ context.Context, entityID int64) ([]Resour
 	return out, nil
 }
 
-func (m *MemoryStore) CreateBooking(_ context.Context, b *Booking) error {
+func (m *MemoryStore) CreateBooking(_ context.Context, _ platform.DBTX, b *Booking) error {
 	if err := b.Validate(); err != nil {
 		return err
 	}
@@ -257,7 +258,7 @@ func (m *MemoryStore) CreateBooking(_ context.Context, b *Booking) error {
 	return nil
 }
 
-func (m *MemoryStore) BookingByID(_ context.Context, entityID int64, id int64) (Booking, error) {
+func (m *MemoryStore) BookingByID(_ context.Context, _ platform.DBTX, entityID int64, id int64) (Booking, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.bookings[id]
@@ -267,7 +268,7 @@ func (m *MemoryStore) BookingByID(_ context.Context, entityID int64, id int64) (
 	return b, nil
 }
 
-func (m *MemoryStore) BookingsOf(_ context.Context, entityID int64, resourceID int64, from, to time.Time) ([]Booking, error) {
+func (m *MemoryStore) BookingsOf(_ context.Context, _ platform.DBTX, entityID int64, resourceID int64, from, to time.Time) ([]Booking, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Booking
@@ -279,7 +280,7 @@ func (m *MemoryStore) BookingsOf(_ context.Context, entityID int64, resourceID i
 	return out, nil
 }
 
-func (m *MemoryStore) SetBookingStatus(_ context.Context, entityID int64, id int64, to BookingStatus, rowVersion int64) (Booking, error) {
+func (m *MemoryStore) SetBookingStatus(_ context.Context, _ platform.DBTX, entityID int64, id int64, to BookingStatus, rowVersion int64) (Booking, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.bookings[id]

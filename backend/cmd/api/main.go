@@ -81,19 +81,19 @@ func run() error {
 		return fmt.Errorf("jwt: %w", err)
 	}
 	store := identity.NewPGStore(pool)
-	if err := seedAdmin(ctx, cfg, store); err != nil {
+	if err := seedAdmin(ctx, cfg, pool, store); err != nil {
 		return fmt.Errorf("seed admin: %w", err)
 	}
 	pstore := partners.NewPGStore(pool)
-	if err := seedDemoOrgs(ctx, pstore); err != nil {
+	if err := seedDemoOrgs(ctx, pool, pstore); err != nil {
 		return fmt.Errorf("seed demo orgs: %w", err)
 	}
 	cstore := catalog.NewPGStore(pool)
-	if err := seedDemoCatalog(ctx, cstore); err != nil {
+	if err := seedDemoCatalog(ctx, pool, cstore); err != nil {
 		return fmt.Errorf("seed demo catalog: %w", err)
 	}
 	sstore := sales.NewPGStore(pool)
-	if err := seedDemoSales(ctx, sstore, pstore, cstore); err != nil {
+	if err := seedDemoSales(ctx, pool, sstore, pstore, cstore); err != nil {
 		return fmt.Errorf("seed demo sales: %w", err)
 	}
 	procstore := procurement.NewPGStore(pool)
@@ -101,7 +101,7 @@ func run() error {
 	svcstore := services.NewPGStore(pool)
 	mfstore := manufacturing.NewPGStore(pool)
 	hrstore := hr.NewPGStore(pool)
-	if err := seedDemoFinance(ctx, fstore); err != nil {
+	if err := seedDemoFinance(ctx, pool, fstore); err != nil {
 		return fmt.Errorf("seed demo finance: %w", err)
 	}
 
@@ -133,10 +133,10 @@ func run() error {
 	// documentsvc metadata needs a Store; PG metadata lands with the PG adapter —
 	// serve metadata in-memory for now is wrong for prod, so wire a minimal PG
 	// metadata store inline via pool below.
-	docSvc := &documentsvc.Service{Store: documentsvc.NewPGStore(pool), Storage: byteStorage}
+	docSvc := &documentsvc.Service{Store: documentsvc.NewPGStore(pool), Storage: byteStorage, DB: pool}
 	providers := map[string]search.Provider{
 		"organization": func(ctx context.Context, entityID int64) ([]search.Result, error) {
-			orgs, err := pstore.ListOrgs(ctx, entityID, 500, 0)
+			orgs, err := pstore.ListOrgs(ctx, pool, entityID, 500, 0)
 			if err != nil {
 				return nil, err
 			}
@@ -147,7 +147,7 @@ func run() error {
 			return out, nil
 		},
 		"product": func(ctx context.Context, entityID int64) ([]search.Result, error) {
-			prods, err := cstore.ListProducts(ctx, entityID, 500, 0)
+			prods, err := cstore.ListProducts(ctx, pool, entityID, 500, 0)
 			if err != nil {
 				return nil, err
 			}
@@ -199,14 +199,14 @@ func run() error {
 		// Write-through indexing: created orgs/products land in OpenSearch
 		// immediately; startup reindex + provider fallback cover the rest.
 		bus.Subscribe("forgeerp.partners.organization.created.v1", func(ctx context.Context, e platform.Event) {
-			o, err := pstore.OrgByID(ctx, e.EntityID, e.ID)
+			o, err := pstore.OrgByID(ctx, pool, e.EntityID, e.ID)
 			if err != nil {
 				return
 			}
 			_ = oss.IndexOne(ctx, search.MakeDocument("organization", o.EntityID, o.ID, o.Name, o.CustomerCode))
 		})
 		bus.Subscribe("forgeerp.catalog.product.created.v1", func(ctx context.Context, e platform.Event) {
-			p, err := cstore.ProductByID(ctx, e.EntityID, e.ID)
+			p, err := cstore.ProductByID(ctx, pool, e.EntityID, e.ID)
 			if err != nil {
 				return
 			}
@@ -214,7 +214,7 @@ func run() error {
 		})
 		log.Print("forgeerp: search write-through subscribed")
 	}
-	identDeps := identity.Deps{Store: store, Issuer: issuer}
+	identDeps := identity.Deps{Store: store, Issuer: issuer, DB: pool}
 	if kc := identity.LoadKeycloakConfig(func(k, d string) string {
 		if v := os.Getenv(k); v != "" {
 			return v
@@ -236,57 +236,57 @@ func run() error {
 	apiLimiter := platform.NewRateLimiter(20, 40)
 	mux.With(apiLimiter.Limit).Route("/api/v1", func(r chi.Router) {
 		identity.Routes(r, identDeps)
-		partners.Routes(r, partners.Deps{Store: pstore, Bus: bus},
+		partners.Routes(r, partners.Deps{Store: pstore, Bus: bus, DB: pool},
 			idH.Require)
-		catalog.Routes(r, catalog.Deps{Store: cstore, Bus: bus},
+		catalog.Routes(r, catalog.Deps{Store: cstore, Bus: bus, DB: pool},
 			idH.Require)
-		sales.Routes(r, sales.Deps{Store: sstore, Catalog: cstore, Bus: bus},
+		sales.Routes(r, sales.Deps{Store: sstore, Catalog: cstore, Bus: bus, DB: pool},
 			idH.Require)
-		procurement.Routes(r, procurement.Deps{Store: procstore, Catalog: cstore, Bus: bus},
+		procurement.Routes(r, procurement.Deps{Store: procstore, Catalog: cstore, Bus: bus, DB: pool},
 			idH.Require)
-		finance.Routes(r, finance.Deps{Store: fstore}, idH.Require)
-		services.Routes(r, services.Deps{Store: svcstore, Bus: bus},
+		finance.Routes(r, finance.Deps{Store: fstore, DB: pool}, idH.Require)
+		services.Routes(r, services.Deps{Store: svcstore, Bus: bus, DB: pool},
 			idH.Require)
-		manufacturing.Routes(r, manufacturing.Deps{Store: mfstore, Ledger: cstore, Bus: bus},
+		manufacturing.Routes(r, manufacturing.Deps{Store: mfstore, Ledger: cstore, Bus: bus, DB: pool},
 			idH.Require)
-		hr.Routes(r, hr.Deps{Store: hrstore, Finance: fstore, Bus: bus}, idH.Require)
+		hr.Routes(r, hr.Deps{Store: hrstore, Finance: fstore, Bus: bus, DB: pool}, idH.Require)
 		posstore := pos.NewPGStore(pool)
 		var walkinOrg int64
 		if v := os.Getenv("FERP_POS_WALKIN_ORG"); v != "" {
 			_, _ = fmt.Sscanf(v, "%d", &walkinOrg)
 		}
-		pos.Routes(r, pos.Deps{Store: posstore, Catalog: cstore, Sales: sstore, WalkinOrg: walkinOrg, Bus: bus},
+		pos.Routes(r, pos.Deps{Store: posstore, Catalog: cstore, Sales: sstore, WalkinOrg: walkinOrg, Bus: bus, DB: pool},
 			idH.Require)
-		reporting.Routes(r, reporting.Deps{Ledger: fstore, Billing: sstore, Stock: cstore, Orgs: pstore},
+		reporting.Routes(r, reporting.Deps{Ledger: fstore, Billing: sstore, Stock: cstore, Orgs: pstore, DB: pool},
 			idH.Require)
 		paystore := payments.NewPGStore(pool)
 		payreg := payments.NewRegistry(
 			payments.NewOnlineProvider(payments.ProviderStripe),
 			payments.NewOnlineProvider(payments.ProviderPayPal))
 		payments.Routes(r, payments.Deps{Store: paystore, Providers: payreg,
-			WebhookSecret: payments.WebhookSecretFromEnv(), Bus: bus},
+			WebhookSecret: payments.WebhookSecretFromEnv(), Bus: bus, DB: pool},
 			idH.Require)
-		booking.Routes(r, booking.Deps{Store: booking.NewPGStore(pool), Bus: bus},
+		booking.Routes(r, booking.Deps{Store: booking.NewPGStore(pool), Bus: bus, DB: pool},
 			idH.Require)
-		survey.Routes(r, survey.Deps{Store: survey.NewPGStore(pool), Bus: bus},
+		survey.Routes(r, survey.Deps{Store: survey.NewPGStore(pool), Bus: bus, DB: pool},
 			idH.Require)
-		members.Routes(r, members.Deps{Store: members.NewPGStore(pool), Bus: bus},
+		members.Routes(r, members.Deps{Store: members.NewPGStore(pool), Bus: bus, DB: pool},
 			idH.Require)
-		assets.Routes(r, assets.Deps{Store: assets.NewPGStore(pool), Bus: bus},
+		assets.Routes(r, assets.Deps{Store: assets.NewPGStore(pool), Bus: bus, DB: pool},
 			idH.Require)
-		kb.Routes(r, kb.Deps{Store: kb.NewPGStore(pool), Bus: bus},
+		kb.Routes(r, kb.Deps{Store: kb.NewPGStore(pool), Bus: bus, DB: pool},
 			idH.Require)
-		events.Routes(r, events.Deps{Store: events.NewPGStore(pool), Bus: bus},
+		events.Routes(r, events.Deps{Store: events.NewPGStore(pool), Bus: bus, DB: pool},
 			idH.Require)
-		dataio.Routes(r, dataio.Deps{Orgs: pstore, Products: cstore, Bus: bus},
+		dataio.Routes(r, dataio.Deps{Orgs: pstore, Products: cstore, Bus: bus, DB: pool},
 			idH.Require)
-		fx.Routes(r, fx.Deps{Store: fx.NewPGStore(pool), Bus: bus}, idH.Require)
-		fx.Routes(r, fx.Deps{Store: fx.NewPGStore(pool), Bus: bus}, idH.Require)
-		sepa.Routes(r, sepa.Deps{Store: sepa.NewPGStore(pool), Bus: bus},
+		fx.Routes(r, fx.Deps{Store: fx.NewPGStore(pool), Bus: bus, DB: pool}, idH.Require)
+		fx.Routes(r, fx.Deps{Store: fx.NewPGStore(pool), Bus: bus, DB: pool}, idH.Require)
+		sepa.Routes(r, sepa.Deps{Store: sepa.NewPGStore(pool), Bus: bus, DB: pool},
 			idH.Require)
-		inbound.Routes(r, inbound.Deps{Store: inbound.NewPGStore(pool), Tickets: svcstore, Bus: bus},
+		inbound.Routes(r, inbound.Deps{Store: inbound.NewPGStore(pool), Tickets: svcstore, Bus: bus, DB: pool},
 			idH.Require)
-		agenda.Routes(r, agenda.Deps{Store: agenda.NewPGStore(pool), Bus: bus},
+		agenda.Routes(r, agenda.Deps{Store: agenda.NewPGStore(pool), Bus: bus, DB: pool},
 			idH.Require)
 		agstore := agenda.NewPGStore(pool)
 		reminderSecs := 300
@@ -296,7 +296,7 @@ func run() error {
 			}
 		}
 		if reminderSecs > 0 {
-			worker := &agenda.Worker{Store: agstore,
+			worker := &agenda.Worker{Store: agstore, DB: pool,
 				Interval: time.Duration(reminderSecs) * time.Second,
 				Logger:   log.Default()}
 			go worker.Run(ctx)
@@ -335,12 +335,12 @@ func run() error {
 
 // seedAdmin ensures the bootstrap administrator exists (Dolibarr install-step
 // admin creation equivalent). Skipped when FERP_ADMIN_PASSWORD is unset.
-func seedAdmin(ctx context.Context, cfg platform.Config, store *identity.PGStore) error {
+func seedAdmin(ctx context.Context, cfg platform.Config, db platform.DBTX, store *identity.PGStore) error {
 	if cfg.AdminPassword == "" {
 		log.Print("forgeerp: FERP_ADMIN_PASSWORD unset, skipping admin seed")
 		return nil
 	}
-	_, err := store.UserByLogin(ctx, 1, "admin")
+	_, err := store.UserByLogin(ctx, db, 1, "admin")
 	if err == nil {
 		return nil // already seeded
 	}
@@ -354,7 +354,7 @@ func seedAdmin(ctx context.Context, cfg platform.Config, store *identity.PGStore
 	u := &identity.User{EntityID: 1, Login: "admin", Email: cfg.AdminEmail,
 		FirstName: "Forge", LastName: "Admin", Status: identity.UserActive,
 		PasswordHash: hash, IsAdmin: true}
-	if err := store.CreateUser(ctx, u); err != nil {
+	if err := store.CreateUser(ctx, db, u); err != nil {
 		return err
 	}
 	log.Printf("forgeerp: seeded admin user %q", cfg.AdminEmail)
@@ -363,8 +363,8 @@ func seedAdmin(ctx context.Context, cfg platform.Config, store *identity.PGStore
 
 // seedDemoOrgs inserts a minimal demo dataset (one customer + one supplier with
 // contacts) when the organizations table is empty. Development/demo only.
-func seedDemoOrgs(ctx context.Context, store *partners.PGStore) error {
-	existing, err := store.ListOrgs(ctx, 1, 1, 0)
+func seedDemoOrgs(ctx context.Context, db platform.DBTX, store *partners.PGStore) error {
+	existing, err := store.ListOrgs(ctx, db, 1, 1, 0)
 	if err != nil {
 		return err
 	}
@@ -381,7 +381,7 @@ func seedDemoOrgs(ctx context.Context, store *partners.PGStore) error {
 		if err := demo[i].Validate(); err != nil {
 			return err
 		}
-		if err := store.CreateOrg(ctx, &demo[i]); err != nil {
+		if err := store.CreateOrg(ctx, db, &demo[i]); err != nil {
 			return err
 		}
 	}
@@ -390,7 +390,7 @@ func seedDemoOrgs(ctx context.Context, store *partners.PGStore) error {
 	if err := contact.Validate(); err != nil {
 		return err
 	}
-	if err := store.CreateContact(ctx, contact); err != nil {
+	if err := store.CreateContact(ctx, db, contact); err != nil {
 		return err
 	}
 	log.Print("forgeerp: seeded demo organizations")
@@ -399,8 +399,8 @@ func seedDemoOrgs(ctx context.Context, store *partners.PGStore) error {
 
 // seedDemoCatalog inserts a demo warehouse + products with opening stock.
 // Development/demo only.
-func seedDemoCatalog(ctx context.Context, store *catalog.PGStore) error {
-	existing, err := store.ListProducts(ctx, 1, 1, 0)
+func seedDemoCatalog(ctx context.Context, db platform.DBTX, store *catalog.PGStore) error {
+	existing, err := store.ListProducts(ctx, db, 1, 1, 0)
 	if err != nil {
 		return err
 	}
@@ -411,7 +411,7 @@ func seedDemoCatalog(ctx context.Context, store *catalog.PGStore) error {
 	if err := w.Validate(); err != nil {
 		return err
 	}
-	if err := store.CreateWarehouse(ctx, w); err != nil {
+	if err := store.CreateWarehouse(ctx, db, w); err != nil {
 		return err
 	}
 	demo := []catalog.Product{
@@ -424,11 +424,11 @@ func seedDemoCatalog(ctx context.Context, store *catalog.PGStore) error {
 		if err := demo[i].Validate(); err != nil {
 			return err
 		}
-		if err := store.CreateProduct(ctx, &demo[i]); err != nil {
+		if err := store.CreateProduct(ctx, db, &demo[i]); err != nil {
 			return err
 		}
 	}
-	if _, err := store.AppendMovement(ctx, &catalog.StockMovement{EntityID: 1,
+	if _, err := store.AppendMovement(ctx, db, &catalog.StockMovement{EntityID: 1,
 		ProductID: demo[0].ID, WarehouseID: w.ID, Qty: 100, UnitCost: 1200,
 		Reason: catalog.ReasonReceipt, Ref: "OPENING"}, false); err != nil {
 		return err
@@ -439,19 +439,19 @@ func seedDemoCatalog(ctx context.Context, store *catalog.PGStore) error {
 
 // seedDemoSales inserts a demo quote-to-cash chain (proposal → order → shipment →
 // invoice, partially paid) when no sales documents exist. Development/demo only.
-func seedDemoSales(ctx context.Context, sstore *sales.PGStore, pstore *partners.PGStore, cstore *catalog.PGStore) error {
-	existing, err := sstore.ListDocs(ctx, 1, "invoice", 1, 0)
+func seedDemoSales(ctx context.Context, db platform.DBTX, sstore *sales.PGStore, pstore *partners.PGStore, cstore *catalog.PGStore) error {
+	existing, err := sstore.ListDocs(ctx, db, 1, "invoice", 1, 0)
 	if err != nil {
 		return err
 	}
 	if len(existing) > 0 {
 		return nil
 	}
-	orgs, err := pstore.ListOrgs(ctx, 1, 1, 0)
+	orgs, err := pstore.ListOrgs(ctx, db, 1, 1, 0)
 	if err != nil || len(orgs) == 0 {
 		return err
 	}
-	prods, err := cstore.ListProducts(ctx, 1, 1, 0)
+	prods, err := cstore.ListProducts(ctx, db, 1, 1, 0)
 	if err != nil || len(prods) == 0 {
 		return err
 	}
@@ -463,15 +463,15 @@ func seedDemoSales(ctx context.Context, sstore *sales.PGStore, pstore *partners.
 			Currency: "USD", RateToBase: 1000000, SourceType: srcT, SourceID: srcID, Lines: lines}
 	}
 	prop := mkDoc(documents.TypeProposal, "", 0)
-	if err := sstore.CreateDoc(ctx, prop, ym); err != nil {
+	if err := sstore.CreateDoc(ctx, db, prop, ym); err != nil {
 		return err
 	}
-	if _, err := sstore.SetStatus(ctx, 1, prop.ID, sales.ProposalSigned); err != nil {
+	if _, err := sstore.SetStatus(ctx, db, 1, prop.ID, sales.ProposalSigned); err != nil {
 		// Signed requires validated first; walk the chain explicitly.
-		if _, err := sstore.SetStatus(ctx, 1, prop.ID, sales.ProposalValidated); err != nil {
+		if _, err := sstore.SetStatus(ctx, db, 1, prop.ID, sales.ProposalValidated); err != nil {
 			return err
 		}
-		if _, err := sstore.SetStatus(ctx, 1, prop.ID, sales.ProposalSigned); err != nil {
+		if _, err := sstore.SetStatus(ctx, db, 1, prop.ID, sales.ProposalSigned); err != nil {
 			return err
 		}
 	}
@@ -480,10 +480,10 @@ func seedDemoSales(ctx context.Context, sstore *sales.PGStore, pstore *partners.
 		return err
 	}
 	ord := &next
-	if err := sstore.CreateDoc(ctx, ord, ym); err != nil {
+	if err := sstore.CreateDoc(ctx, db, ord, ym); err != nil {
 		return err
 	}
-	if _, err := sstore.SetStatus(ctx, 1, ord.ID, sales.OrderValidated); err != nil {
+	if _, err := sstore.SetStatus(ctx, db, 1, ord.ID, sales.OrderValidated); err != nil {
 		return err
 	}
 	nx2, err := sales.Convert(*ord, documents.TypeInvoice)
@@ -491,19 +491,19 @@ func seedDemoSales(ctx context.Context, sstore *sales.PGStore, pstore *partners.
 		return err
 	}
 	inv := &nx2
-	if err := sstore.CreateDoc(ctx, inv, ym); err != nil {
+	if err := sstore.CreateDoc(ctx, db, inv, ym); err != nil {
 		return err
 	}
-	if _, err := sstore.SetStatus(ctx, 1, inv.ID, sales.InvoiceValidated); err != nil {
+	if _, err := sstore.SetStatus(ctx, db, 1, inv.ID, sales.InvoiceValidated); err != nil {
 		return err
 	}
-	bal, err := sstore.InvoiceBalance(ctx, 1, inv.ID)
+	bal, err := sstore.InvoiceBalance(ctx, db, 1, inv.ID)
 	if err != nil {
 		return err
 	}
 	pay := &sales.Payment{EntityID: 1, OrgID: orgs[0].ID, Amount: bal / 2,
 		Currency: "USD", Method: "transfer", PaidAt: time.Now().UTC()}
-	if _, err := sstore.RecordPayment(ctx, pay, []int64{inv.ID}, ym); err != nil {
+	if _, err := sstore.RecordPayment(ctx, db, pay, []int64{inv.ID}, ym); err != nil {
 		return err
 	}
 	log.Print("forgeerp: seeded demo sales chain")
@@ -514,8 +514,8 @@ func seedDemoSales(ctx context.Context, sstore *sales.PGStore, pstore *partners.
 // year, and a demo bank account. Development/demo only. Idempotent: skips when
 // any chart accounts exist (trial balance stays empty until entries post, so it
 // must not be used as the emptiness check).
-func seedDemoFinance(ctx context.Context, store *finance.PGStore) error {
-	existing, err := store.Accounts(ctx, 1)
+func seedDemoFinance(ctx context.Context, db platform.DBTX, store *finance.PGStore) error {
+	existing, err := store.Accounts(ctx, db, 1)
 	if err != nil {
 		return err
 	}
@@ -531,7 +531,7 @@ func seedDemoFinance(ctx context.Context, store *finance.PGStore) error {
 		{EntityID: 1, Code: "445700", Label: "VAT collected", Type: "liability"},
 	}
 	for i := range accts {
-		if err := store.CreateAccount(ctx, &accts[i]); err != nil {
+		if err := store.CreateAccount(ctx, db, &accts[i]); err != nil {
 			return err
 		}
 	}
@@ -541,7 +541,7 @@ func seedDemoFinance(ctx context.Context, store *finance.PGStore) error {
 		{EntityID: 1, Code: "BNK", Label: "Bank"},
 	} {
 		jj := j
-		if err := store.CreateJournal(ctx, &jj); err != nil {
+		if err := store.CreateJournal(ctx, db, &jj); err != nil {
 			return err
 		}
 	}
@@ -549,11 +549,11 @@ func seedDemoFinance(ctx context.Context, store *finance.PGStore) error {
 	fy := &finance.FiscalYear{EntityID: 1, Label: "FY", Locked: false,
 		StartDate: time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC),
 		EndDate:   time.Date(now.Year(), 12, 31, 23, 59, 59, 0, time.UTC)}
-	if err := store.CreateFiscalYear(ctx, fy); err != nil {
+	if err := store.CreateFiscalYear(ctx, db, fy); err != nil {
 		return err
 	}
 	ba := &finance.BankAccount{EntityID: 1, Code: "BNK1", Label: "Main account"}
-	if err := store.CreateBankAccount(ctx, ba); err != nil {
+	if err := store.CreateBankAccount(ctx, db, ba); err != nil {
 		return err
 	}
 	log.Print("forgeerp: seeded demo finance")

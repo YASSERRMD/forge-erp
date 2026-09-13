@@ -16,6 +16,7 @@ import (
 type Deps struct {
 	Store Store
 	Bus   platform.Bus
+	DB    platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -81,13 +82,13 @@ func (h *Handler) CreateOrg(w http.ResponseWriter, r *http.Request) {
 	}
 	if o.ParentID != nil {
 		if err := CheckNoCycle(0, o.ParentID, func(id int64) (*int64, bool) {
-			return h.deps.Store.ParentOf(r.Context(), entityOf(r), id)
+			return h.deps.Store.ParentOf(r.Context(), h.deps.DB, entityOf(r), id)
 		}); err != nil {
 			writeErr(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
 	}
-	if err := h.deps.Store.CreateOrg(r.Context(), &o); err != nil {
+	if err := h.deps.Store.CreateOrg(r.Context(), h.deps.DB, &o); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -102,7 +103,7 @@ func (h *Handler) ListOrgs(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	list, err := h.deps.Store.ListOrgs(r.Context(), entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListOrgs(r.Context(), h.deps.DB, entityOf(r), limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -117,7 +118,7 @@ func (h *Handler) GetOrg(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	o, err := h.deps.Store.OrgByID(r.Context(), entityOf(r), id)
+	o, err := h.deps.Store.OrgByID(r.Context(), h.deps.DB, entityOf(r), id)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "organization not found")
 		return
@@ -145,13 +146,13 @@ func (h *Handler) UpdateOrg(w http.ResponseWriter, r *http.Request) {
 	}
 	if o.ParentID != nil {
 		if err := CheckNoCycle(o.ID, o.ParentID, func(pid int64) (*int64, bool) {
-			return h.deps.Store.ParentOf(r.Context(), entityOf(r), pid)
+			return h.deps.Store.ParentOf(r.Context(), h.deps.DB, entityOf(r), pid)
 		}); err != nil {
 			writeErr(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
 	}
-	if err := h.deps.Store.UpdateOrg(r.Context(), &o); err != nil {
+	if err := h.deps.Store.UpdateOrg(r.Context(), h.deps.DB, &o); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -166,7 +167,7 @@ func (h *Handler) CreateContact(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	if _, err := h.deps.Store.OrgByID(r.Context(), entityOf(r), orgID); err != nil {
+	if _, err := h.deps.Store.OrgByID(r.Context(), h.deps.DB, entityOf(r), orgID); err != nil {
 		writeErr(w, http.StatusNotFound, "organization not found")
 		return
 	}
@@ -178,7 +179,7 @@ func (h *Handler) CreateContact(w http.ResponseWriter, r *http.Request) {
 	c.ID = 0
 	c.EntityID = entityOf(r)
 	c.OrgID = orgID
-	if err := h.deps.Store.CreateContact(r.Context(), &c); err != nil {
+	if err := h.deps.Store.CreateContact(r.Context(), h.deps.DB, &c); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -193,11 +194,11 @@ func (h *Handler) ListContacts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	if _, err := h.deps.Store.OrgByID(r.Context(), entityOf(r), orgID); err != nil {
+	if _, err := h.deps.Store.OrgByID(r.Context(), h.deps.DB, entityOf(r), orgID); err != nil {
 		writeErr(w, http.StatusNotFound, "organization not found")
 		return
 	}
-	list, err := h.deps.Store.ContactsOf(r.Context(), orgID)
+	list, err := h.deps.Store.ContactsOf(r.Context(), h.deps.DB, orgID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -214,7 +215,7 @@ func (h *Handler) CreateCategory(w http.ResponseWriter, r *http.Request) {
 	}
 	c.ID = 0
 	c.EntityID = entityOf(r)
-	if err := h.deps.Store.CreateCategory(r.Context(), &c); err != nil {
+	if err := h.deps.Store.CreateCategory(r.Context(), h.deps.DB, &c); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}

@@ -21,27 +21,27 @@ func TestVariantBarcodeRules(t *testing.T) {
 	m := NewMemoryStore()
 	p := &Product{EntityID: 1, SKU: "BASE-1", Name: "Base", Type: ProductGoods,
 		Status: ProductActive}
-	if err := m.CreateProduct(ctx, p); err != nil {
+	if err := m.CreateProduct(ctx, nil, p); err != nil {
 		t.Fatalf("product: %v", err)
 	}
 	v := &Variant{EntityID: 1, ProductID: p.ID, SKU: "BASE-1-L",
 		Attributes: map[string]any{"size": "L"}, PriceDelta: 100, Barcode: "5901234123457"}
-	if err := m.CreateVariant(ctx, v); err != nil {
+	if err := m.CreateVariant(ctx, nil, v); err != nil {
 		t.Fatalf("variant: %v", err)
 	}
-	if err := m.CreateVariant(ctx, &Variant{EntityID: 1, ProductID: p.ID,
+	if err := m.CreateVariant(ctx, nil, &Variant{EntityID: 1, ProductID: p.ID,
 		SKU: "BASE-1-L"}); err == nil {
 		t.Error("duplicate variant SKU accepted")
 	}
-	if err := m.CreateVariant(ctx, &Variant{EntityID: 1, ProductID: p.ID,
+	if err := m.CreateVariant(ctx, nil, &Variant{EntityID: 1, ProductID: p.ID,
 		SKU: "BASE-1-X", Barcode: "5901234123450"}); err == nil {
 		t.Error("bad barcode accepted")
 	}
-	if err := m.CreateVariant(ctx, &Variant{EntityID: 1, ProductID: p.ID,
+	if err := m.CreateVariant(ctx, nil, &Variant{EntityID: 1, ProductID: p.ID,
 		SKU: "BASE-1-S", Barcode: ""}); err != nil {
 		t.Fatalf("barcode-less variant: %v", err)
 	}
-	list, err := m.VariantsOf(ctx, p.ID)
+	list, err := m.VariantsOf(ctx, nil, p.ID)
 	if err != nil || len(list) != 2 {
 		t.Fatalf("variants=%d err=%v", len(list), err)
 	}
@@ -52,15 +52,15 @@ func TestPGVariantFlow(t *testing.T) {
 	pool := pgtest.Pool(t)
 	st := NewPGStore(pool)
 	p := &Product{EntityID: 1, SKU: "PG-V", Name: "V", Type: ProductGoods, Status: ProductActive}
-	if err := st.CreateProduct(ctx, p); err != nil {
+	if err := st.CreateProduct(ctx, pool, p); err != nil {
 		t.Fatalf("product: %v", err)
 	}
 	v := &Variant{EntityID: 1, ProductID: p.ID, SKU: "PG-V-L",
 		Attributes: map[string]any{"size": "L"}, Barcode: "5901234123457"}
-	if err := st.CreateVariant(ctx, v); err != nil {
+	if err := st.CreateVariant(ctx, pool, v); err != nil {
 		t.Fatalf("variant: %v", err)
 	}
-	list, err := st.VariantsOf(ctx, p.ID)
+	list, err := st.VariantsOf(ctx, pool, p.ID)
 	if err != nil || len(list) != 1 || list[0].Barcode != "5901234123457" {
 		t.Fatalf("variants=%+v err=%v", list, err)
 	}

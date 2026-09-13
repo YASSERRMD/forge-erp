@@ -9,15 +9,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/go-chi/chi/v5"
 )
 
 // Deps wires handlers to persistence and the event bus.
 type Deps struct {
 	Store Store
 	Bus   platform.Bus
+	DB    platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -105,7 +106,7 @@ func (h *Handler) CreateResource(w http.ResponseWriter, r *http.Request) {
 	res.ID = 0
 	res.EntityID = entityOf(r)
 	res.Status = ResourceActive
-	if err := h.deps.Store.CreateResource(r.Context(), &res); err != nil {
+	if err := h.deps.Store.CreateResource(r.Context(), h.deps.DB, &res); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -114,7 +115,7 @@ func (h *Handler) CreateResource(w http.ResponseWriter, r *http.Request) {
 
 // ListResources lists resources within the caller's entity.
 func (h *Handler) ListResources(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListResources(r.Context(), entityOf(r))
+	list, err := h.deps.Store.ListResources(r.Context(), h.deps.DB, entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -132,7 +133,7 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 	b.ID = 0
 	b.EntityID = entityOf(r)
 	b.Status = BookingBooked
-	if err := h.deps.Store.CreateBooking(r.Context(), &b); err != nil {
+	if err := h.deps.Store.CreateBooking(r.Context(), h.deps.DB, &b); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -154,7 +155,7 @@ func (h *Handler) ListBookings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "valid from/to (RFC3339) required")
 		return
 	}
-	list, err := h.deps.Store.BookingsOf(r.Context(), entityOf(r), resID, from, to)
+	list, err := h.deps.Store.BookingsOf(r.Context(), h.deps.DB, entityOf(r), resID, from, to)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -174,7 +175,7 @@ func (h *Handler) SetBookingStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	b, err := h.deps.Store.SetBookingStatus(r.Context(), entityOf(r), id, BookingStatus(in.Status), in.RowVersion)
+	b, err := h.deps.Store.SetBookingStatus(r.Context(), h.deps.DB, entityOf(r), id, BookingStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

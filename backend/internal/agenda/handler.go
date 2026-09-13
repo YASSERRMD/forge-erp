@@ -9,15 +9,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/go-chi/chi/v5"
 )
 
 // Deps wires handlers to persistence and the event bus.
 type Deps struct {
 	Store Store
 	Bus   platform.Bus
+	DB    platform.DBTX
 	Now   func() time.Time
 }
 
@@ -112,7 +113,7 @@ func (h *Handler) CreateEvent(w http.ResponseWriter, r *http.Request) {
 	e.ID = 0
 	e.EntityID = entityOf(r)
 	e.Status = EventScheduled
-	if err := h.deps.Store.CreateEvent(r.Context(), &e); err != nil {
+	if err := h.deps.Store.CreateEvent(r.Context(), h.deps.DB, &e); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -133,7 +134,7 @@ func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	list, err := h.deps.Store.ListEvents(r.Context(), entityOf(r), from, to, limit, 0)
+	list, err := h.deps.Store.ListEvents(r.Context(), h.deps.DB, entityOf(r), from, to, limit, 0)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -153,7 +154,7 @@ func (h *Handler) SetEventStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	e, err := h.deps.Store.SetEventStatus(r.Context(), entityOf(r), id, EventStatus(in.Status), in.RowVersion)
+	e, err := h.deps.Store.SetEventStatus(r.Context(), h.deps.DB, entityOf(r), id, EventStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -165,14 +166,14 @@ func (h *Handler) SetEventStatus(w http.ResponseWriter, r *http.Request) {
 // hits this; each reminder fires exactly once via MarkReminded).
 func (h *Handler) DispatchReminders(w http.ResponseWriter, r *http.Request) {
 	now := h.now()
-	due, err := h.deps.Store.DueReminders(r.Context(), entityOf(r), now, 100)
+	due, err := h.deps.Store.DueReminders(r.Context(), h.deps.DB, entityOf(r), now, 100)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "dispatch failed")
 		return
 	}
 	sent := 0
 	for _, e := range due {
-		if err := h.deps.Store.MarkReminded(r.Context(), entityOf(r), e.ID); err != nil {
+		if err := h.deps.Store.MarkReminded(r.Context(), h.deps.DB, entityOf(r), e.ID); err != nil {
 			continue
 		}
 		h.publish(r.Context(), entityOf(r), "forgeerp.agenda.reminder.due.v1", "event", e.ID)

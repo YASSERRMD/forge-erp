@@ -82,10 +82,10 @@ func TestPGOrgRoundTrip(t *testing.T) {
 	pool := pgtest.Pool(t)
 	pst := partners.NewPGStore(pool)
 	o := &partners.Organization{EntityID: 1, Name: "PG IO", IsCustomer: true, CustomerCode: "PGIO"}
-	if err := pst.CreateOrg(context.Background(), o); err != nil {
+	if err := pst.CreateOrg(context.Background(), pool, o); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	list, err := pst.ListOrgs(context.Background(), 1, 50, 0)
+	list, err := pst.ListOrgs(context.Background(), pool, 1, 50, 0)
 	if err != nil || len(list) != 1 || list[0].CustomerCode != "PGIO" {
 		t.Fatalf("list=%+v err=%v", list, err)
 	}

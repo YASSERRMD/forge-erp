@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // Payment records money against one or more invoices.
@@ -28,17 +29,17 @@ type Payment struct {
 
 // Store is the persistence contract for the sales context.
 type Store interface {
-	CreateDoc(ctx context.Context, d *Document, yearMonth string) error
-	DocByID(ctx context.Context, entityID, id int64) (Document, error)
-	ListDocs(ctx context.Context, entityID int64, t documents.DocType, limit, offset int) ([]Document, error)
+	CreateDoc(ctx context.Context, db platform.DBTX, d *Document, yearMonth string) error
+	DocByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Document, error)
+	ListDocs(ctx context.Context, db platform.DBTX, entityID int64, t documents.DocType, limit, offset int) ([]Document, error)
 	// SetStatus enforces the kernel transition table before persisting.
-	SetStatus(ctx context.Context, entityID, id int64, to int16) (Document, error)
+	SetStatus(ctx context.Context, db platform.DBTX, entityID, id int64, to int16) (Document, error)
 	// UpdateDocLines replaces a DRAFT document's lines and recomputed totals.
-	UpdateDocLines(ctx context.Context, entityID, id int64, lines []documents.Line) (Document, error)
-	RecordPayment(ctx context.Context, p *Payment, invoiceIDs []int64, yearMonth string) ([]int64, error)
-	InvoiceBalance(ctx context.Context, entityID, invoiceID int64) (int64, error)
+	UpdateDocLines(ctx context.Context, db platform.DBTX, entityID, id int64, lines []documents.Line) (Document, error)
+	RecordPayment(ctx context.Context, db platform.DBTX, p *Payment, invoiceIDs []int64, yearMonth string) ([]int64, error)
+	InvoiceBalance(ctx context.Context, db platform.DBTX, entityID, invoiceID int64) (int64, error)
 	// ApplyCredit allocates a validated credit note against an invoice.
-	ApplyCredit(ctx context.Context, entityID, invoiceID, creditID, amount int64) error
+	ApplyCredit(ctx context.Context, db platform.DBTX, entityID, invoiceID, creditID, amount int64) error
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -84,9 +85,9 @@ func loadLines(ctx context.Context, q queryFunc, docID int64) ([]documents.Line,
 }
 
 // nextRefLocked bumps the monthly counter inside the caller's transaction.
-func nextRefLocked(ctx context.Context, tx pgx.Tx, entityID int64, t documents.DocType, ym string) (string, error) {
+func nextRefLocked(ctx context.Context, db platform.DBTX, entityID int64, t documents.DocType, ym string) (string, error) {
 	var seq int64
-	err := tx.QueryRow(ctx, `INSERT INTO ferp_doc_counters (entity_id, type, year_month, next_seq)
+	err := db.QueryRow(ctx, `INSERT INTO ferp_doc_counters (entity_id, type, year_month, next_seq)
 		VALUES ($1,$2,$3,2) ON CONFLICT (entity_id, type, year_month)
 		DO UPDATE SET next_seq=ferp_doc_counters.next_seq+1
 		RETURNING next_seq-1`, entityID, string(t), ym).Scan(&seq)
@@ -96,7 +97,7 @@ func nextRefLocked(ctx context.Context, tx pgx.Tx, entityID int64, t documents.D
 	return documents.NextRef(t, ym, seq), nil
 }
 
-func (s *PGStore) CreateDoc(ctx context.Context, d *Document, yearMonth string) error {
+func (s *PGStore) CreateDoc(ctx context.Context, db platform.DBTX, d *Document, yearMonth string) error {
 	if err := d.Validate(); err != nil {
 		return err
 	}
@@ -144,12 +145,12 @@ func nullProduct(id int64) any {
 	return id
 }
 
-func (s *PGStore) DocByID(ctx context.Context, entityID, id int64) (Document, error) {
-	d, err := scanDoc(s.pool.QueryRow(ctx, `SELECT `+docCols+` FROM ferp_documents WHERE id=$1 AND entity_id=$2`, id, entityID))
+func (s *PGStore) DocByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Document, error) {
+	d, err := scanDoc(db.QueryRow(ctx, `SELECT `+docCols+` FROM ferp_documents WHERE id=$1 AND entity_id=$2`, id, entityID))
 	if err != nil {
 		return Document{}, err
 	}
-	lines, err := loadLines(ctx, s.pool.Query, id)
+	lines, err := loadLines(ctx, db.Query, id)
 	if err != nil {
 		return Document{}, err
 	}
@@ -157,8 +158,8 @@ func (s *PGStore) DocByID(ctx context.Context, entityID, id int64) (Document, er
 	return d, nil
 }
 
-func (s *PGStore) ListDocs(ctx context.Context, entityID int64, t documents.DocType, limit, offset int) ([]Document, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+docCols+` FROM ferp_documents
+func (s *PGStore) ListDocs(ctx context.Context, db platform.DBTX, entityID int64, t documents.DocType, limit, offset int) ([]Document, error) {
+	rows, err := db.Query(ctx, `SELECT `+docCols+` FROM ferp_documents
 		WHERE entity_id=$1 AND type=$2 ORDER BY id DESC LIMIT $3 OFFSET $4`,
 		entityID, string(t), limit, offset)
 	if err != nil {
@@ -176,15 +177,15 @@ func (s *PGStore) ListDocs(ctx context.Context, entityID int64, t documents.DocT
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetStatus(ctx context.Context, entityID, id int64, to int16) (Document, error) {
-	d, err := s.DocByID(ctx, entityID, id)
+func (s *PGStore) SetStatus(ctx context.Context, db platform.DBTX, entityID, id int64, to int16) (Document, error) {
+	d, err := s.DocByID(ctx, db, entityID, id)
 	if err != nil {
 		return Document{}, err
 	}
 	if err := d.MoveTo(to); err != nil {
 		return Document{}, err
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_documents SET status=$1, updated_at=now(), row_version=row_version+1
+	tag, err := db.Exec(ctx, `UPDATE ferp_documents SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, d.RowVersion)
 	if err != nil {
 		return Document{}, err
@@ -199,7 +200,7 @@ func (s *PGStore) SetStatus(ctx context.Context, entityID, id int64, to int16) (
 
 // UpdateDocLines replaces a DRAFT document's lines with recomputed totals.
 // Non-draft documents are rejected (validated docs are API-immutable).
-func (s *PGStore) UpdateDocLines(ctx context.Context, entityID, id int64, lines []documents.Line) (Document, error) {
+func (s *PGStore) UpdateDocLines(ctx context.Context, db platform.DBTX, entityID, id int64, lines []documents.Line) (Document, error) {
 	if len(lines) == 0 {
 		return Document{}, errors.New("sales: document requires at least one line")
 	}
@@ -241,10 +242,10 @@ func (s *PGStore) UpdateDocLines(ctx context.Context, entityID, id int64, lines 
 	if err := tx.Commit(ctx); err != nil {
 		return Document{}, err
 	}
-	return s.DocByID(ctx, entityID, id)
+	return s.DocByID(ctx, db, entityID, id)
 }
 
-func (s *PGStore) RecordPayment(ctx context.Context, p *Payment, invoiceIDs []int64, yearMonth string) ([]int64, error) {
+func (s *PGStore) RecordPayment(ctx context.Context, db platform.DBTX, p *Payment, invoiceIDs []int64, yearMonth string) ([]int64, error) {
 	if p.Amount <= 0 {
 		return nil, errors.New("sales: payment amount must be positive")
 	}
@@ -316,29 +317,29 @@ func (s *PGStore) RecordPayment(ctx context.Context, p *Payment, invoiceIDs []in
 	return applied, tx.Commit(ctx)
 }
 
-func (s *PGStore) InvoiceBalance(ctx context.Context, entityID, invoiceID int64) (int64, error) {
+func (s *PGStore) InvoiceBalance(ctx context.Context, db platform.DBTX, entityID, invoiceID int64) (int64, error) {
 	var gross, paid int64
-	if err := s.pool.QueryRow(ctx, `SELECT total_gross FROM ferp_documents WHERE id=$1 AND entity_id=$2 AND type='invoice'`, invoiceID, entityID).Scan(&gross); err != nil {
+	if err := db.QueryRow(ctx, `SELECT total_gross FROM ferp_documents WHERE id=$1 AND entity_id=$2 AND type='invoice'`, invoiceID, entityID).Scan(&gross); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, identity.ErrNotFound
 		}
 		return 0, err
 	}
-	_ = s.pool.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0) FROM ferp_payment_allocations WHERE invoice_id=$1`, invoiceID).Scan(&paid)
+	_ = db.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0) FROM ferp_payment_allocations WHERE invoice_id=$1`, invoiceID).Scan(&paid)
 	var credited int64
-	_ = s.pool.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0) FROM ferp_credit_allocations WHERE invoice_id=$1`, invoiceID).Scan(&credited)
+	_ = db.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0) FROM ferp_credit_allocations WHERE invoice_id=$1`, invoiceID).Scan(&credited)
 	return gross - paid - credited, nil
 }
 
 // ApplyCredit allocates a validated credit note against an invoice balance.
-func (s *PGStore) ApplyCredit(ctx context.Context, entityID, invoiceID, creditID, amount int64) error {
+func (s *PGStore) ApplyCredit(ctx context.Context, db platform.DBTX, entityID, invoiceID, creditID, amount int64) error {
 	if amount <= 0 {
 		return errors.New("sales: credit amount must be positive")
 	}
 	var ctype string
 	var cstatus int16
 	var ctotal int64
-	err := s.pool.QueryRow(ctx, `SELECT type, status, total_gross FROM ferp_documents WHERE id=$1 AND entity_id=$2`, creditID, entityID).Scan(&ctype, &cstatus, &ctotal)
+	err := db.QueryRow(ctx, `SELECT type, status, total_gross FROM ferp_documents WHERE id=$1 AND entity_id=$2`, creditID, entityID).Scan(&ctype, &cstatus, &ctotal)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return identity.ErrNotFound
 	}
@@ -348,7 +349,7 @@ func (s *PGStore) ApplyCredit(ctx context.Context, entityID, invoiceID, creditID
 	if ctype != string(documents.TypeCreditNote) || cstatus != 1 {
 		return errors.New("sales: credit note must be validated")
 	}
-	bal, err := s.InvoiceBalance(ctx, entityID, invoiceID)
+	bal, err := s.InvoiceBalance(ctx, db, entityID, invoiceID)
 	if err != nil {
 		return err
 	}
@@ -358,7 +359,7 @@ func (s *PGStore) ApplyCredit(ctx context.Context, entityID, invoiceID, creditID
 	if amount > ctotal {
 		return fmt.Errorf("sales: credit %d exceeds note total %d", amount, ctotal)
 	}
-	_, err = s.pool.Exec(ctx, `INSERT INTO ferp_credit_allocations (invoice_id, credit_id, amount)
+	_, err = db.Exec(ctx, `INSERT INTO ferp_credit_allocations (invoice_id, credit_id, amount)
 		VALUES ($1,$2,$3) ON CONFLICT (invoice_id, credit_id)
 		DO UPDATE SET amount=ferp_credit_allocations.amount+EXCLUDED.amount`,
 		invoiceID, creditID, amount)
@@ -391,7 +392,7 @@ func (m *MemoryStore) ref(entityID int64, kind, ym string) string {
 	return fmt.Sprintf("%s-%s-%04d", prefix, ym, m.counters[k])
 }
 
-func (m *MemoryStore) CreateDoc(_ context.Context, d *Document, yearMonth string) error {
+func (m *MemoryStore) CreateDoc(_ context.Context, _ platform.DBTX, d *Document, yearMonth string) error {
 	if err := d.Validate(); err != nil {
 		return err
 	}
@@ -409,7 +410,7 @@ func (m *MemoryStore) CreateDoc(_ context.Context, d *Document, yearMonth string
 	return nil
 }
 
-func (m *MemoryStore) DocByID(_ context.Context, entityID, id int64) (Document, error) {
+func (m *MemoryStore) DocByID(_ context.Context, _ platform.DBTX, entityID, id int64) (Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, ok := m.docs[id]
@@ -419,7 +420,7 @@ func (m *MemoryStore) DocByID(_ context.Context, entityID, id int64) (Document, 
 	return d, nil
 }
 
-func (m *MemoryStore) ListDocs(_ context.Context, entityID int64, t documents.DocType, limit, offset int) ([]Document, error) {
+func (m *MemoryStore) ListDocs(_ context.Context, _ platform.DBTX, entityID int64, t documents.DocType, limit, offset int) ([]Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Document
@@ -438,7 +439,7 @@ func (m *MemoryStore) ListDocs(_ context.Context, entityID int64, t documents.Do
 	return out, nil
 }
 
-func (m *MemoryStore) SetStatus(_ context.Context, entityID, id int64, to int16) (Document, error) {
+func (m *MemoryStore) SetStatus(_ context.Context, _ platform.DBTX, entityID, id int64, to int16) (Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, ok := m.docs[id]
@@ -455,7 +456,7 @@ func (m *MemoryStore) SetStatus(_ context.Context, entityID, id int64, to int16)
 }
 
 // UpdateDocLines replaces a DRAFT document's lines with recomputed totals.
-func (m *MemoryStore) UpdateDocLines(_ context.Context, entityID, id int64, lines []documents.Line) (Document, error) {
+func (m *MemoryStore) UpdateDocLines(_ context.Context, _ platform.DBTX, entityID, id int64, lines []documents.Line) (Document, error) {
 	if len(lines) == 0 {
 		return Document{}, errors.New("sales: document requires at least one line")
 	}
@@ -479,7 +480,7 @@ func (m *MemoryStore) UpdateDocLines(_ context.Context, entityID, id int64, line
 	return d, nil
 }
 
-func (m *MemoryStore) RecordPayment(_ context.Context, p *Payment, invoiceIDs []int64, yearMonth string) ([]int64, error) {
+func (m *MemoryStore) RecordPayment(_ context.Context, _ platform.DBTX, p *Payment, invoiceIDs []int64, yearMonth string) ([]int64, error) {
 	if p.Amount <= 0 {
 		return nil, errors.New("sales: payment amount must be positive")
 	}
@@ -522,7 +523,7 @@ func (m *MemoryStore) RecordPayment(_ context.Context, p *Payment, invoiceIDs []
 	return applied, nil
 }
 
-func (m *MemoryStore) InvoiceBalance(_ context.Context, entityID, invoiceID int64) (int64, error) {
+func (m *MemoryStore) InvoiceBalance(_ context.Context, _ platform.DBTX, entityID, invoiceID int64) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	inv, ok := m.docs[invoiceID]
@@ -533,7 +534,7 @@ func (m *MemoryStore) InvoiceBalance(_ context.Context, entityID, invoiceID int6
 }
 
 // ApplyCredit allocates a validated credit note against an invoice balance.
-func (m *MemoryStore) ApplyCredit(_ context.Context, entityID, invoiceID, creditID, amount int64) error {
+func (m *MemoryStore) ApplyCredit(_ context.Context, _ platform.DBTX, entityID, invoiceID, creditID, amount int64) error {
 	if amount <= 0 {
 		return errors.New("sales: credit amount must be positive")
 	}

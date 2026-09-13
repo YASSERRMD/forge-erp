@@ -16,7 +16,7 @@ func TestIntraEU(t *testing.T) {
 	mkOrg := func(name, cc string) int64 {
 		o := &partners.Organization{EntityID: 1, Name: name, IsCustomer: true,
 			CustomerCode: name, Address: partners.Address{Country: cc}}
-		if err := pstore.CreateOrg(ctx, o); err != nil {
+		if err := pstore.CreateOrg(ctx, nil, o); err != nil {
 			t.Fatalf("org: %v", err)
 		}
 		return o.ID
@@ -28,17 +28,17 @@ func TestIntraEU(t *testing.T) {
 		d := &sales.Document{EntityID: 1, Type: documents.TypeInvoice, OrgID: org,
 			Currency: "EUR", RateToBase: 1000000,
 			Lines: []documents.Line{{ProductID: 1, Label: "x", Qty: 1, UnitNet: 1000, VATRateBps: 2000}}}
-		if err := billing.CreateDoc(ctx, d, "202609"); err != nil {
+		if err := billing.CreateDoc(ctx, nil, d, "202609"); err != nil {
 			t.Fatalf("invoice: %v", err)
 		}
-		if _, err := billing.SetStatus(ctx, d.EntityID, d.ID, sales.InvoiceValidated); err != nil {
+		if _, err := billing.SetStatus(ctx, nil, d.EntityID, d.ID, sales.InvoiceValidated); err != nil {
 			t.Fatalf("validate: %v", err)
 		}
 	}
 	mkInv(de)
 	mkInv(fr)
 	mkInv(us)
-	rows, err := IntraEU(ctx, 1, "FR", billing, pstore)
+	rows, err := IntraEU(ctx, nil, 1, "FR", billing, pstore)
 	if err != nil {
 		t.Fatalf("intra: %v", err)
 	}
@@ -46,18 +46,18 @@ func TestIntraEU(t *testing.T) {
 		t.Fatalf("rows=%+v want single DE 1000/200", rows)
 	}
 	// Paid invoices count too.
-	docs, _ := billing.ListDocs(ctx, 1, documents.TypeInvoice, 10, 0)
+	docs, _ := billing.ListDocs(ctx, nil, 1, documents.TypeInvoice, 10, 0)
 	for _, d := range docs {
-		if _, err := billing.SetStatus(ctx, d.EntityID, d.ID, sales.InvoicePaid); err != nil {
+		if _, err := billing.SetStatus(ctx, nil, d.EntityID, d.ID, sales.InvoicePaid); err != nil {
 			t.Fatalf("pay %d: %v", d.ID, err)
 		}
 	}
-	rows, _ = IntraEU(ctx, 1, "FR", billing, pstore)
+	rows, _ = IntraEU(ctx, nil, 1, "FR", billing, pstore)
 	if len(rows) != 1 || rows[0].Net != 1000 {
 		t.Fatalf("paid rows=%+v", rows)
 	}
 	// Receivables include part-paid balances.
-	got, total, err := Receivables(ctx, 1, billing)
+	got, total, err := Receivables(ctx, nil, 1, billing)
 	if err != nil {
 		t.Fatalf("receivables: %v", err)
 	}
@@ -72,14 +72,14 @@ func TestSalesMonthlyBuckets(t *testing.T) {
 		d := &sales.Document{EntityID: 1, Type: documents.TypeInvoice, OrgID: 7,
 			Currency: "USD", RateToBase: 1000000,
 			Lines: []documents.Line{{ProductID: 1, Label: "x", Qty: 1, UnitNet: 1000, VATRateBps: 0}}}
-		if err := billing.CreateDoc(ctx, d, "202609"); err != nil {
+		if err := billing.CreateDoc(ctx, nil, d, "202609"); err != nil {
 			t.Fatalf("invoice: %v", err)
 		}
-		if _, err := billing.SetStatus(ctx, d.EntityID, d.ID, sales.InvoiceValidated); err != nil {
+		if _, err := billing.SetStatus(ctx, nil, d.EntityID, d.ID, sales.InvoiceValidated); err != nil {
 			t.Fatalf("validate: %v", err)
 		}
 	}
-	points, err := SalesMonthly(ctx, 1, billing)
+	points, err := SalesMonthly(ctx, nil, 1, billing)
 	if err != nil {
 		t.Fatalf("monthly: %v", err)
 	}

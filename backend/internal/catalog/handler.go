@@ -14,6 +14,7 @@ import (
 // Deps wires handlers to persistence, the event bus (nil-safe), and the stock policy.
 type Deps struct {
 	Store         Store
+	DB            platform.DBTX
 	Bus           platform.Bus
 	AllowNegative bool // mirrors Dolibarr's negative-stock option
 }
@@ -75,7 +76,7 @@ func (h *Handler) CreateProduct(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	if err := h.deps.Store.CreateProduct(r.Context(), &p); err != nil {
+	if err := h.deps.Store.CreateProduct(r.Context(), h.deps.DB, &p); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -93,7 +94,7 @@ func (h *Handler) ListProducts(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	list, err := h.deps.Store.ListProducts(r.Context(), entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListProducts(r.Context(), h.deps.DB, entityOf(r), limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -108,7 +109,7 @@ func (h *Handler) GetProduct(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	p, err := h.deps.Store.ProductByID(r.Context(), entityOf(r), id)
+	p, err := h.deps.Store.ProductByID(r.Context(), h.deps.DB, entityOf(r), id)
 	if err != nil || p.EntityID != entityOf(r) {
 		writeErr(w, http.StatusNotFound, "product not found")
 		return
@@ -130,7 +131,7 @@ func (h *Handler) CreateWarehouse(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	if err := h.deps.Store.CreateWarehouse(r.Context(), &wh); err != nil {
+	if err := h.deps.Store.CreateWarehouse(r.Context(), h.deps.DB, &wh); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -139,7 +140,7 @@ func (h *Handler) CreateWarehouse(w http.ResponseWriter, r *http.Request) {
 
 // ListWarehouses lists warehouses within the caller's entity.
 func (h *Handler) ListWarehouses(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListWarehouses(r.Context(), entityOf(r))
+	list, err := h.deps.Store.ListWarehouses(r.Context(), h.deps.DB, entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -166,7 +167,7 @@ func (h *Handler) AppendMovement(w http.ResponseWriter, r *http.Request) {
 	}
 	m := StockMovement{EntityID: entityOf(r), ProductID: req.ProductID, WarehouseID: req.WarehouseID,
 		LotID: req.LotID, Qty: req.Qty, UnitCost: req.UnitCost, Reason: req.Reason, Ref: req.Ref}
-	level, err := h.deps.Store.AppendMovement(r.Context(), &m, h.deps.AllowNegative)
+	level, err := h.deps.Store.AppendMovement(r.Context(), h.deps.DB, &m, h.deps.AllowNegative)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -186,7 +187,7 @@ func (h *Handler) GetLevel(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "product_id and warehouse_id required")
 		return
 	}
-	level, err := h.deps.Store.Level(r.Context(), pid, wid)
+	level, err := h.deps.Store.Level(r.Context(), h.deps.DB, pid, wid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "level failed")
 		return
@@ -215,7 +216,7 @@ func (h *Handler) Adjust(w http.ResponseWriter, r *http.Request) {
 	}
 	m := StockMovement{EntityID: entityOf(r), ProductID: req.ProductID, WarehouseID: req.WarehouseID,
 		Qty: req.Qty, UnitCost: req.UnitCost, Reason: reason, Ref: req.Ref}
-	level, err := h.deps.Store.AppendMovement(r.Context(), &m, h.deps.AllowNegative)
+	level, err := h.deps.Store.AppendMovement(r.Context(), h.deps.DB, &m, h.deps.AllowNegative)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -255,7 +256,7 @@ func (h *Handler) CreateVariant(w http.ResponseWriter, r *http.Request) {
 	v.ID = 0
 	v.EntityID = entityOf(r)
 	v.ProductID = pid
-	if err := h.deps.Store.CreateVariant(r.Context(), &v); err != nil {
+	if err := h.deps.Store.CreateVariant(r.Context(), h.deps.DB, &v); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -269,7 +270,7 @@ func (h *Handler) ListVariants(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.VariantsOf(r.Context(), pid)
+	list, err := h.deps.Store.VariantsOf(r.Context(), h.deps.DB, pid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return

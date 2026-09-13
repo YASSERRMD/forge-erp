@@ -6,6 +6,7 @@ import (
 
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 )
 
@@ -20,7 +21,7 @@ var euMembers = map[string]bool{
 
 // Orgs abstracts customer lookup for country attribution.
 type Orgs interface {
-	OrgByID(ctx context.Context, entityID, id int64) (partners.Organization, error)
+	OrgByID(ctx context.Context, db platform.DBTX, entityID, id int64) (partners.Organization, error)
 }
 
 // IntraRow is one destination-country aggregate (Dolibarr intracommreport:
@@ -34,9 +35,9 @@ type IntraRow struct {
 
 // IntraEU aggregates validated/closed invoices to EU customers outside the
 // home country (home = caller's country code, e.g. FR).
-func IntraEU(ctx context.Context, entityID int64, home string, billing Billing, orgs Orgs) ([]IntraRow, error) {
+func IntraEU(ctx context.Context, db platform.DBTX, entityID int64, home string, billing Billing, orgs Orgs) ([]IntraRow, error) {
 	home = strings.ToUpper(strings.TrimSpace(home))
-	docs, err := billing.ListDocs(ctx, entityID, documents.TypeInvoice, 500, 0)
+	docs, err := billing.ListDocs(ctx, db, entityID, documents.TypeInvoice, 500, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +47,7 @@ func IntraEU(ctx context.Context, entityID int64, home string, billing Billing, 
 		if d.Status == sales.InvoiceDraft || d.Status == 9 { // skip drafts/cancelled
 			continue
 		}
-		o, err := orgs.OrgByID(ctx, entityID, d.OrgID)
+		o, err := orgs.OrgByID(ctx, db, entityID, d.OrgID)
 		if err != nil {
 			continue // orphan invoice: excluded, never blocks the report
 		}

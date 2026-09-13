@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/go-chi/chi/v5"
 )
 
 // Middleware builds Require-style RBAC gates.
@@ -67,7 +67,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("object_id"); v != "" {
 		objectID, _ = strconv.ParseInt(v, 10, 64)
 	}
-	list, err := h.svc.Store.List(r.Context(), entityOf(r), r.URL.Query().Get("scope"), objectID)
+	list, err := h.svc.Store.List(r.Context(), h.svc.DB, entityOf(r), r.URL.Query().Get("scope"), objectID)
 	if err != nil {
 		http.Error(w, `{"error":"list failed"}`, http.StatusInternalServerError)
 		return
@@ -83,7 +83,7 @@ func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"bad id"}`, http.StatusBadRequest)
 		return
 	}
-	d, err := h.svc.Store.ByID(r.Context(), entityOf(r), id)
+	d, err := h.svc.Store.ByID(r.Context(), h.svc.DB, entityOf(r), id)
 	if err != nil || d.EntityID != entityOf(r) {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 		return
@@ -110,7 +110,7 @@ func (h *Handler) Share(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"bad id"}`, http.StatusBadRequest)
 		return
 	}
-	d, err := h.svc.Store.ByID(r.Context(), entityOf(r), id)
+	d, err := h.svc.Store.ByID(r.Context(), h.svc.DB, entityOf(r), id)
 	if err != nil || d.EntityID != entityOf(r) {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 		return
@@ -138,7 +138,7 @@ func (h *Handler) Share(w http.ResponseWriter, r *http.Request) {
 	}
 	st := &ShareToken{Token: token, EntityID: d.EntityID, DocID: d.ID,
 		ExpiresAt: time.Now().UTC().Add(time.Duration(body.ExpiresHours) * time.Hour)}
-	if err := sb.CreateShare(r.Context(), st); err != nil {
+	if err := sb.CreateShare(r.Context(), h.svc.DB, st); err != nil {
 		http.Error(w, `{"error":"share failed"}`, http.StatusInternalServerError)
 		return
 	}
@@ -161,12 +161,12 @@ func PublicShare(svc *Service) http.HandlerFunc {
 			http.Error(w, `{"error":"sharing unavailable"}`, http.StatusNotImplemented)
 			return
 		}
-		st, err := sb.ShareTarget(r.Context(), token)
+		st, err := sb.ShareTarget(r.Context(), svc.DB, token)
 		if err != nil {
 			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 			return
 		}
-		d, err := svc.Store.ByID(r.Context(), st.EntityID, st.DocID)
+		d, err := svc.Store.ByID(r.Context(), svc.DB, st.EntityID, st.DocID)
 		if err != nil || d.EntityID != st.EntityID {
 			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 			return

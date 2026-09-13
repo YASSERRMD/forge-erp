@@ -11,26 +11,27 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/finance"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 )
 
 // Ledger abstracts the postings needed for P&L.
 type Ledger interface {
-	Accounts(ctx context.Context, entityID int64) ([]finance.Account, error)
-	TrialBalance(ctx context.Context, entityID int64) (map[int64][2]int64, error)
+	Accounts(ctx context.Context, db platform.DBTX, entityID int64) ([]finance.Account, error)
+	TrialBalance(ctx context.Context, db platform.DBTX, entityID int64) (map[int64][2]int64, error)
 }
 
 // Billing abstracts invoice balances for receivables.
 type Billing interface {
-	ListDocs(ctx context.Context, entityID int64, t documents.DocType, limit, offset int) ([]sales.Document, error)
-	InvoiceBalance(ctx context.Context, entityID, invoiceID int64) (int64, error)
+	ListDocs(ctx context.Context, db platform.DBTX, entityID int64, t documents.DocType, limit, offset int) ([]sales.Document, error)
+	InvoiceBalance(ctx context.Context, db platform.DBTX, entityID, invoiceID int64) (int64, error)
 }
 
 // Stock abstracts product levels for valuation.
 type Stock interface {
-	ListProducts(ctx context.Context, entityID int64, limit, offset int) ([]catalog.Product, error)
-	Level(ctx context.Context, productID, warehouseID int64) (catalog.StockLevel, error)
-	ListWarehouses(ctx context.Context, entityID int64) ([]catalog.Warehouse, error)
+	ListProducts(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]catalog.Product, error)
+	Level(ctx context.Context, db platform.DBTX, productID, warehouseID int64) (catalog.StockLevel, error)
+	ListWarehouses(ctx context.Context, db platform.DBTX, entityID int64) ([]catalog.Warehouse, error)
 }
 
 // AccountLine is one P&L row (balance signed: revenue/equity/liability as
@@ -51,12 +52,12 @@ type ProfitAndLoss struct {
 }
 
 // BuildPNL assembles P&L from the chart and trial balance.
-func BuildPNL(ctx context.Context, entityID int64, ledger Ledger) (ProfitAndLoss, error) {
-	accts, err := ledger.Accounts(ctx, entityID)
+func BuildPNL(ctx context.Context, db platform.DBTX, entityID int64, ledger Ledger) (ProfitAndLoss, error) {
+	accts, err := ledger.Accounts(ctx, db, entityID)
 	if err != nil {
 		return ProfitAndLoss{}, err
 	}
-	tb, err := ledger.TrialBalance(ctx, entityID)
+	tb, err := ledger.TrialBalance(ctx, db, entityID)
 	if err != nil {
 		return ProfitAndLoss{}, err
 	}
@@ -92,8 +93,8 @@ type MonthlyPoint struct {
 
 // SalesMonthly buckets non-draft, non-cancelled invoices by creation month
 // (latest 12 months with activity, ascending).
-func SalesMonthly(ctx context.Context, entityID int64, billing Billing) ([]MonthlyPoint, error) {
-	docs, err := billing.ListDocs(ctx, entityID, documents.TypeInvoice, 500, 0)
+func SalesMonthly(ctx context.Context, db platform.DBTX, entityID int64, billing Billing) ([]MonthlyPoint, error) {
+	docs, err := billing.ListDocs(ctx, db, entityID, documents.TypeInvoice, 500, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -141,8 +142,8 @@ type MarginLine struct {
 
 // ProductMargins computes margins from validated invoices and PMP levels.
 // Cost uses the quantity-weighted PMP across warehouses.
-func ProductMargins(ctx context.Context, entityID int64, billing Billing, stock Stock) ([]MarginLine, error) {
-	docs, err := billing.ListDocs(ctx, entityID, documents.TypeInvoice, 500, 0)
+func ProductMargins(ctx context.Context, db platform.DBTX, entityID int64, billing Billing, stock Stock) ([]MarginLine, error) {
+	docs, err := billing.ListDocs(ctx, db, entityID, documents.TypeInvoice, 500, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -166,11 +167,11 @@ func ProductMargins(ctx context.Context, entityID int64, billing Billing, stock 
 			a.rev += l.Qty * l.UnitNet
 		}
 	}
-	warehouses, err := stock.ListWarehouses(ctx, entityID)
+	warehouses, err := stock.ListWarehouses(ctx, db, entityID)
 	if err != nil {
 		return nil, err
 	}
-	prods, err := stock.ListProducts(ctx, entityID, 500, 0)
+	prods, err := stock.ListProducts(ctx, db, entityID, 500, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +183,7 @@ func ProductMargins(ctx context.Context, entityID int64, billing Billing, stock 
 	for pid, a := range byProduct {
 		var qty, value int64
 		for _, w := range warehouses {
-			lvl, err := stock.Level(ctx, pid, w.ID)
+			lvl, err := stock.Level(ctx, db, pid, w.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -216,8 +217,8 @@ type Receivable struct {
 }
 
 // Receivables lists validated invoices with an outstanding balance.
-func Receivables(ctx context.Context, entityID int64, billing Billing) ([]Receivable, int64, error) {
-	docs, err := billing.ListDocs(ctx, entityID, documents.TypeInvoice, 500, 0)
+func Receivables(ctx context.Context, db platform.DBTX, entityID int64, billing Billing) ([]Receivable, int64, error) {
+	docs, err := billing.ListDocs(ctx, db, entityID, documents.TypeInvoice, 500, 0)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -227,7 +228,7 @@ func Receivables(ctx context.Context, entityID int64, billing Billing) ([]Receiv
 		if d.Status == sales.InvoiceDraft || d.Status == 9 { // skip drafts/cancelled
 			continue
 		}
-		bal, err := billing.InvoiceBalance(ctx, entityID, d.ID)
+		bal, err := billing.InvoiceBalance(ctx, db, entityID, d.ID)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -250,15 +251,15 @@ type ValuationLine struct {
 }
 
 // StockValuation values every product in a warehouse at PMP.
-func StockValuation(ctx context.Context, entityID, warehouseID int64, stock Stock) ([]ValuationLine, int64, error) {
-	prods, err := stock.ListProducts(ctx, entityID, 500, 0)
+func StockValuation(ctx context.Context, db platform.DBTX, entityID, warehouseID int64, stock Stock) ([]ValuationLine, int64, error) {
+	prods, err := stock.ListProducts(ctx, db, entityID, 500, 0)
 	if err != nil {
 		return nil, 0, err
 	}
 	var out []ValuationLine
 	var total int64
 	for _, p := range prods {
-		lvl, err := stock.Level(ctx, p.ID, warehouseID)
+		lvl, err := stock.Level(ctx, db, p.ID, warehouseID)
 		if err != nil {
 			return nil, 0, err
 		}

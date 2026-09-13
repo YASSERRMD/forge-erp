@@ -2,6 +2,7 @@ package manufacturing
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 func passthrough(_, _, _ string) func(http.Handler) http.Handler {
@@ -20,9 +22,21 @@ func testRouter() (http.Handler, *catalog.MemoryStore) {
 	ledger := catalog.NewMemoryStore()
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {
-		Routes(r, Deps{Store: NewMemoryStore(), Ledger: ledger}, passthrough)
+		Routes(r, Deps{Store: NewMemoryStore(), Ledger: testLedger{ledger}}, passthrough)
 	})
 	return r, ledger
+}
+
+// testLedger adapts the catalog store to the Ledger interface. Both sides
+// converged on the DBTX rule, so the adapter forwards the handle through.
+type testLedger struct{ m *catalog.MemoryStore }
+
+func (l testLedger) Level(ctx context.Context, db platform.DBTX, productID, warehouseID int64) (catalog.StockLevel, error) {
+	return l.m.Level(ctx, db, productID, warehouseID)
+}
+
+func (l testLedger) AppendMovement(ctx context.Context, db platform.DBTX, mov *catalog.StockMovement, allowNegative bool) (catalog.StockLevel, error) {
+	return l.m.AppendMovement(ctx, db, mov, allowNegative)
 }
 
 func doReq(t *testing.T, h http.Handler, method, path string, body any) *httptest.ResponseRecorder {
@@ -46,7 +60,7 @@ func TestBOMMOProduceFlow(t *testing.T) {
 		{EntityID: 1, ProductID: 3, WarehouseID: 1, Qty: 50, Reason: catalog.ReasonReceipt, Ref: "OPEN"},
 	} {
 		m := mv
-		if _, err := ledger.AppendMovement(ctx, &m, false); err != nil {
+		if _, err := ledger.AppendMovement(ctx, nil, &m, false); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
@@ -97,9 +111,9 @@ func TestBOMMOProduceFlow(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("produce: code=%d body=%s", rec.Code, rec.Body.String())
 	}
-	lvl2, _ := ledger.Level(ctx, 2, 1)
-	lvl3, _ := ledger.Level(ctx, 3, 1)
-	lvl1, _ := ledger.Level(ctx, 1, 1)
+	lvl2, _ := ledger.Level(ctx, nil, 2, 1)
+	lvl3, _ := ledger.Level(ctx, nil, 3, 1)
+	lvl1, _ := ledger.Level(ctx, nil, 1, 1)
 	if lvl2.Qty != 70 || lvl3.Qty != 40 || lvl1.Qty != 10 {
 		t.Fatalf("levels=%d/%d/%d want 70/40/10", lvl2.Qty, lvl3.Qty, lvl1.Qty)
 	}

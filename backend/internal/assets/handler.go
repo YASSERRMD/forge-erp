@@ -8,15 +8,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/go-chi/chi/v5"
 )
 
 // Deps wires handlers to persistence and the event bus.
 type Deps struct {
 	Store Store
 	Bus   platform.Bus
+	DB    platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -99,7 +100,7 @@ func (h *Handler) CreateAsset(w http.ResponseWriter, r *http.Request) {
 	a.ID = 0
 	a.EntityID = entityOf(r)
 	a.Status = AssetInService
-	if err := h.deps.Store.CreateAsset(r.Context(), &a); err != nil {
+	if err := h.deps.Store.CreateAsset(r.Context(), h.deps.DB, &a); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -126,7 +127,7 @@ func (h *Handler) UpdateAsset(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a, err := h.deps.Store.UpdateAsset(r.Context(), entityOf(r), id, in.Label, in.Serial, in.WarehouseID, in.RowVersion)
+	a, err := h.deps.Store.UpdateAsset(r.Context(), h.deps.DB, entityOf(r), id, in.Label, in.Serial, in.WarehouseID, in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -141,7 +142,7 @@ func (h *Handler) ListAssets(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	list, err := h.deps.Store.ListAssets(r.Context(), entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListAssets(r.Context(), h.deps.DB, entityOf(r), limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -161,7 +162,7 @@ func (h *Handler) SetAssetStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a, err := h.deps.Store.SetAssetStatus(r.Context(), entityOf(r), id, AssetStatus(in.Status), in.RowVersion)
+	a, err := h.deps.Store.SetAssetStatus(r.Context(), h.deps.DB, entityOf(r), id, AssetStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

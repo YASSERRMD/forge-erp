@@ -10,24 +10,25 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // Store is the persistence contract for the catalog context.
 type Store interface {
-	CreateProduct(ctx context.Context, p *Product) error
-	ProductByID(ctx context.Context, entityID, id int64) (Product, error)
-	ListProducts(ctx context.Context, entityID int64, limit, offset int) ([]Product, error)
-	CreateWarehouse(ctx context.Context, w *Warehouse) error
-	WarehouseByID(ctx context.Context, entityID, id int64) (Warehouse, error)
-	ListWarehouses(ctx context.Context, entityID int64) ([]Warehouse, error)
+	CreateProduct(ctx context.Context, db platform.DBTX, p *Product) error
+	ProductByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Product, error)
+	ListProducts(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Product, error)
+	CreateWarehouse(ctx context.Context, db platform.DBTX, w *Warehouse) error
+	WarehouseByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Warehouse, error)
+	ListWarehouses(ctx context.Context, db platform.DBTX, entityID int64) ([]Warehouse, error)
 	// AppendMovement validates, appends the ledger line, and advances the level
 	// atomically (PG) — the negative-stock guard lives in Apply.
-	AppendMovement(ctx context.Context, m *StockMovement, allowNegative bool) (StockLevel, error)
-	Level(ctx context.Context, productID, warehouseID int64) (StockLevel, error)
-	CreateLot(ctx context.Context, l *Lot) error
+	AppendMovement(ctx context.Context, db platform.DBTX, m *StockMovement, allowNegative bool) (StockLevel, error)
+	Level(ctx context.Context, db platform.DBTX, productID, warehouseID int64) (StockLevel, error)
+	CreateLot(ctx context.Context, db platform.DBTX, l *Lot) error
 	// Variants manage sellable product combinations.
-	CreateVariant(ctx context.Context, v *Variant) error
-	VariantsOf(ctx context.Context, productID int64) ([]Variant, error)
+	CreateVariant(ctx context.Context, db platform.DBTX, v *Variant) error
+	VariantsOf(ctx context.Context, db platform.DBTX, productID int64) ([]Variant, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -55,9 +56,9 @@ func scanProduct(row pgx.Row) (Product, error) {
 	return p, nil
 }
 
-func (s *PGStore) CreateProduct(ctx context.Context, p *Product) error {
+func (s *PGStore) CreateProduct(ctx context.Context, db platform.DBTX, p *Product) error {
 	custom, _ := json.Marshal(nullMap(p.CustomFields))
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_products
+	return db.QueryRow(ctx, `INSERT INTO ferp_products
 		(entity_id, sku, name, type, unit, net_price, vat_rate_bps, status, stock_tracked,
 		 custom_fields, created_by, updated_by)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, row_version`,
@@ -73,12 +74,12 @@ func nullMap(m map[string]any) map[string]any {
 	return m
 }
 
-func (s *PGStore) ProductByID(ctx context.Context, entityID, id int64) (Product, error) {
-	return scanProduct(s.pool.QueryRow(ctx, `SELECT `+productCols+` FROM ferp_products WHERE id=$1 AND entity_id=$2`, id, entityID))
+func (s *PGStore) ProductByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Product, error) {
+	return scanProduct(db.QueryRow(ctx, `SELECT `+productCols+` FROM ferp_products WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
-func (s *PGStore) ListProducts(ctx context.Context, entityID int64, limit, offset int) ([]Product, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+productCols+` FROM ferp_products
+func (s *PGStore) ListProducts(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Product, error) {
+	rows, err := db.Query(ctx, `SELECT `+productCols+` FROM ferp_products
 		WHERE entity_id=$1 ORDER BY name LIMIT $2 OFFSET $3`, entityID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -95,15 +96,15 @@ func (s *PGStore) ListProducts(ctx context.Context, entityID int64, limit, offse
 	return out, rows.Err()
 }
 
-func (s *PGStore) CreateWarehouse(ctx context.Context, w *Warehouse) error {
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_warehouses (entity_id, code, label, status)
+func (s *PGStore) CreateWarehouse(ctx context.Context, db platform.DBTX, w *Warehouse) error {
+	return db.QueryRow(ctx, `INSERT INTO ferp_warehouses (entity_id, code, label, status)
 		VALUES ($1,$2,$3,$4) RETURNING id, created_at, updated_at`,
 		w.EntityID, w.Code, w.Label, w.Status).Scan(&w.ID, &w.CreatedAt, &w.UpdatedAt)
 }
 
-func (s *PGStore) WarehouseByID(ctx context.Context, entityID, id int64) (Warehouse, error) {
+func (s *PGStore) WarehouseByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Warehouse, error) {
 	var w Warehouse
-	err := s.pool.QueryRow(ctx, `SELECT id, entity_id, code, label, status, created_at, updated_at
+	err := db.QueryRow(ctx, `SELECT id, entity_id, code, label, status, created_at, updated_at
 		FROM ferp_warehouses WHERE id=$1 AND entity_id=$2`, id, entityID).Scan(
 		&w.ID, &w.EntityID, &w.Code, &w.Label, &w.Status, &w.CreatedAt, &w.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -112,8 +113,8 @@ func (s *PGStore) WarehouseByID(ctx context.Context, entityID, id int64) (Wareho
 	return w, err
 }
 
-func (s *PGStore) ListWarehouses(ctx context.Context, entityID int64) ([]Warehouse, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, code, label, status, created_at, updated_at
+func (s *PGStore) ListWarehouses(ctx context.Context, db platform.DBTX, entityID int64) ([]Warehouse, error) {
+	rows, err := db.Query(ctx, `SELECT id, entity_id, code, label, status, created_at, updated_at
 		FROM ferp_warehouses WHERE entity_id=$1 ORDER BY code`, entityID)
 	if err != nil {
 		return nil, err
@@ -130,9 +131,9 @@ func (s *PGStore) ListWarehouses(ctx context.Context, entityID int64) ([]Warehou
 	return out, rows.Err()
 }
 
-func (s *PGStore) Level(ctx context.Context, productID, warehouseID int64) (StockLevel, error) {
+func (s *PGStore) Level(ctx context.Context, db platform.DBTX, productID, warehouseID int64) (StockLevel, error) {
 	var l StockLevel
-	err := s.pool.QueryRow(ctx, `SELECT product_id, warehouse_id, qty, total_value
+	err := db.QueryRow(ctx, `SELECT product_id, warehouse_id, qty, total_value
 		FROM ferp_stock_levels WHERE product_id=$1 AND warehouse_id=$2`,
 		productID, warehouseID).Scan(&l.ProductID, &l.WarehouseID, &l.Qty, &l.TotalValue)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -141,7 +142,9 @@ func (s *PGStore) Level(ctx context.Context, productID, warehouseID int64) (Stoc
 	return l, err
 }
 
-func (s *PGStore) AppendMovement(ctx context.Context, m *StockMovement, allowNegative bool) (StockLevel, error) {
+func (s *PGStore) AppendMovement(ctx context.Context, db platform.DBTX, m *StockMovement, allowNegative bool) (StockLevel, error) {
+	// Begin is not part of the DBTX surface; the store keeps its pool
+	// for starting the post transaction.
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return StockLevel{}, err
@@ -180,8 +183,8 @@ func (s *PGStore) AppendMovement(ctx context.Context, m *StockMovement, allowNeg
 	return next, nil
 }
 
-func (s *PGStore) CreateLot(ctx context.Context, l *Lot) error {
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_lots (entity_id, product_id, number, expires_at)
+func (s *PGStore) CreateLot(ctx context.Context, db platform.DBTX, l *Lot) error {
+	return db.QueryRow(ctx, `INSERT INTO ferp_lots (entity_id, product_id, number, expires_at)
 		VALUES ($1,$2,$3,$4) RETURNING id`,
 		l.EntityID, l.ProductID, l.Number, l.ExpiresAt).Scan(&l.ID)
 }
@@ -210,7 +213,7 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
-func (m *MemoryStore) CreateProduct(_ context.Context, p *Product) error {
+func (m *MemoryStore) CreateProduct(_ context.Context, _ platform.DBTX, p *Product) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
@@ -229,7 +232,7 @@ func (m *MemoryStore) CreateProduct(_ context.Context, p *Product) error {
 
 func skuKey(entityID int64, sku string) string { return fmt.Sprintf("%d\x00%s", entityID, sku) }
 
-func (m *MemoryStore) ProductByID(_ context.Context, entityID, id int64) (Product, error) {
+func (m *MemoryStore) ProductByID(_ context.Context, _ platform.DBTX, entityID, id int64) (Product, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.products[id]
@@ -239,7 +242,7 @@ func (m *MemoryStore) ProductByID(_ context.Context, entityID, id int64) (Produc
 	return p, nil
 }
 
-func (m *MemoryStore) ListProducts(_ context.Context, entityID int64, limit, offset int) ([]Product, error) {
+func (m *MemoryStore) ListProducts(_ context.Context, _ platform.DBTX, entityID int64, limit, offset int) ([]Product, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Product
@@ -258,7 +261,7 @@ func (m *MemoryStore) ListProducts(_ context.Context, entityID int64, limit, off
 	return out, nil
 }
 
-func (m *MemoryStore) CreateWarehouse(_ context.Context, w *Warehouse) error {
+func (m *MemoryStore) CreateWarehouse(_ context.Context, _ platform.DBTX, w *Warehouse) error {
 	if err := w.Validate(); err != nil {
 		return err
 	}
@@ -269,7 +272,7 @@ func (m *MemoryStore) CreateWarehouse(_ context.Context, w *Warehouse) error {
 	return nil
 }
 
-func (m *MemoryStore) WarehouseByID(_ context.Context, entityID, id int64) (Warehouse, error) {
+func (m *MemoryStore) WarehouseByID(_ context.Context, _ platform.DBTX, entityID, id int64) (Warehouse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	w, ok := m.houses[id]
@@ -279,7 +282,7 @@ func (m *MemoryStore) WarehouseByID(_ context.Context, entityID, id int64) (Ware
 	return w, nil
 }
 
-func (m *MemoryStore) ListWarehouses(_ context.Context, entityID int64) ([]Warehouse, error) {
+func (m *MemoryStore) ListWarehouses(_ context.Context, _ platform.DBTX, entityID int64) ([]Warehouse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Warehouse
@@ -291,7 +294,7 @@ func (m *MemoryStore) ListWarehouses(_ context.Context, entityID int64) ([]Wareh
 	return out, nil
 }
 
-func (m *MemoryStore) AppendMovement(_ context.Context, mov *StockMovement, allowNegative bool) (StockLevel, error) {
+func (m *MemoryStore) AppendMovement(_ context.Context, _ platform.DBTX, mov *StockMovement, allowNegative bool) (StockLevel, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	k := [2]int64{mov.ProductID, mov.WarehouseID}
@@ -305,13 +308,13 @@ func (m *MemoryStore) AppendMovement(_ context.Context, mov *StockMovement, allo
 	return next, nil
 }
 
-func (m *MemoryStore) Level(_ context.Context, productID, warehouseID int64) (StockLevel, error) {
+func (m *MemoryStore) Level(_ context.Context, _ platform.DBTX, productID, warehouseID int64) (StockLevel, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.levels[[2]int64{productID, warehouseID}], nil
 }
 
-func (m *MemoryStore) CreateLot(_ context.Context, l *Lot) error {
+func (m *MemoryStore) CreateLot(_ context.Context, _ platform.DBTX, l *Lot) error {
 	if err := l.Validate(); err != nil {
 		return err
 	}

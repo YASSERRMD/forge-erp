@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // ErrNotFound is returned when a row does not exist.
@@ -15,24 +16,24 @@ var ErrNotFound = errors.New("finance: not found")
 
 // Store is the persistence contract for finance.
 type Store interface {
-	CreateAccount(ctx context.Context, a *Account) error
+	CreateAccount(ctx context.Context, db platform.DBTX, a *Account) error
 	// Accounts lists the chart of accounts (reporting + UI).
-	Accounts(ctx context.Context, entityID int64) ([]Account, error)
-	ListJournals(ctx context.Context, entityID int64) ([]Journal, error)
-	ListBankAccounts(ctx context.Context, entityID int64) ([]BankAccount, error)
-	ListLoans(ctx context.Context, entityID int64) ([]Loan, error)
-	CreateJournal(ctx context.Context, j *Journal) error
-	CreateFiscalYear(ctx context.Context, f *FiscalYear) error
+	Accounts(ctx context.Context, db platform.DBTX, entityID int64) ([]Account, error)
+	ListJournals(ctx context.Context, db platform.DBTX, entityID int64) ([]Journal, error)
+	ListBankAccounts(ctx context.Context, db platform.DBTX, entityID int64) ([]BankAccount, error)
+	ListLoans(ctx context.Context, db platform.DBTX, entityID int64) ([]Loan, error)
+	CreateJournal(ctx context.Context, db platform.DBTX, j *Journal) error
+	CreateFiscalYear(ctx context.Context, db platform.DBTX, f *FiscalYear) error
 	// PostEntry validates balance + fiscal-year lock, chains the hash, and persists atomically.
-	PostEntry(ctx context.Context, e *Entry) error
-	EntriesByJournal(ctx context.Context, journalID int64) ([]Entry, error)
+	PostEntry(ctx context.Context, db platform.DBTX, e *Entry) error
+	EntriesByJournal(ctx context.Context, db platform.DBTX, journalID int64) ([]Entry, error)
 	// TrialBalance returns per-account debit/credit sums for posted entries.
-	TrialBalance(ctx context.Context, entityID int64) (map[int64][2]int64, error)
-	CreateBankAccount(ctx context.Context, a *BankAccount) error
-	RecordTransaction(ctx context.Context, t *BankTransaction) error
-	Reconcile(ctx context.Context, entityID, txID int64, at time.Time) error
-	AccountBalance(ctx context.Context, accountID int64) (int64, error)
-	CreateLoan(ctx context.Context, l *Loan) error
+	TrialBalance(ctx context.Context, db platform.DBTX, entityID int64) (map[int64][2]int64, error)
+	CreateBankAccount(ctx context.Context, db platform.DBTX, a *BankAccount) error
+	RecordTransaction(ctx context.Context, db platform.DBTX, t *BankTransaction) error
+	Reconcile(ctx context.Context, db platform.DBTX, entityID, txID int64, at time.Time) error
+	AccountBalance(ctx context.Context, db platform.DBTX, accountID int64) (int64, error)
+	CreateLoan(ctx context.Context, db platform.DBTX, l *Loan) error
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -41,18 +42,18 @@ type PGStore struct{ pool *pgxpool.Pool }
 // NewPGStore wraps a pool.
 func NewPGStore(pool *pgxpool.Pool) *PGStore { return &PGStore{pool: pool} }
 
-func (s *PGStore) CreateAccount(ctx context.Context, a *Account) error {
+func (s *PGStore) CreateAccount(ctx context.Context, db platform.DBTX, a *Account) error {
 	if err := a.Validate(); err != nil {
 		return err
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_accounts (entity_id, code, label, type)
+	return db.QueryRow(ctx, `INSERT INTO ferp_accounts (entity_id, code, label, type)
 		VALUES ($1,$2,$3,$4) RETURNING id`,
 		a.EntityID, a.Code, a.Label, a.Type).Scan(&a.ID)
 }
 
 // Accounts lists an entity's chart of accounts (reporting P&L).
-func (s *PGStore) Accounts(ctx context.Context, entityID int64) ([]Account, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, code, label, type FROM ferp_accounts
+func (s *PGStore) Accounts(ctx context.Context, db platform.DBTX, entityID int64) ([]Account, error) {
+	rows, err := db.Query(ctx, `SELECT id, entity_id, code, label, type FROM ferp_accounts
 		WHERE entity_id=$1 ORDER BY code`, entityID)
 	if err != nil {
 		return nil, err
@@ -69,8 +70,8 @@ func (s *PGStore) Accounts(ctx context.Context, entityID int64) ([]Account, erro
 	return out, rows.Err()
 }
 
-func (s *PGStore) ListJournals(ctx context.Context, entityID int64) ([]Journal, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, code, label FROM ferp_journals
+func (s *PGStore) ListJournals(ctx context.Context, db platform.DBTX, entityID int64) ([]Journal, error) {
+	rows, err := db.Query(ctx, `SELECT id, entity_id, code, label FROM ferp_journals
 		WHERE entity_id=$1 ORDER BY code`, entityID)
 	if err != nil {
 		return nil, err
@@ -87,8 +88,8 @@ func (s *PGStore) ListJournals(ctx context.Context, entityID int64) ([]Journal, 
 	return out, rows.Err()
 }
 
-func (s *PGStore) ListBankAccounts(ctx context.Context, entityID int64) ([]BankAccount, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, code, label, iban FROM ferp_bank_accounts
+func (s *PGStore) ListBankAccounts(ctx context.Context, db platform.DBTX, entityID int64) ([]BankAccount, error) {
+	rows, err := db.Query(ctx, `SELECT id, entity_id, code, label, iban FROM ferp_bank_accounts
 		WHERE entity_id=$1 ORDER BY code`, entityID)
 	if err != nil {
 		return nil, err
@@ -105,8 +106,8 @@ func (s *PGStore) ListBankAccounts(ctx context.Context, entityID int64) ([]BankA
 	return out, rows.Err()
 }
 
-func (s *PGStore) ListLoans(ctx context.Context, entityID int64) ([]Loan, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, label, principal, rate_bps, start_date, periods
+func (s *PGStore) ListLoans(ctx context.Context, db platform.DBTX, entityID int64) ([]Loan, error) {
+	rows, err := db.Query(ctx, `SELECT id, entity_id, label, principal, rate_bps, start_date, periods
 		FROM ferp_loans WHERE entity_id=$1 ORDER BY id`, entityID)
 	if err != nil {
 		return nil, err
@@ -123,21 +124,23 @@ func (s *PGStore) ListLoans(ctx context.Context, entityID int64) ([]Loan, error)
 	return out, rows.Err()
 }
 
-func (s *PGStore) CreateJournal(ctx context.Context, j *Journal) error {
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_journals (entity_id, code, label)
+func (s *PGStore) CreateJournal(ctx context.Context, db platform.DBTX, j *Journal) error {
+	return db.QueryRow(ctx, `INSERT INTO ferp_journals (entity_id, code, label)
 		VALUES ($1,$2,$3) RETURNING id`, j.EntityID, j.Code, j.Label).Scan(&j.ID)
 }
 
-func (s *PGStore) CreateFiscalYear(ctx context.Context, f *FiscalYear) error {
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_fiscal_years (entity_id, label, start_date, end_date, locked)
+func (s *PGStore) CreateFiscalYear(ctx context.Context, db platform.DBTX, f *FiscalYear) error {
+	return db.QueryRow(ctx, `INSERT INTO ferp_fiscal_years (entity_id, label, start_date, end_date, locked)
 		VALUES ($1,$2,$3,$4,$5) RETURNING id`,
 		f.EntityID, f.Label, f.StartDate, f.EndDate, f.Locked).Scan(&f.ID)
 }
 
-func (s *PGStore) PostEntry(ctx context.Context, e *Entry) error {
+func (s *PGStore) PostEntry(ctx context.Context, db platform.DBTX, e *Entry) error {
 	if err := e.Validate(); err != nil {
 		return err
 	}
+	// Begin is not part of the DBTX surface; the store keeps its pool
+	// for starting the post transaction.
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -229,12 +232,12 @@ func loadEntries(ctx context.Context, q queryFunc, journalID int64) ([]Entry, er
 	return out, nil
 }
 
-func (s *PGStore) EntriesByJournal(ctx context.Context, journalID int64) ([]Entry, error) {
-	return loadEntries(ctx, s.pool.Query, journalID)
+func (s *PGStore) EntriesByJournal(ctx context.Context, db platform.DBTX, journalID int64) ([]Entry, error) {
+	return loadEntries(ctx, db.Query, journalID)
 }
 
-func (s *PGStore) TrialBalance(ctx context.Context, entityID int64) (map[int64][2]int64, error) {
-	rows, err := s.pool.Query(ctx, `SELECT l.account_id, SUM(l.debit), SUM(l.credit)
+func (s *PGStore) TrialBalance(ctx context.Context, db platform.DBTX, entityID int64) (map[int64][2]int64, error) {
+	rows, err := db.Query(ctx, `SELECT l.account_id, SUM(l.debit), SUM(l.credit)
 		FROM ferp_entry_lines l JOIN ferp_entries e ON e.id=l.entry_id
 		WHERE e.entity_id=$1 AND e.status=1 GROUP BY l.account_id`, entityID)
 	if err != nil {
@@ -252,22 +255,22 @@ func (s *PGStore) TrialBalance(ctx context.Context, entityID int64) (map[int64][
 	return out, rows.Err()
 }
 
-func (s *PGStore) CreateBankAccount(ctx context.Context, a *BankAccount) error {
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_bank_accounts (entity_id, code, label, iban)
+func (s *PGStore) CreateBankAccount(ctx context.Context, db platform.DBTX, a *BankAccount) error {
+	return db.QueryRow(ctx, `INSERT INTO ferp_bank_accounts (entity_id, code, label, iban)
 		VALUES ($1,$2,$3,$4) RETURNING id`, a.EntityID, a.Code, a.Label, a.IBAN).Scan(&a.ID)
 }
 
-func (s *PGStore) RecordTransaction(ctx context.Context, t *BankTransaction) error {
+func (s *PGStore) RecordTransaction(ctx context.Context, db platform.DBTX, t *BankTransaction) error {
 	if err := t.Validate(); err != nil {
 		return err
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_bank_transactions
+	return db.QueryRow(ctx, `INSERT INTO ferp_bank_transactions
 		(entity_id, account_id, amount, label, value_date) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
 		t.EntityID, t.AccountID, t.Amount, t.Label, t.ValueDate).Scan(&t.ID)
 }
 
-func (s *PGStore) Reconcile(ctx context.Context, entityID, txID int64, at time.Time) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_bank_transactions SET reconciled=TRUE, reconciled_at=$1
+func (s *PGStore) Reconcile(ctx context.Context, db platform.DBTX, entityID, txID int64, at time.Time) error {
+	tag, err := db.Exec(ctx, `UPDATE ferp_bank_transactions SET reconciled=TRUE, reconciled_at=$1
 		WHERE id=$2 AND entity_id=$3 AND reconciled=FALSE`, at, txID, entityID)
 	if err != nil {
 		return err
@@ -278,18 +281,18 @@ func (s *PGStore) Reconcile(ctx context.Context, entityID, txID int64, at time.T
 	return nil
 }
 
-func (s *PGStore) AccountBalance(ctx context.Context, accountID int64) (int64, error) {
+func (s *PGStore) AccountBalance(ctx context.Context, db platform.DBTX, accountID int64) (int64, error) {
 	var bal int64
-	_ = s.pool.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0) FROM ferp_bank_transactions WHERE account_id=$1`, accountID).Scan(&bal)
+	_ = db.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0) FROM ferp_bank_transactions WHERE account_id=$1`, accountID).Scan(&bal)
 	return bal, nil
 }
 
-func (s *PGStore) CreateLoan(ctx context.Context, l *Loan) error {
+func (s *PGStore) CreateLoan(ctx context.Context, db platform.DBTX, l *Loan) error {
 	if l.Principal <= 0 || l.Periods <= 0 {
 		return errors.New("finance: bad loan terms")
 	}
 	l.Schedule = BuildSchedule(l.Principal, l.RateBps, l.Start, l.Periods)
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_loans
+	return db.QueryRow(ctx, `INSERT INTO ferp_loans
 		(entity_id, label, principal, rate_bps, start_date, periods) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
 		l.EntityID, l.Label, l.Principal, l.RateBps, l.Start, l.Periods).Scan(&l.ID)
 }
@@ -315,7 +318,7 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
-func (m *MemoryStore) CreateAccount(_ context.Context, a *Account) error {
+func (m *MemoryStore) CreateAccount(_ context.Context, _ platform.DBTX, a *Account) error {
 	if err := a.Validate(); err != nil {
 		return err
 	}
@@ -327,7 +330,7 @@ func (m *MemoryStore) CreateAccount(_ context.Context, a *Account) error {
 }
 
 // Accounts lists an entity's chart of accounts (reporting P&L).
-func (m *MemoryStore) Accounts(_ context.Context, entityID int64) ([]Account, error) {
+func (m *MemoryStore) Accounts(_ context.Context, _ platform.DBTX, entityID int64) ([]Account, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Account
@@ -339,7 +342,7 @@ func (m *MemoryStore) Accounts(_ context.Context, entityID int64) ([]Account, er
 	return out, nil
 }
 
-func (m *MemoryStore) ListJournals(_ context.Context, entityID int64) ([]Journal, error) {
+func (m *MemoryStore) ListJournals(_ context.Context, _ platform.DBTX, entityID int64) ([]Journal, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Journal
@@ -351,7 +354,7 @@ func (m *MemoryStore) ListJournals(_ context.Context, entityID int64) ([]Journal
 	return out, nil
 }
 
-func (m *MemoryStore) ListBankAccounts(_ context.Context, entityID int64) ([]BankAccount, error) {
+func (m *MemoryStore) ListBankAccounts(_ context.Context, _ platform.DBTX, entityID int64) ([]BankAccount, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []BankAccount
@@ -363,7 +366,7 @@ func (m *MemoryStore) ListBankAccounts(_ context.Context, entityID int64) ([]Ban
 	return out, nil
 }
 
-func (m *MemoryStore) ListLoans(_ context.Context, entityID int64) ([]Loan, error) {
+func (m *MemoryStore) ListLoans(_ context.Context, _ platform.DBTX, entityID int64) ([]Loan, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Loan
@@ -375,7 +378,7 @@ func (m *MemoryStore) ListLoans(_ context.Context, entityID int64) ([]Loan, erro
 	return out, nil
 }
 
-func (m *MemoryStore) CreateJournal(_ context.Context, j *Journal) error {
+func (m *MemoryStore) CreateJournal(_ context.Context, _ platform.DBTX, j *Journal) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	j.ID = m.next()
@@ -383,7 +386,7 @@ func (m *MemoryStore) CreateJournal(_ context.Context, j *Journal) error {
 	return nil
 }
 
-func (m *MemoryStore) CreateFiscalYear(_ context.Context, f *FiscalYear) error {
+func (m *MemoryStore) CreateFiscalYear(_ context.Context, _ platform.DBTX, f *FiscalYear) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	f.ID = m.next()
@@ -391,7 +394,7 @@ func (m *MemoryStore) CreateFiscalYear(_ context.Context, f *FiscalYear) error {
 	return nil
 }
 
-func (m *MemoryStore) PostEntry(_ context.Context, e *Entry) error {
+func (m *MemoryStore) PostEntry(_ context.Context, _ platform.DBTX, e *Entry) error {
 	if err := e.Validate(); err != nil {
 		return err
 	}
@@ -417,7 +420,7 @@ func (m *MemoryStore) PostEntry(_ context.Context, e *Entry) error {
 	return nil
 }
 
-func (m *MemoryStore) EntriesByJournal(_ context.Context, journalID int64) ([]Entry, error) {
+func (m *MemoryStore) EntriesByJournal(_ context.Context, _ platform.DBTX, journalID int64) ([]Entry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Entry
@@ -429,7 +432,7 @@ func (m *MemoryStore) EntriesByJournal(_ context.Context, journalID int64) ([]En
 	return out, nil
 }
 
-func (m *MemoryStore) TrialBalance(_ context.Context, entityID int64) (map[int64][2]int64, error) {
+func (m *MemoryStore) TrialBalance(_ context.Context, _ platform.DBTX, entityID int64) (map[int64][2]int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := map[int64][2]int64{}
@@ -447,7 +450,7 @@ func (m *MemoryStore) TrialBalance(_ context.Context, entityID int64) (map[int64
 	return out, nil
 }
 
-func (m *MemoryStore) CreateBankAccount(_ context.Context, a *BankAccount) error {
+func (m *MemoryStore) CreateBankAccount(_ context.Context, _ platform.DBTX, a *BankAccount) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a.ID = m.next()
@@ -455,7 +458,7 @@ func (m *MemoryStore) CreateBankAccount(_ context.Context, a *BankAccount) error
 	return nil
 }
 
-func (m *MemoryStore) RecordTransaction(_ context.Context, t *BankTransaction) error {
+func (m *MemoryStore) RecordTransaction(_ context.Context, _ platform.DBTX, t *BankTransaction) error {
 	if err := t.Validate(); err != nil {
 		return err
 	}
@@ -466,7 +469,7 @@ func (m *MemoryStore) RecordTransaction(_ context.Context, t *BankTransaction) e
 	return nil
 }
 
-func (m *MemoryStore) Reconcile(_ context.Context, entityID, txID int64, at time.Time) error {
+func (m *MemoryStore) Reconcile(_ context.Context, _ platform.DBTX, entityID, txID int64, at time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, ok := m.txs[txID]
@@ -482,7 +485,7 @@ func (m *MemoryStore) Reconcile(_ context.Context, entityID, txID int64, at time
 	return nil
 }
 
-func (m *MemoryStore) AccountBalance(_ context.Context, accountID int64) (int64, error) {
+func (m *MemoryStore) AccountBalance(_ context.Context, _ platform.DBTX, accountID int64) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var bal int64
@@ -494,7 +497,7 @@ func (m *MemoryStore) AccountBalance(_ context.Context, accountID int64) (int64,
 	return bal, nil
 }
 
-func (m *MemoryStore) CreateLoan(_ context.Context, l *Loan) error {
+func (m *MemoryStore) CreateLoan(_ context.Context, _ platform.DBTX, l *Loan) error {
 	if l.Principal <= 0 || l.Periods <= 0 {
 		return errors.New("finance: bad loan terms")
 	}

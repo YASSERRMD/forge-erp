@@ -28,53 +28,53 @@ func TestOverlapAndCapacity(t *testing.T) {
 	ctx := context.Background()
 	m := NewMemoryStore()
 	r := &Resource{EntityID: 1, Code: "ROOM-A", Label: "Room A", Capacity: 4, Status: ResourceActive}
-	if err := m.CreateResource(ctx, r); err != nil {
+	if err := m.CreateResource(ctx, nil, r); err != nil {
 		t.Fatalf("resource: %v", err)
 	}
 	s1, e1 := window(10, 9, 11)
 	b1 := &Booking{EntityID: 1, ResourceID: r.ID, UserLogin: "ada", StartAt: s1, EndAt: e1, Seats: 3}
-	if err := m.CreateBooking(ctx, b1); err != nil {
+	if err := m.CreateBooking(ctx, nil, b1); err != nil {
 		t.Fatalf("booking 1: %v", err)
 	}
 	// Overlapping 10-12 with 2 seats exceeds capacity 4 (3 used).
 	s2, e2 := window(10, 10, 12)
-	if err := m.CreateBooking(ctx, &Booking{EntityID: 1, ResourceID: r.ID,
+	if err := m.CreateBooking(ctx, nil, &Booking{EntityID: 1, ResourceID: r.ID,
 		UserLogin: "bob", StartAt: s2, EndAt: e2, Seats: 2}); err == nil {
 		t.Error("over-capacity accepted")
 	}
 	// Same window with 1 seat fits.
-	if err := m.CreateBooking(ctx, &Booking{EntityID: 1, ResourceID: r.ID,
+	if err := m.CreateBooking(ctx, nil, &Booking{EntityID: 1, ResourceID: r.ID,
 		UserLogin: "bob", StartAt: s2, EndAt: e2, Seats: 1}); err != nil {
 		t.Fatalf("fitting booking: %v", err)
 	}
 	// Adjacent window (12-13) overlaps nothing.
 	s3, e3 := window(10, 12, 13)
-	if err := m.CreateBooking(ctx, &Booking{EntityID: 1, ResourceID: r.ID,
+	if err := m.CreateBooking(ctx, nil, &Booking{EntityID: 1, ResourceID: r.ID,
 		UserLogin: "cid", StartAt: s3, EndAt: e3, Seats: 4}); err != nil {
 		t.Fatalf("adjacent booking: %v", err)
 	}
 	// Cancel the first booking frees capacity for a 4-seat overlap.
-	upd, err := m.SetBookingStatus(ctx, 1, b1.ID, BookingCanceled, b1.RowVersion)
+	upd, err := m.SetBookingStatus(ctx, nil, 1, b1.ID, BookingCanceled, b1.RowVersion)
 	if err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	_ = upd
 	// Zero-length window rejected.
-	if err := m.CreateBooking(ctx, &Booking{EntityID: 1, ResourceID: r.ID,
+	if err := m.CreateBooking(ctx, nil, &Booking{EntityID: 1, ResourceID: r.ID,
 		UserLogin: "x", StartAt: s1, EndAt: s1, Seats: 1}); err == nil {
 		t.Error("zero-length accepted")
 	}
 	// Inactive resource rejects.
 	r2 := &Resource{EntityID: 1, Code: "ROOM-B", Label: "B", Capacity: 2, Status: ResourceInactive}
-	if err := m.CreateResource(ctx, r2); err != nil {
+	if err := m.CreateResource(ctx, nil, r2); err != nil {
 		t.Fatalf("resource B: %v", err)
 	}
-	if err := m.CreateBooking(ctx, &Booking{EntityID: 1, ResourceID: r2.ID,
+	if err := m.CreateBooking(ctx, nil, &Booking{EntityID: 1, ResourceID: r2.ID,
 		UserLogin: "x", StartAt: s1, EndAt: e1, Seats: 1}); err == nil {
 		t.Error("inactive resource accepted")
 	}
 	// Illegal transition.
-	if _, err := m.SetBookingStatus(ctx, 1, b1.ID, BookingCompleted, upd.RowVersion); err == nil {
+	if _, err := m.SetBookingStatus(ctx, nil, 1, b1.ID, BookingCompleted, upd.RowVersion); err == nil {
 		t.Error("canceled→completed accepted")
 	}
 }
@@ -87,7 +87,7 @@ func TestBookingAPI(t *testing.T) {
 	})
 	ctx := context.Background()
 	res := &Resource{EntityID: 1, Code: "R1", Label: "R", Capacity: 1, Status: ResourceActive}
-	if err := st.CreateResource(ctx, res); err != nil {
+	if err := st.CreateResource(ctx, nil, res); err != nil {
 		t.Fatalf("resource: %v", err)
 	}
 	post := func(path string, body any) *httptest.ResponseRecorder {
@@ -129,24 +129,24 @@ func TestCrossTenantIsolation(t *testing.T) {
 	ctx := context.Background()
 	m := NewMemoryStore()
 	r := &Resource{EntityID: 1, Code: "X-TENANT", Label: "X", Capacity: 2, Status: ResourceActive}
-	if err := m.CreateResource(ctx, r); err != nil {
+	if err := m.CreateResource(ctx, nil, r); err != nil {
 		t.Fatalf("resource: %v", err)
 	}
-	if _, err := m.ResourceByID(ctx, 2, r.ID); err == nil {
+	if _, err := m.ResourceByID(ctx, nil, 2, r.ID); err == nil {
 		t.Error("cross-tenant ResourceByID accepted")
 	}
 	s, e := window(20, 9, 10)
 	b := &Booking{EntityID: 1, ResourceID: r.ID, UserLogin: "ada", StartAt: s, EndAt: e, Seats: 1}
-	if err := m.CreateBooking(ctx, b); err != nil {
+	if err := m.CreateBooking(ctx, nil, b); err != nil {
 		t.Fatalf("booking: %v", err)
 	}
-	if _, err := m.BookingByID(ctx, 2, b.ID); err == nil {
+	if _, err := m.BookingByID(ctx, nil, 2, b.ID); err == nil {
 		t.Error("cross-tenant BookingByID accepted")
 	}
-	if _, err := m.SetBookingStatus(ctx, 2, b.ID, BookingCanceled, b.RowVersion); err == nil {
+	if _, err := m.SetBookingStatus(ctx, nil, 2, b.ID, BookingCanceled, b.RowVersion); err == nil {
 		t.Error("cross-tenant SetBookingStatus accepted")
 	}
-	got, err := m.BookingsOf(ctx, 2, r.ID, s.Add(-time.Hour), e.Add(time.Hour))
+	got, err := m.BookingsOf(ctx, nil, 2, r.ID, s.Add(-time.Hour), e.Add(time.Hour))
 	if err != nil || len(got) != 0 {
 		t.Fatalf("cross-tenant BookingsOf=%d err=%v want empty", len(got), err)
 	}
@@ -154,18 +154,19 @@ func TestCrossTenantIsolation(t *testing.T) {
 
 func TestPGOverlapAndCapacity(t *testing.T) {
 	ctx := context.Background()
-	st := NewPGStore(pgtest.Pool(t))
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
 	r := &Resource{EntityID: 1, Code: "PG-R1", Label: "Room", Capacity: 2, Status: ResourceActive}
-	if err := st.CreateResource(ctx, r); err != nil {
+	if err := st.CreateResource(ctx, pool, r); err != nil {
 		t.Fatalf("resource: %v", err)
 	}
 	s := time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC)
 	e := time.Date(2026, 9, 10, 11, 0, 0, 0, time.UTC)
-	if err := st.CreateBooking(ctx, &Booking{EntityID: 1, ResourceID: r.ID,
+	if err := st.CreateBooking(ctx, pool, &Booking{EntityID: 1, ResourceID: r.ID,
 		UserLogin: "a", StartAt: s, EndAt: e, Seats: 2}); err != nil {
 		t.Fatalf("booking: %v", err)
 	}
-	if err := st.CreateBooking(ctx, &Booking{EntityID: 1, ResourceID: r.ID,
+	if err := st.CreateBooking(ctx, pool, &Booking{EntityID: 1, ResourceID: r.ID,
 		UserLogin: "b", StartAt: s, EndAt: e, Seats: 1}); err == nil {
 		t.Error("over-capacity accepted on PG")
 	}

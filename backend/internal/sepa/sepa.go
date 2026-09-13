@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // Batch status.
@@ -313,10 +314,10 @@ func ExportXML(b Batch, now time.Time) ([]byte, error) {
 
 // Store is the persistence contract for SEPA batches.
 type Store interface {
-	CreateBatch(ctx context.Context, b *Batch) error
-	BatchByID(ctx context.Context, entityID int64, id int64) (Batch, error)
-	ListBatches(ctx context.Context, entityID int64) ([]Batch, error)
-	SetBatchStatus(ctx context.Context, entityID int64, id int64, to BatchStatus, rowVersion int64) (Batch, error)
+	CreateBatch(ctx context.Context, db platform.DBTX, b *Batch) error
+	BatchByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Batch, error)
+	ListBatches(ctx context.Context, db platform.DBTX, entityID int64) ([]Batch, error)
+	SetBatchStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to BatchStatus, rowVersion int64) (Batch, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -343,12 +344,12 @@ func scanBatch(row pgx.Row) (Batch, error) {
 	return b, nil
 }
 
-func (s *PGStore) CreateBatch(ctx context.Context, b *Batch) error {
+func (s *PGStore) CreateBatch(ctx context.Context, db platform.DBTX, b *Batch) error {
 	if err := b.Validate(); err != nil {
 		return err
 	}
 	raw, _ := json.Marshal(b.Transactions)
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_sepa_batches
+	return db.QueryRow(ctx, `INSERT INTO ferp_sepa_batches
 		(entity_id, ref, creditor_name, creditor_iban, creditor_bic, creditor_id,
 		 sequence, requested_at, transactions, status)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, row_version`,
@@ -357,12 +358,12 @@ func (s *PGStore) CreateBatch(ctx context.Context, b *Batch) error {
 	).Scan(&b.ID, &b.RowVersion)
 }
 
-func (s *PGStore) BatchByID(ctx context.Context, entityID int64, id int64) (Batch, error) {
-	return scanBatch(s.pool.QueryRow(ctx, `SELECT `+batchCols+` FROM ferp_sepa_batches WHERE id=$1 AND entity_id=$2`, id, entityID))
+func (s *PGStore) BatchByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Batch, error) {
+	return scanBatch(db.QueryRow(ctx, `SELECT `+batchCols+` FROM ferp_sepa_batches WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
-func (s *PGStore) ListBatches(ctx context.Context, entityID int64) ([]Batch, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+batchCols+` FROM ferp_sepa_batches WHERE entity_id=$1 ORDER BY id`, entityID)
+func (s *PGStore) ListBatches(ctx context.Context, db platform.DBTX, entityID int64) ([]Batch, error) {
+	rows, err := db.Query(ctx, `SELECT `+batchCols+` FROM ferp_sepa_batches WHERE entity_id=$1 ORDER BY id`, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -378,8 +379,8 @@ func (s *PGStore) ListBatches(ctx context.Context, entityID int64) ([]Batch, err
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetBatchStatus(ctx context.Context, entityID int64, id int64, to BatchStatus, rowVersion int64) (Batch, error) {
-	b, err := s.BatchByID(ctx, entityID, id)
+func (s *PGStore) SetBatchStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to BatchStatus, rowVersion int64) (Batch, error) {
+	b, err := s.BatchByID(ctx, db, entityID, id)
 	if err != nil {
 		return Batch{}, err
 	}
@@ -389,7 +390,7 @@ func (s *PGStore) SetBatchStatus(ctx context.Context, entityID int64, id int64, 
 	if !b.CanTransition(to) {
 		return Batch{}, errors.New("sepa: illegal transition")
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_sepa_batches SET status=$1, row_version=row_version+1
+	tag, err := db.Exec(ctx, `UPDATE ferp_sepa_batches SET status=$1, row_version=row_version+1
 		WHERE id=$2 AND row_version=$3 AND entity_id=$4`, to, id, rowVersion, entityID)
 	if err != nil {
 		return Batch{}, err
@@ -416,7 +417,7 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
-func (m *MemoryStore) CreateBatch(_ context.Context, b *Batch) error {
+func (m *MemoryStore) CreateBatch(_ context.Context, _ platform.DBTX, b *Batch) error {
 	if err := b.Validate(); err != nil {
 		return err
 	}
@@ -433,7 +434,7 @@ func (m *MemoryStore) CreateBatch(_ context.Context, b *Batch) error {
 	return nil
 }
 
-func (m *MemoryStore) BatchByID(_ context.Context, entityID int64, id int64) (Batch, error) {
+func (m *MemoryStore) BatchByID(_ context.Context, _ platform.DBTX, entityID int64, id int64) (Batch, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.batches[id]
@@ -443,7 +444,7 @@ func (m *MemoryStore) BatchByID(_ context.Context, entityID int64, id int64) (Ba
 	return b, nil
 }
 
-func (m *MemoryStore) ListBatches(_ context.Context, entityID int64) ([]Batch, error) {
+func (m *MemoryStore) ListBatches(_ context.Context, _ platform.DBTX, entityID int64) ([]Batch, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Batch
@@ -455,7 +456,7 @@ func (m *MemoryStore) ListBatches(_ context.Context, entityID int64) ([]Batch, e
 	return out, nil
 }
 
-func (m *MemoryStore) SetBatchStatus(_ context.Context, entityID int64, id int64, to BatchStatus, rowVersion int64) (Batch, error) {
+func (m *MemoryStore) SetBatchStatus(_ context.Context, _ platform.DBTX, entityID int64, id int64, to BatchStatus, rowVersion int64) (Batch, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.batches[id]

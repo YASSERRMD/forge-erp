@@ -27,12 +27,12 @@ func TestUploadRoundtripMemory(t *testing.T) {
 	if string(b) != "%PDF-hello" {
 		t.Fatalf("bytes = %q", b)
 	}
-	list, err := svc.Store.List(ctx, 1, "sales", 42)
+	list, err := svc.Store.List(ctx, nil, 1, "sales", 42)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list: %v %v", list, err)
 	}
 	// Other entity isolated.
-	empty, _ := svc.Store.List(ctx, 2, "sales", 42)
+	empty, _ := svc.Store.List(ctx, nil, 2, "sales", 42)
 	if len(empty) != 0 {
 		t.Fatal("cross-entity leak")
 	}
@@ -54,10 +54,10 @@ func TestCrossTenantIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Store.ByID(ctx, 2, d.ID); err == nil {
+	if _, err := svc.Store.ByID(ctx, nil, 2, d.ID); err == nil {
 		t.Fatal("cross-tenant ByID accepted")
 	}
-	if got, err := svc.Store.ByID(ctx, 1, d.ID); err != nil || got.ID != d.ID {
+	if got, err := svc.Store.ByID(ctx, nil, 1, d.ID); err != nil || got.ID != d.ID {
 		t.Fatalf("own-entity ByID err=%v doc=%+v", err, got)
 	}
 }

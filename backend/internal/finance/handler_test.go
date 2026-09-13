@@ -110,12 +110,12 @@ func TestPostInvoiceConsumer(t *testing.T) {
 	rev := &Account{EntityID: 1, Code: "707", Label: "R", Type: "revenue"}
 	vat := &Account{EntityID: 1, Code: "4457", Label: "V", Type: "liability"}
 	for _, a := range []*Account{cust, rev, vat} {
-		_ = st.CreateAccount(ctx, a)
+		_ = st.CreateAccount(ctx, nil, a)
 	}
 	j := &Journal{EntityID: 1, Code: "VEN", Label: "V"}
-	_ = st.CreateJournal(ctx, j)
+	_ = st.CreateJournal(ctx, nil, j)
 	// Sales invoice INV gross 1200 (net 1000 + vat 200) auto-posts balanced.
-	e, err := PostInvoice(ctx, st, 1, j.ID, "INV-1", time.Now().UTC(),
+	e, err := PostInvoice(ctx, nil, st, 1, j.ID, "INV-1", time.Now().UTC(),
 		cust.ID, rev.ID, vat.ID, 1000, 200, "auto", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestPostInvoiceConsumer(t *testing.T) {
 	if e.Status != EntryPosted {
 		t.Fatalf("status = %d", e.Status)
 	}
-	tb, _ := st.TrialBalance(ctx, 1)
+	tb, _ := st.TrialBalance(ctx, nil, 1)
 	var dr, cr int64
 	for _, s := range tb {
 		dr += s[0]

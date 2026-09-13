@@ -9,18 +9,19 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // Store is the persistence contract for the partners context.
 type Store interface {
-	CreateOrg(ctx context.Context, o *Organization) error
-	OrgByID(ctx context.Context, entityID, id int64) (Organization, error)
-	ListOrgs(ctx context.Context, entityID int64, limit, offset int) ([]Organization, error)
-	UpdateOrg(ctx context.Context, o *Organization) error
-	ParentOf(ctx context.Context, entityID, id int64) (*int64, bool)
-	CreateContact(ctx context.Context, c *Contact) error
-	ContactsOf(ctx context.Context, orgID int64) ([]Contact, error)
-	CreateCategory(ctx context.Context, c *Category) error
+	CreateOrg(ctx context.Context, db platform.DBTX, o *Organization) error
+	OrgByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Organization, error)
+	ListOrgs(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Organization, error)
+	UpdateOrg(ctx context.Context, db platform.DBTX, o *Organization) error
+	ParentOf(ctx context.Context, db platform.DBTX, entityID, id int64) (*int64, bool)
+	CreateContact(ctx context.Context, db platform.DBTX, c *Contact) error
+	ContactsOf(ctx context.Context, db platform.DBTX, orgID int64) ([]Contact, error)
+	CreateCategory(ctx context.Context, db platform.DBTX, c *Category) error
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -55,10 +56,10 @@ func scanOrg(row pgx.Row) (Organization, error) {
 // Omitted created/updated timestamps on the domain struct are tracked via RowVersion;
 // full audit timestamps live in the row. (Timestamps intentionally minimal in domain.)
 
-func (s *PGStore) CreateOrg(ctx context.Context, o *Organization) error {
+func (s *PGStore) CreateOrg(ctx context.Context, db platform.DBTX, o *Organization) error {
 	addr, _ := json.Marshal(o.Address)
 	custom, _ := json.Marshal(nullableMap(o.CustomFields))
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_organizations
+	return db.QueryRow(ctx, `INSERT INTO ferp_organizations
 		(entity_id, name, alias, ref_ext, parent_id, status, is_customer, is_supplier, is_prospect,
 		 customer_code, supplier_code, email, phone, address, acct_customer, acct_supplier,
 		 custom_fields, created_by, updated_by)
@@ -78,12 +79,12 @@ func nullableMap(m map[string]any) map[string]any {
 	return m
 }
 
-func (s *PGStore) OrgByID(ctx context.Context, entityID, id int64) (Organization, error) {
-	return scanOrg(s.pool.QueryRow(ctx, `SELECT `+orgCols+` FROM ferp_organizations WHERE id=$1 AND entity_id=$2`, id, entityID))
+func (s *PGStore) OrgByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Organization, error) {
+	return scanOrg(db.QueryRow(ctx, `SELECT `+orgCols+` FROM ferp_organizations WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
-func (s *PGStore) ListOrgs(ctx context.Context, entityID int64, limit, offset int) ([]Organization, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+orgCols+` FROM ferp_organizations
+func (s *PGStore) ListOrgs(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Organization, error) {
+	rows, err := db.Query(ctx, `SELECT `+orgCols+` FROM ferp_organizations
 		WHERE entity_id=$1 ORDER BY name LIMIT $2 OFFSET $3`, entityID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -100,10 +101,10 @@ func (s *PGStore) ListOrgs(ctx context.Context, entityID int64, limit, offset in
 	return out, rows.Err()
 }
 
-func (s *PGStore) UpdateOrg(ctx context.Context, o *Organization) error {
+func (s *PGStore) UpdateOrg(ctx context.Context, db platform.DBTX, o *Organization) error {
 	addr, _ := json.Marshal(o.Address)
 	custom, _ := json.Marshal(nullableMap(o.CustomFields))
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_organizations SET name=$1, alias=$2, ref_ext=$3,
+	tag, err := db.Exec(ctx, `UPDATE ferp_organizations SET name=$1, alias=$2, ref_ext=$3,
 		parent_id=$4, status=$5, is_customer=$6, is_supplier=$7, is_prospect=$8,
 		customer_code=NULLIF($9,''), supplier_code=NULLIF($10,''), email=$11, phone=$12,
 		address=$13, acct_customer=$14, acct_supplier=$15, custom_fields=$16,
@@ -122,9 +123,9 @@ func (s *PGStore) UpdateOrg(ctx context.Context, o *Organization) error {
 	return nil
 }
 
-func (s *PGStore) ParentOf(ctx context.Context, entityID, id int64) (*int64, bool) {
+func (s *PGStore) ParentOf(ctx context.Context, db platform.DBTX, entityID, id int64) (*int64, bool) {
 	var parent *int64
-	err := s.pool.QueryRow(ctx, `SELECT parent_id FROM ferp_organizations WHERE id=$1 AND entity_id=$2`, id, entityID).Scan(&parent)
+	err := db.QueryRow(ctx, `SELECT parent_id FROM ferp_organizations WHERE id=$1 AND entity_id=$2`, id, entityID).Scan(&parent)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false
 	}
@@ -153,9 +154,9 @@ func scanContact(row pgx.Row) (Contact, error) {
 	return c, nil
 }
 
-func (s *PGStore) CreateContact(ctx context.Context, c *Contact) error {
+func (s *PGStore) CreateContact(ctx context.Context, db platform.DBTX, c *Contact) error {
 	custom, _ := json.Marshal(nullableMap(c.CustomFields))
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_contacts
+	return db.QueryRow(ctx, `INSERT INTO ferp_contacts
 		(entity_id, org_id, first_name, last_name, email, phone, role, is_default, custom_fields, created_by, updated_by)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, row_version`,
 		c.EntityID, c.OrgID, c.FirstName, c.LastName, c.Email, c.Phone, c.Role,
@@ -163,8 +164,8 @@ func (s *PGStore) CreateContact(ctx context.Context, c *Contact) error {
 	).Scan(&c.ID, &c.RowVersion)
 }
 
-func (s *PGStore) ContactsOf(ctx context.Context, orgID int64) ([]Contact, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+contactCols+` FROM ferp_contacts WHERE org_id=$1 ORDER BY last_name, first_name`, orgID)
+func (s *PGStore) ContactsOf(ctx context.Context, db platform.DBTX, orgID int64) ([]Contact, error) {
+	rows, err := db.Query(ctx, `SELECT `+contactCols+` FROM ferp_contacts WHERE org_id=$1 ORDER BY last_name, first_name`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -180,8 +181,8 @@ func (s *PGStore) ContactsOf(ctx context.Context, orgID int64) ([]Contact, error
 	return out, rows.Err()
 }
 
-func (s *PGStore) CreateCategory(ctx context.Context, c *Category) error {
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_categories (entity_id, code, label, scope)
+func (s *PGStore) CreateCategory(ctx context.Context, db platform.DBTX, c *Category) error {
+	return db.QueryRow(ctx, `INSERT INTO ferp_categories (entity_id, code, label, scope)
 		VALUES ($1,$2,$3,$4) RETURNING id`, c.EntityID, c.Code, c.Label, c.Scope).Scan(&c.ID)
 }
 
@@ -201,7 +202,7 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
-func (m *MemoryStore) CreateOrg(_ context.Context, o *Organization) error {
+func (m *MemoryStore) CreateOrg(_ context.Context, _ platform.DBTX, o *Organization) error {
 	if err := o.Validate(); err != nil {
 		return err
 	}
@@ -221,7 +222,7 @@ func (m *MemoryStore) CreateOrg(_ context.Context, o *Organization) error {
 	return nil
 }
 
-func (m *MemoryStore) OrgByID(_ context.Context, entityID, id int64) (Organization, error) {
+func (m *MemoryStore) OrgByID(_ context.Context, _ platform.DBTX, entityID, id int64) (Organization, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	o, ok := m.orgs[id]
@@ -231,7 +232,7 @@ func (m *MemoryStore) OrgByID(_ context.Context, entityID, id int64) (Organizati
 	return o, nil
 }
 
-func (m *MemoryStore) ListOrgs(_ context.Context, entityID int64, limit, offset int) ([]Organization, error) {
+func (m *MemoryStore) ListOrgs(_ context.Context, _ platform.DBTX, entityID int64, limit, offset int) ([]Organization, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Organization
@@ -250,7 +251,7 @@ func (m *MemoryStore) ListOrgs(_ context.Context, entityID int64, limit, offset 
 	return out, nil
 }
 
-func (m *MemoryStore) UpdateOrg(_ context.Context, o *Organization) error {
+func (m *MemoryStore) UpdateOrg(_ context.Context, _ platform.DBTX, o *Organization) error {
 	if err := o.Validate(); err != nil {
 		return err
 	}
@@ -268,7 +269,7 @@ func (m *MemoryStore) UpdateOrg(_ context.Context, o *Organization) error {
 	return nil
 }
 
-func (m *MemoryStore) ParentOf(_ context.Context, entityID, id int64) (*int64, bool) {
+func (m *MemoryStore) ParentOf(_ context.Context, _ platform.DBTX, entityID, id int64) (*int64, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	o, ok := m.orgs[id]
@@ -278,7 +279,7 @@ func (m *MemoryStore) ParentOf(_ context.Context, entityID, id int64) (*int64, b
 	return o.ParentID, true
 }
 
-func (m *MemoryStore) CreateContact(_ context.Context, c *Contact) error {
+func (m *MemoryStore) CreateContact(_ context.Context, _ platform.DBTX, c *Contact) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -293,7 +294,7 @@ func (m *MemoryStore) CreateContact(_ context.Context, c *Contact) error {
 	return nil
 }
 
-func (m *MemoryStore) ContactsOf(_ context.Context, orgID int64) ([]Contact, error) {
+func (m *MemoryStore) ContactsOf(_ context.Context, _ platform.DBTX, orgID int64) ([]Contact, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Contact
@@ -305,7 +306,7 @@ func (m *MemoryStore) ContactsOf(_ context.Context, orgID int64) ([]Contact, err
 	return out, nil
 }
 
-func (m *MemoryStore) CreateCategory(_ context.Context, c *Category) error {
+func (m *MemoryStore) CreateCategory(_ context.Context, _ platform.DBTX, c *Category) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}

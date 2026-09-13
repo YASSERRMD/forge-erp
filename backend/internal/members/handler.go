@@ -8,15 +8,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/go-chi/chi/v5"
 )
 
 // Deps wires handlers to persistence and the event bus.
 type Deps struct {
 	Store Store
 	Bus   platform.Bus
+	DB    platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -121,7 +122,7 @@ func (h *Handler) CreateType(w http.ResponseWriter, r *http.Request) {
 	}
 	t.ID = 0
 	t.EntityID = entityOf(r)
-	if err := h.deps.Store.CreateType(r.Context(), &t); err != nil {
+	if err := h.deps.Store.CreateType(r.Context(), h.deps.DB, &t); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -130,7 +131,7 @@ func (h *Handler) CreateType(w http.ResponseWriter, r *http.Request) {
 
 // ListTypes lists membership classes.
 func (h *Handler) ListTypes(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListTypes(r.Context(), entityOf(r))
+	list, err := h.deps.Store.ListTypes(r.Context(), h.deps.DB, entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -148,7 +149,7 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 	m.ID = 0
 	m.EntityID = entityOf(r)
 	m.Status = MemberDraft
-	if err := h.deps.Store.CreateMember(r.Context(), &m); err != nil {
+	if err := h.deps.Store.CreateMember(r.Context(), h.deps.DB, &m); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -159,7 +160,7 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 // ListMembers pages members.
 func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	limit, offset := page(r)
-	list, err := h.deps.Store.ListMembers(r.Context(), entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListMembers(r.Context(), h.deps.DB, entityOf(r), limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -179,7 +180,7 @@ func (h *Handler) SetMemberStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	m, err := h.deps.Store.SetMemberStatus(r.Context(), entityOf(r), id, MemberStatus(in.Status), in.RowVersion)
+	m, err := h.deps.Store.SetMemberStatus(r.Context(), h.deps.DB, entityOf(r), id, MemberStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -203,7 +204,7 @@ func (h *Handler) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 	s.EntityID = entityOf(r)
 	s.MemberID = mid
 	s.Status = SubDraft
-	if err := h.deps.Store.CreateSubscription(r.Context(), &s); err != nil {
+	if err := h.deps.Store.CreateSubscription(r.Context(), h.deps.DB, &s); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -217,7 +218,7 @@ func (h *Handler) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.SubscriptionsOf(r.Context(), entityOf(r), mid)
+	list, err := h.deps.Store.SubscriptionsOf(r.Context(), h.deps.DB, entityOf(r), mid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -237,7 +238,7 @@ func (h *Handler) SetSubscriptionStatus(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	s, err := h.deps.Store.SetSubscriptionStatus(r.Context(), entityOf(r), id, SubscriptionStatus(in.Status), in.RowVersion)
+	s, err := h.deps.Store.SetSubscriptionStatus(r.Context(), h.deps.DB, entityOf(r), id, SubscriptionStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -255,7 +256,7 @@ func (h *Handler) CreateDonation(w http.ResponseWriter, r *http.Request) {
 	d.ID = 0
 	d.EntityID = entityOf(r)
 	d.Status = DonationPromised
-	if err := h.deps.Store.CreateDonation(r.Context(), &d); err != nil {
+	if err := h.deps.Store.CreateDonation(r.Context(), h.deps.DB, &d); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -266,7 +267,7 @@ func (h *Handler) CreateDonation(w http.ResponseWriter, r *http.Request) {
 // ListDonations pages donations.
 func (h *Handler) ListDonations(w http.ResponseWriter, r *http.Request) {
 	limit, offset := page(r)
-	list, err := h.deps.Store.ListDonations(r.Context(), entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListDonations(r.Context(), h.deps.DB, entityOf(r), limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -286,7 +287,7 @@ func (h *Handler) SetDonationStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	d, err := h.deps.Store.SetDonationStatus(r.Context(), entityOf(r), id, DonationStatus(in.Status), in.RowVersion)
+	d, err := h.deps.Store.SetDonationStatus(r.Context(), h.deps.DB, entityOf(r), id, DonationStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

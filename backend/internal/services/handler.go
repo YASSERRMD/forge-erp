@@ -8,15 +8,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/go-chi/chi/v5"
 )
 
 // Deps wires handlers to persistence and the event bus (bus may be nil in tests).
 type Deps struct {
 	Store Store
 	Bus   platform.Bus
+	DB    platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -134,7 +135,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	p.ID = 0
 	p.EntityID = entityOf(r)
 	p.Status = ProjectDraft
-	if err := h.deps.Store.CreateProject(r.Context(), &p); err != nil {
+	if err := h.deps.Store.CreateProject(r.Context(), h.deps.DB, &p); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -145,7 +146,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 // ListProjects pages projects within the caller's entity.
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	limit, offset := page(r)
-	list, err := h.deps.Store.ListProjects(r.Context(), entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListProjects(r.Context(), h.deps.DB, entityOf(r), limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -160,7 +161,7 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	p, err := h.deps.Store.ProjectByID(r.Context(), entityOf(r), id)
+	p, err := h.deps.Store.ProjectByID(r.Context(), h.deps.DB, entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -180,7 +181,7 @@ func (h *Handler) SetProjectStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	p, err := h.deps.Store.SetProjectStatus(r.Context(), entityOf(r), id, ProjectStatus(in.Status), in.RowVersion)
+	p, err := h.deps.Store.SetProjectStatus(r.Context(), h.deps.DB, entityOf(r), id, ProjectStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -205,7 +206,7 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	t.EntityID = entityOf(r)
 	t.ProjectID = pid
 	t.Status = TaskTodo
-	if err := h.deps.Store.CreateTask(r.Context(), &t); err != nil {
+	if err := h.deps.Store.CreateTask(r.Context(), h.deps.DB, &t); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -220,7 +221,7 @@ func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.TasksOf(r.Context(), pid)
+	list, err := h.deps.Store.TasksOf(r.Context(), h.deps.DB, pid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -240,7 +241,7 @@ func (h *Handler) SetTaskStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	t, err := h.deps.Store.SetTaskStatus(r.Context(), entityOf(r), id, TaskStatus(in.Status), in.RowVersion)
+	t, err := h.deps.Store.SetTaskStatus(r.Context(), h.deps.DB, entityOf(r), id, TaskStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -263,7 +264,7 @@ func (h *Handler) AddTime(w http.ResponseWriter, r *http.Request) {
 	e.ID = 0
 	e.EntityID = entityOf(r)
 	e.TaskID = tid
-	if err := h.deps.Store.AddTime(r.Context(), &e); err != nil {
+	if err := h.deps.Store.AddTime(r.Context(), h.deps.DB, &e); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -277,7 +278,7 @@ func (h *Handler) TaskHours(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	sum, err := h.deps.Store.TaskHours(r.Context(), tid)
+	sum, err := h.deps.Store.TaskHours(r.Context(), h.deps.DB, tid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "sum failed")
 		return
@@ -292,7 +293,7 @@ func (h *Handler) ProjectHours(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	sum, err := h.deps.Store.ProjectHours(r.Context(), pid)
+	sum, err := h.deps.Store.ProjectHours(r.Context(), h.deps.DB, pid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "sum failed")
 		return
@@ -310,7 +311,7 @@ func (h *Handler) CreateContract(w http.ResponseWriter, r *http.Request) {
 	c.ID = 0
 	c.EntityID = entityOf(r)
 	c.Status = ContractDraft
-	if err := h.deps.Store.CreateContract(r.Context(), &c); err != nil {
+	if err := h.deps.Store.CreateContract(r.Context(), h.deps.DB, &c); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -330,7 +331,7 @@ func (h *Handler) SetContractStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	c, err := h.deps.Store.SetContractStatus(r.Context(), entityOf(r), id, ContractStatus(in.Status), in.RowVersion)
+	c, err := h.deps.Store.SetContractStatus(r.Context(), h.deps.DB, entityOf(r), id, ContractStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -341,7 +342,7 @@ func (h *Handler) SetContractStatus(w http.ResponseWriter, r *http.Request) {
 // ListContracts pages contracts within the caller's entity.
 func (h *Handler) ListContracts(w http.ResponseWriter, r *http.Request) {
 	limit, offset := page(r)
-	list, err := h.deps.Store.ListContracts(r.Context(), entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListContracts(r.Context(), h.deps.DB, entityOf(r), limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -356,7 +357,7 @@ func (h *Handler) ContractsOfOrg(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad org id")
 		return
 	}
-	list, err := h.deps.Store.ContractsOfOrg(r.Context(), orgID)
+	list, err := h.deps.Store.ContractsOfOrg(r.Context(), h.deps.DB, orgID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -374,7 +375,7 @@ func (h *Handler) CreateIntervention(w http.ResponseWriter, r *http.Request) {
 	in.ID = 0
 	in.EntityID = entityOf(r)
 	in.Status = InterventionScheduled
-	if err := h.deps.Store.CreateIntervention(r.Context(), &in); err != nil {
+	if err := h.deps.Store.CreateIntervention(r.Context(), h.deps.DB, &in); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -385,7 +386,7 @@ func (h *Handler) CreateIntervention(w http.ResponseWriter, r *http.Request) {
 // ListInterventions pages interventions within the caller's entity.
 func (h *Handler) ListInterventions(w http.ResponseWriter, r *http.Request) {
 	limit, offset := page(r)
-	list, err := h.deps.Store.ListInterventions(r.Context(), entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListInterventions(r.Context(), h.deps.DB, entityOf(r), limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -405,7 +406,7 @@ func (h *Handler) SetInterventionStatus(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	upd, err := h.deps.Store.SetInterventionStatus(r.Context(), entityOf(r), id, InterventionStatus(in.Status), in.RowVersion)
+	upd, err := h.deps.Store.SetInterventionStatus(r.Context(), h.deps.DB, entityOf(r), id, InterventionStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -423,7 +424,7 @@ func (h *Handler) CreateTicket(w http.ResponseWriter, r *http.Request) {
 	t.ID = 0
 	t.EntityID = entityOf(r)
 	t.Status = TicketOpen
-	if err := h.deps.Store.CreateTicket(r.Context(), &t); err != nil {
+	if err := h.deps.Store.CreateTicket(r.Context(), h.deps.DB, &t); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -434,7 +435,7 @@ func (h *Handler) CreateTicket(w http.ResponseWriter, r *http.Request) {
 // ListTickets pages tickets within the caller's entity.
 func (h *Handler) ListTickets(w http.ResponseWriter, r *http.Request) {
 	limit, offset := page(r)
-	list, err := h.deps.Store.ListTickets(r.Context(), entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListTickets(r.Context(), h.deps.DB, entityOf(r), limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -449,7 +450,7 @@ func (h *Handler) GetTicket(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	t, err := h.deps.Store.TicketByID(r.Context(), entityOf(r), id)
+	t, err := h.deps.Store.TicketByID(r.Context(), h.deps.DB, entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -469,7 +470,7 @@ func (h *Handler) SetTicketStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	t, err := h.deps.Store.SetTicketStatus(r.Context(), entityOf(r), id, TicketStatus(in.Status), in.RowVersion)
+	t, err := h.deps.Store.SetTicketStatus(r.Context(), h.deps.DB, entityOf(r), id, TicketStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -492,7 +493,7 @@ func (h *Handler) AddMessage(w http.ResponseWriter, r *http.Request) {
 	m.ID = 0
 	m.EntityID = entityOf(r)
 	m.TicketID = tid
-	if err := h.deps.Store.AddMessage(r.Context(), &m); err != nil {
+	if err := h.deps.Store.AddMessage(r.Context(), h.deps.DB, &m); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -506,7 +507,7 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.MessagesOf(r.Context(), tid)
+	list, err := h.deps.Store.MessagesOf(r.Context(), h.deps.DB, tid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return

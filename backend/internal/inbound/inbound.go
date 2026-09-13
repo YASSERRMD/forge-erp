@@ -15,29 +15,29 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/YASSERRMD/forge-erp/backend/internal/services"
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Mailbox is an inbound mail source (fetch config; passwords live in env/secrets).
 type Mailbox struct {
-	ID        int64     `json:"id"`
-	EntityID  int64     `json:"entity_id"`
-	Code      string    `json:"code"` // unique per entity
-	Host      string    `json:"host"`
-	Port      int       `json:"port"`
-	Username  string    `json:"username"`
-	UseTLS    bool      `json:"use_tls"`
-	Active    bool      `json:"active"`
-	LastFetch *time.Time `json:"last_fetch"`
-	LastError string    `json:"last_error"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	RowVersion int64    `json:"row_version"`
+	ID         int64      `json:"id"`
+	EntityID   int64      `json:"entity_id"`
+	Code       string     `json:"code"` // unique per entity
+	Host       string     `json:"host"`
+	Port       int        `json:"port"`
+	Username   string     `json:"username"`
+	UseTLS     bool       `json:"use_tls"`
+	Active     bool       `json:"active"`
+	LastFetch  *time.Time `json:"last_fetch"`
+	LastError  string     `json:"last_error"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	RowVersion int64      `json:"row_version"`
 }
 
 // Validate checks mailbox invariants.
@@ -56,16 +56,16 @@ func (m Mailbox) Validate() error {
 
 // Tickets abstracts ticket filing for received mail.
 type Tickets interface {
-	CreateTicket(ctx context.Context, t *services.Ticket) error
-	AddMessage(ctx context.Context, m *services.TicketMessage) error
+	CreateTicket(ctx context.Context, db platform.DBTX, t *services.Ticket) error
+	AddMessage(ctx context.Context, db platform.DBTX, m *services.TicketMessage) error
 }
 
 // Store is the persistence contract for mailboxes.
 type Store interface {
-	UpsertMailbox(ctx context.Context, m *Mailbox) error
-	MailboxByCode(ctx context.Context, entityID int64, code string) (Mailbox, error)
-	ListMailboxes(ctx context.Context, entityID int64) ([]Mailbox, error)
-	RecordFetch(ctx context.Context, entityID int64, code string, at time.Time, fetchErr string) error
+	UpsertMailbox(ctx context.Context, db platform.DBTX, m *Mailbox) error
+	MailboxByCode(ctx context.Context, db platform.DBTX, entityID int64, code string) (Mailbox, error)
+	ListMailboxes(ctx context.Context, db platform.DBTX, entityID int64) ([]Mailbox, error)
+	RecordFetch(ctx context.Context, db platform.DBTX, entityID int64, code string, at time.Time, fetchErr string) error
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -91,11 +91,11 @@ func mailboxErr(err error) error {
 	return err
 }
 
-func (s *PGStore) UpsertMailbox(ctx context.Context, mb *Mailbox) error {
+func (s *PGStore) UpsertMailbox(ctx context.Context, db platform.DBTX, mb *Mailbox) error {
 	if err := mb.Validate(); err != nil {
 		return err
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_mailboxes
+	return db.QueryRow(ctx, `INSERT INTO ferp_mailboxes
 		(entity_id, code, host, port, username, use_tls, active)
 		VALUES ($1,$2,$3,$4,$5,$6,$7)
 		ON CONFLICT (entity_id, code) DO UPDATE SET
@@ -107,14 +107,14 @@ func (s *PGStore) UpsertMailbox(ctx context.Context, mb *Mailbox) error {
 	).Scan(&mb.ID, &mb.RowVersion)
 }
 
-func (s *PGStore) MailboxByCode(ctx context.Context, entityID int64, code string) (Mailbox, error) {
-	mb, err := scanMailbox(s.pool.QueryRow(ctx, `SELECT `+mailboxCols+` FROM ferp_mailboxes
+func (s *PGStore) MailboxByCode(ctx context.Context, db platform.DBTX, entityID int64, code string) (Mailbox, error) {
+	mb, err := scanMailbox(db.QueryRow(ctx, `SELECT `+mailboxCols+` FROM ferp_mailboxes
 		WHERE entity_id=$1 AND code=$2`, entityID, code))
 	return mb, mailboxErr(err)
 }
 
-func (s *PGStore) ListMailboxes(ctx context.Context, entityID int64) ([]Mailbox, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+mailboxCols+` FROM ferp_mailboxes WHERE entity_id=$1 ORDER BY code`, entityID)
+func (s *PGStore) ListMailboxes(ctx context.Context, db platform.DBTX, entityID int64) ([]Mailbox, error) {
+	rows, err := db.Query(ctx, `SELECT `+mailboxCols+` FROM ferp_mailboxes WHERE entity_id=$1 ORDER BY code`, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -130,8 +130,8 @@ func (s *PGStore) ListMailboxes(ctx context.Context, entityID int64) ([]Mailbox,
 	return out, rows.Err()
 }
 
-func (s *PGStore) RecordFetch(ctx context.Context, entityID int64, code string, at time.Time, fetchErr string) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_mailboxes SET last_fetch=$1, last_error=$2, updated_at=now()
+func (s *PGStore) RecordFetch(ctx context.Context, db platform.DBTX, entityID int64, code string, at time.Time, fetchErr string) error {
+	tag, err := db.Exec(ctx, `UPDATE ferp_mailboxes SET last_fetch=$1, last_error=$2, updated_at=now()
 		WHERE entity_id=$3 AND code=$4`, at, fetchErr, entityID, code)
 	if err != nil {
 		return err
@@ -157,7 +157,7 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
-func (m *MemoryStore) UpsertMailbox(_ context.Context, mb *Mailbox) error {
+func (m *MemoryStore) UpsertMailbox(_ context.Context, _ platform.DBTX, mb *Mailbox) error {
 	if err := mb.Validate(); err != nil {
 		return err
 	}
@@ -177,7 +177,7 @@ func (m *MemoryStore) UpsertMailbox(_ context.Context, mb *Mailbox) error {
 	return nil
 }
 
-func (m *MemoryStore) MailboxByCode(_ context.Context, entityID int64, code string) (Mailbox, error) {
+func (m *MemoryStore) MailboxByCode(_ context.Context, _ platform.DBTX, entityID int64, code string) (Mailbox, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.mailboxes {
@@ -188,7 +188,7 @@ func (m *MemoryStore) MailboxByCode(_ context.Context, entityID int64, code stri
 	return Mailbox{}, identity.ErrNotFound
 }
 
-func (m *MemoryStore) ListMailboxes(_ context.Context, entityID int64) ([]Mailbox, error) {
+func (m *MemoryStore) ListMailboxes(_ context.Context, _ platform.DBTX, entityID int64) ([]Mailbox, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Mailbox
@@ -200,7 +200,7 @@ func (m *MemoryStore) ListMailboxes(_ context.Context, entityID int64) ([]Mailbo
 	return out, nil
 }
 
-func (m *MemoryStore) RecordFetch(_ context.Context, entityID int64, code string, at time.Time, fetchErr string) error {
+func (m *MemoryStore) RecordFetch(_ context.Context, _ platform.DBTX, entityID int64, code string, at time.Time, fetchErr string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, e := range m.mailboxes {
@@ -219,6 +219,7 @@ type Deps struct {
 	Store   Store
 	Tickets Tickets
 	Bus     platform.Bus
+	DB      platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -283,7 +284,7 @@ func (h *Handler) UpsertMailbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mb.EntityID = entityOf(r)
-	if err := h.deps.Store.UpsertMailbox(r.Context(), &mb); err != nil {
+	if err := h.deps.Store.UpsertMailbox(r.Context(), h.deps.DB, &mb); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -292,7 +293,7 @@ func (h *Handler) UpsertMailbox(w http.ResponseWriter, r *http.Request) {
 
 // ListMailboxes lists fetch sources with last-fetch state.
 func (h *Handler) ListMailboxes(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListMailboxes(r.Context(), entityOf(r))
+	list, err := h.deps.Store.ListMailboxes(r.Context(), h.deps.DB, entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -320,7 +321,7 @@ func (h *Handler) Receive(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "inbound: mailbox, from and subject required")
 		return
 	}
-	mb, err := h.deps.Store.MailboxByCode(r.Context(), entityOf(r), in.Mailbox)
+	mb, err := h.deps.Store.MailboxByCode(r.Context(), h.deps.DB, entityOf(r), in.Mailbox)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -333,17 +334,17 @@ func (h *Handler) Receive(w http.ResponseWriter, r *http.Request) {
 	ref := "MAIL-" + strconv.FormatInt(now.UnixNano(), 10)
 	tk := &services.Ticket{EntityID: entityOf(r), Ref: ref,
 		Subject: in.Subject, Priority: 2, Status: services.TicketOpen}
-	if err := h.deps.Tickets.CreateTicket(r.Context(), tk); err != nil {
+	if err := h.deps.Tickets.CreateTicket(r.Context(), h.deps.DB, tk); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
 	msg := &services.TicketMessage{EntityID: tk.EntityID, TicketID: tk.ID,
 		Author: in.From, Body: in.Body}
-	if err := h.deps.Tickets.AddMessage(r.Context(), msg); err != nil {
+	if err := h.deps.Tickets.AddMessage(r.Context(), h.deps.DB, msg); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	_ = h.deps.Store.RecordFetch(r.Context(), tk.EntityID, mb.Code, now, "")
+	_ = h.deps.Store.RecordFetch(r.Context(), h.deps.DB, tk.EntityID, mb.Code, now, "")
 	h.publish(r.Context(), entityOf(r), "forgeerp.inbound.ticketed.v1", "ticket", tk.ID)
 	writeJSON(w, http.StatusCreated, tk)
 }

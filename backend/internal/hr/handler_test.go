@@ -140,12 +140,12 @@ func TestPayExpensePostsLedger(t *testing.T) {
 		{EntityID: 1, Code: "512000", Label: "Bank", Type: "asset"},
 	} {
 		a := a
-		if err := fstore.CreateAccount(ctx, &a); err != nil {
+		if err := fstore.CreateAccount(ctx, nil, &a); err != nil {
 			t.Fatalf("account: %v", err)
 		}
 	}
 	j := &finance.Journal{EntityID: 1, Code: "ACH", Label: "Purchases"}
-	if err := fstore.CreateJournal(ctx, j); err != nil {
+	if err := fstore.CreateJournal(ctx, nil, j); err != nil {
 		t.Fatalf("journal: %v", err)
 	}
 	rec := doReq(t, r, http.MethodPost, "/api/v1/hr/expenses",
@@ -166,7 +166,7 @@ func TestPayExpensePostsLedger(t *testing.T) {
 		}
 		_ = json.NewDecoder(rec.Body).Decode(&rep)
 	}
-	accts, _ := fstore.Accounts(ctx, 1)
+	accts, _ := fstore.Accounts(ctx, nil, 1)
 	byCode := map[string]int64{}
 	for _, a := range accts {
 		byCode[a.Code] = a.ID
@@ -177,7 +177,7 @@ func TestPayExpensePostsLedger(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("pay: code=%d body=%s", rec.Code, rec.Body.String())
 	}
-	tb, _ := fstore.TrialBalance(ctx, 1)
+	tb, _ := fstore.TrialBalance(ctx, nil, 1)
 	if tb[byCode["625000"]] != [2]int64{3000, 0} || tb[byCode["512000"]] != [2]int64{0, 3000} {
 		t.Fatalf("trial=%v", tb)
 	}

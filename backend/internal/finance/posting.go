@@ -3,12 +3,14 @@ package finance
 import (
 	"context"
 	"time"
+
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // PostInvoice auto-posts a sales/purchase invoice into the ledger (event consumer
 // for invoice-paid/validated events): DR customer/supplier control, CR revenue,
 // CR VAT. VAT leg omitted when zero. Returns the posted entry.
-func PostInvoice(ctx context.Context, s Store, entityID, journalID int64, ref string,
+func PostInvoice(ctx context.Context, db platform.DBTX, s Store, entityID, journalID int64, ref string,
 	date time.Time, customerAcct, revenueAcct, vatAcct int64,
 	net, vat int64, memo string, createdBy *int64) (*Entry, error) {
 	lines := []EntryLine{
@@ -20,7 +22,7 @@ func PostInvoice(ctx context.Context, s Store, entityID, journalID int64, ref st
 	}
 	e := &Entry{EntityID: entityID, JournalID: journalID, Ref: ref, Date: date,
 		Memo: memo, Lines: lines, CreatedBy: createdBy}
-	if err := s.PostEntry(ctx, e); err != nil {
+	if err := s.PostEntry(ctx, db, e); err != nil {
 		return nil, err
 	}
 	return e, nil

@@ -8,15 +8,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/go-chi/chi/v5"
 )
 
 // Deps wires handlers to persistence and the event bus.
 type Deps struct {
 	Store Store
 	Bus   platform.Bus
+	DB    platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -112,7 +113,7 @@ func (h *Handler) CreateArticle(w http.ResponseWriter, r *http.Request) {
 	a.ID = 0
 	a.EntityID = entityOf(r)
 	a.Status = ArticleDraft
-	if err := h.deps.Store.CreateArticle(r.Context(), &a); err != nil {
+	if err := h.deps.Store.CreateArticle(r.Context(), h.deps.DB, &a); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -122,7 +123,7 @@ func (h *Handler) CreateArticle(w http.ResponseWriter, r *http.Request) {
 // ListArticles pages articles (publishedOnly=1 filters drafts).
 func (h *Handler) ListArticles(w http.ResponseWriter, r *http.Request) {
 	limit, offset := page(r)
-	list, err := h.deps.Store.ListArticles(r.Context(), entityOf(r),
+	list, err := h.deps.Store.ListArticles(r.Context(), h.deps.DB, entityOf(r),
 		r.URL.Query().Get("publishedOnly") == "1", limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
@@ -150,7 +151,7 @@ func (h *Handler) UpdateArticle(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a, err := h.deps.Store.UpdateArticle(r.Context(), entityOf(r), id, in.Title, in.Body, in.Tags, in.RowVersion)
+	a, err := h.deps.Store.UpdateArticle(r.Context(), h.deps.DB, entityOf(r), id, in.Title, in.Body, in.Tags, in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -170,7 +171,7 @@ func (h *Handler) SetArticleStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a, err := h.deps.Store.SetArticleStatus(r.Context(), entityOf(r), id, ArticleStatus(in.Status), in.RowVersion)
+	a, err := h.deps.Store.SetArticleStatus(r.Context(), h.deps.DB, entityOf(r), id, ArticleStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -181,7 +182,7 @@ func (h *Handler) SetArticleStatus(w http.ResponseWriter, r *http.Request) {
 
 // Search searches published articles.
 func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.SearchArticles(r.Context(), entityOf(r), r.URL.Query().Get("q"), 50)
+	list, err := h.deps.Store.SearchArticles(r.Context(), h.deps.DB, entityOf(r), r.URL.Query().Get("q"), 50)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "search failed")
 		return

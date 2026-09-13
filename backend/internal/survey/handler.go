@@ -8,15 +8,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/go-chi/chi/v5"
 )
 
 // Deps wires handlers to persistence and the event bus.
 type Deps struct {
 	Store Store
 	Bus   platform.Bus
+	DB    platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -108,7 +109,7 @@ func (h *Handler) CreateSurvey(w http.ResponseWriter, r *http.Request) {
 	s.ID = 0
 	s.EntityID = entityOf(r)
 	s.Status = SurveyDraft
-	if err := h.deps.Store.CreateSurvey(r.Context(), &s); err != nil {
+	if err := h.deps.Store.CreateSurvey(r.Context(), h.deps.DB, &s); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -118,7 +119,7 @@ func (h *Handler) CreateSurvey(w http.ResponseWriter, r *http.Request) {
 
 // ListSurveys lists surveys within the caller's entity.
 func (h *Handler) ListSurveys(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListSurveys(r.Context(), entityOf(r))
+	list, err := h.deps.Store.ListSurveys(r.Context(), h.deps.DB, entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -138,7 +139,7 @@ func (h *Handler) SetSurveyStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	s, err := h.deps.Store.SetSurveyStatus(r.Context(), entityOf(r), id, SurveyStatus(in.Status), in.RowVersion)
+	s, err := h.deps.Store.SetSurveyStatus(r.Context(), h.deps.DB, entityOf(r), id, SurveyStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -161,7 +162,7 @@ func (h *Handler) AddQuestion(w http.ResponseWriter, r *http.Request) {
 	q.ID = 0
 	q.EntityID = entityOf(r)
 	q.SurveyID = sid
-	if err := h.deps.Store.AddQuestion(r.Context(), &q); err != nil {
+	if err := h.deps.Store.AddQuestion(r.Context(), h.deps.DB, &q); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -175,7 +176,7 @@ func (h *Handler) ListQuestions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.QuestionsOf(r.Context(), entityOf(r), sid)
+	list, err := h.deps.Store.QuestionsOf(r.Context(), h.deps.DB, entityOf(r), sid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -198,7 +199,7 @@ func (h *Handler) AddOption(w http.ResponseWriter, r *http.Request) {
 	o.ID = 0
 	o.EntityID = entityOf(r)
 	o.QuestionID = qid
-	if err := h.deps.Store.AddOption(r.Context(), &o); err != nil {
+	if err := h.deps.Store.AddOption(r.Context(), h.deps.DB, &o); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -212,7 +213,7 @@ func (h *Handler) ListOptions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.OptionsOf(r.Context(), entityOf(r), qid)
+	list, err := h.deps.Store.OptionsOf(r.Context(), h.deps.DB, entityOf(r), qid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -235,7 +236,7 @@ func (h *Handler) CastVote(w http.ResponseWriter, r *http.Request) {
 	v.ID = 0
 	v.EntityID = entityOf(r)
 	v.QuestionID = qid
-	if err := h.deps.Store.CastVote(r.Context(), &v); err != nil {
+	if err := h.deps.Store.CastVote(r.Context(), h.deps.DB, &v); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -249,7 +250,7 @@ func (h *Handler) Results(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	tally, err := h.deps.Store.Results(r.Context(), entityOf(r), qid)
+	tally, err := h.deps.Store.Results(r.Context(), h.deps.DB, entityOf(r), qid)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

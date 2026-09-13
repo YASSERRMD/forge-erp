@@ -23,17 +23,17 @@ func TestAssetLifecycle(t *testing.T) {
 	ctx := context.Background()
 	m := NewMemoryStore()
 	a := &Asset{EntityID: 1, Code: "CNC-1", Label: "CNC mill", Kind: "workstation", Status: AssetInService}
-	if err := m.CreateAsset(ctx, a); err != nil {
+	if err := m.CreateAsset(ctx, nil, a); err != nil {
 		t.Fatalf("asset: %v", err)
 	}
-	if err := m.CreateAsset(ctx, &Asset{EntityID: 1, Code: "X", Label: "x", Kind: "spaceship"}); err == nil {
+	if err := m.CreateAsset(ctx, nil, &Asset{EntityID: 1, Code: "X", Label: "x", Kind: "spaceship"}); err == nil {
 		t.Error("bad kind accepted")
 	}
-	upd, err := m.SetAssetStatus(ctx, 1, a.ID, AssetMaintenance, a.RowVersion)
+	upd, err := m.SetAssetStatus(ctx, nil, 1, a.ID, AssetMaintenance, a.RowVersion)
 	if err != nil {
 		t.Fatalf("maintenance: %v", err)
 	}
-	if _, err := m.SetAssetStatus(ctx, 1, a.ID, AssetRetired, upd.RowVersion); err != nil {
+	if _, err := m.SetAssetStatus(ctx, nil, 1, a.ID, AssetRetired, upd.RowVersion); err != nil {
 		t.Fatalf("retire: %v", err)
 	}
 
@@ -63,34 +63,35 @@ func TestUpdateFrozenRetired(t *testing.T) {
 	ctx := context.Background()
 	m := NewMemoryStore()
 	a := &Asset{EntityID: 1, Code: "A1", Label: "L", Kind: "it", Status: AssetInService}
-	if err := m.CreateAsset(ctx, a); err != nil {
+	if err := m.CreateAsset(ctx, nil, a); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	upd, err := m.UpdateAsset(ctx, 1, a.ID, "L2", "SN-1", nil, a.RowVersion)
+	upd, err := m.UpdateAsset(ctx, nil, 1, a.ID, "L2", "SN-1", nil, a.RowVersion)
 	if err != nil || upd.Label != "L2" || upd.Serial != "SN-1" {
 		t.Fatalf("update: %+v %v", upd, err)
 	}
-	ret, err := m.SetAssetStatus(ctx, 1, a.ID, AssetRetired, upd.RowVersion)
+	ret, err := m.SetAssetStatus(ctx, nil, 1, a.ID, AssetRetired, upd.RowVersion)
 	if err != nil {
 		t.Fatalf("retire: %v", err)
 	}
-	if _, err := m.UpdateAsset(ctx, 1, a.ID, "L3", "", nil, ret.RowVersion); err == nil {
+	if _, err := m.UpdateAsset(ctx, nil, 1, a.ID, "L3", "", nil, ret.RowVersion); err == nil {
 		t.Error("retired edit accepted")
 	}
 }
 
 func TestPGAssetFlow(t *testing.T) {
 	ctx := context.Background()
-	st := NewPGStore(pgtest.Pool(t))
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
 	a := &Asset{EntityID: 1, Code: "PG-A", Label: "PG", Kind: "it", Status: AssetInService}
-	if err := st.CreateAsset(ctx, a); err != nil {
+	if err := st.CreateAsset(ctx, pool, a); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	got, err := st.AssetByID(ctx, 1, a.ID)
+	got, err := st.AssetByID(ctx, pool, 1, a.ID)
 	if err != nil || got.Code != "PG-A" {
 		t.Fatalf("by id: %+v %v", got, err)
 	}
-	if _, err := st.SetAssetStatus(ctx, 1, a.ID, AssetMaintenance, a.RowVersion); err != nil {
+	if _, err := st.SetAssetStatus(ctx, pool, 1, a.ID, AssetMaintenance, a.RowVersion); err != nil {
 		t.Fatalf("maintenance: %v", err)
 	}
 }
@@ -99,16 +100,16 @@ func TestCrossTenantIsolation(t *testing.T) {
 	ctx := context.Background()
 	m := NewMemoryStore()
 	a := &Asset{EntityID: 1, Code: "X-1", Label: "X", Kind: "it", Status: AssetInService}
-	if err := m.CreateAsset(ctx, a); err != nil {
+	if err := m.CreateAsset(ctx, nil, a); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := m.AssetByID(ctx, 2, a.ID); !errors.Is(err, identity.ErrNotFound) {
+	if _, err := m.AssetByID(ctx, nil, 2, a.ID); !errors.Is(err, identity.ErrNotFound) {
 		t.Fatalf("cross-tenant AssetByID err=%v want ErrNotFound", err)
 	}
-	if _, err := m.SetAssetStatus(ctx, 2, a.ID, AssetMaintenance, a.RowVersion); !errors.Is(err, identity.ErrNotFound) {
+	if _, err := m.SetAssetStatus(ctx, nil, 2, a.ID, AssetMaintenance, a.RowVersion); !errors.Is(err, identity.ErrNotFound) {
 		t.Fatalf("cross-tenant SetAssetStatus err=%v want ErrNotFound", err)
 	}
-	if _, err := m.UpdateAsset(ctx, 2, a.ID, "Y", "", nil, a.RowVersion); !errors.Is(err, identity.ErrNotFound) {
+	if _, err := m.UpdateAsset(ctx, nil, 2, a.ID, "Y", "", nil, a.RowVersion); !errors.Is(err, identity.ErrNotFound) {
 		t.Fatalf("cross-tenant UpdateAsset err=%v want ErrNotFound", err)
 	}
 }

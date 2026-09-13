@@ -16,6 +16,7 @@ import (
 // Deps wires handlers to persistence, the catalog ledger, and the event bus.
 type Deps struct {
 	Store  Store
+	DB     platform.DBTX
 	Ledger Ledger
 	Bus    platform.Bus
 }
@@ -111,7 +112,7 @@ func (h *Handler) CreateBOM(w http.ResponseWriter, r *http.Request) {
 	b.ID = 0
 	b.EntityID = entityOf(r)
 	b.Status = BOMDraft
-	if err := h.deps.Store.CreateBOM(r.Context(), &b); err != nil {
+	if err := h.deps.Store.CreateBOM(r.Context(), h.deps.DB, &b); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -126,7 +127,7 @@ func (h *Handler) ListBOMs(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	list, err := h.deps.Store.ListBOMs(r.Context(), entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListBOMs(r.Context(), h.deps.DB, entityOf(r), limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -141,7 +142,7 @@ func (h *Handler) GetBOM(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	b, err := h.deps.Store.BOMByID(r.Context(), entityOf(r), id)
+	b, err := h.deps.Store.BOMByID(r.Context(), h.deps.DB, entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -161,7 +162,7 @@ func (h *Handler) SetBOMStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	b, err := h.deps.Store.SetBOMStatus(r.Context(), entityOf(r), id, BOMStatus(in.Status), in.RowVersion)
+	b, err := h.deps.Store.SetBOMStatus(r.Context(), h.deps.DB, entityOf(r), id, BOMStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -184,7 +185,7 @@ func (h *Handler) AddLine(w http.ResponseWriter, r *http.Request) {
 	l.ID = 0
 	l.EntityID = entityOf(r)
 	l.BOMID = bid
-	if err := h.deps.Store.AddLine(r.Context(), &l); err != nil {
+	if err := h.deps.Store.AddLine(r.Context(), h.deps.DB, &l); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -198,7 +199,7 @@ func (h *Handler) ListLines(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.LinesOf(r.Context(), bid)
+	list, err := h.deps.Store.LinesOf(r.Context(), h.deps.DB, bid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -216,7 +217,7 @@ func (h *Handler) CreateMO(w http.ResponseWriter, r *http.Request) {
 	mo.ID = 0
 	mo.EntityID = entityOf(r)
 	mo.Status = MODraft
-	if err := h.deps.Store.CreateMO(r.Context(), &mo); err != nil {
+	if err := h.deps.Store.CreateMO(r.Context(), h.deps.DB, &mo); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -231,7 +232,7 @@ func (h *Handler) ListMOs(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	list, err := h.deps.Store.ListMOs(r.Context(), entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListMOs(r.Context(), h.deps.DB, entityOf(r), limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -246,7 +247,7 @@ func (h *Handler) GetMO(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	mo, err := h.deps.Store.MOByID(r.Context(), entityOf(r), id)
+	mo, err := h.deps.Store.MOByID(r.Context(), h.deps.DB, entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -266,7 +267,7 @@ func (h *Handler) SetMOStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	mo, err := h.deps.Store.SetMOStatus(r.Context(), entityOf(r), id, MOStatus(in.Status), in.RowVersion)
+	mo, err := h.deps.Store.SetMOStatus(r.Context(), h.deps.DB, entityOf(r), id, MOStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -282,22 +283,22 @@ func (h *Handler) Produce(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	mo, err := h.deps.Store.MOByID(r.Context(), entityOf(r), id)
+	mo, err := h.deps.Store.MOByID(r.Context(), h.deps.DB, entityOf(r), id)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	lines, err := h.deps.Store.LinesOf(r.Context(), mo.BOMID)
+	lines, err := h.deps.Store.LinesOf(r.Context(), h.deps.DB, mo.BOMID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "lines failed")
 		return
 	}
-	plan, err := PostProduce(r.Context(), mo, lines, h.deps.Ledger)
+	plan, err := PostProduce(r.Context(), h.deps.DB, mo, lines, h.deps.Ledger)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	done, err := h.deps.Store.MarkProduced(r.Context(), entityOf(r), mo.ID, mo.RowVersion)
+	done, err := h.deps.Store.MarkProduced(r.Context(), h.deps.DB, entityOf(r), mo.ID, mo.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

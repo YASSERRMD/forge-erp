@@ -10,9 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 )
 
 // Asset status.
@@ -74,11 +75,11 @@ func (a Asset) CanTransition(to AssetStatus) bool {
 
 // Store is the persistence contract for assets.
 type Store interface {
-	CreateAsset(ctx context.Context, a *Asset) error
-	AssetByID(ctx context.Context, entityID int64, id int64) (Asset, error)
-	UpdateAsset(ctx context.Context, entityID int64, id int64, label, serial string, warehouseID *int64, rowVersion int64) (Asset, error)
-	ListAssets(ctx context.Context, entityID int64, limit, offset int) ([]Asset, error)
-	SetAssetStatus(ctx context.Context, entityID int64, id int64, to AssetStatus, rowVersion int64) (Asset, error)
+	CreateAsset(ctx context.Context, db platform.DBTX, a *Asset) error
+	AssetByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Asset, error)
+	UpdateAsset(ctx context.Context, db platform.DBTX, entityID int64, id int64, label, serial string, warehouseID *int64, rowVersion int64) (Asset, error)
+	ListAssets(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Asset, error)
+	SetAssetStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to AssetStatus, rowVersion int64) (Asset, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -100,11 +101,11 @@ func scanAsset(row pgx.Row) (Asset, error) {
 	return a, err
 }
 
-func (s *PGStore) CreateAsset(ctx context.Context, a *Asset) error {
+func (s *PGStore) CreateAsset(ctx context.Context, db platform.DBTX, a *Asset) error {
 	if err := a.Validate(); err != nil {
 		return err
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_assets
+	return db.QueryRow(ctx, `INSERT INTO ferp_assets
 		(entity_id, code, label, kind, product_id, serial, warehouse_id, status, acquired_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, row_version`,
 		a.EntityID, a.Code, a.Label, a.Kind, a.ProductID, a.Serial,
@@ -112,13 +113,13 @@ func (s *PGStore) CreateAsset(ctx context.Context, a *Asset) error {
 	).Scan(&a.ID, &a.RowVersion)
 }
 
-func (s *PGStore) AssetByID(ctx context.Context, entityID int64, id int64) (Asset, error) {
-	return scanAsset(s.pool.QueryRow(ctx, `SELECT `+assetCols+` FROM ferp_assets WHERE id=$1 AND entity_id=$2`, id, entityID))
+func (s *PGStore) AssetByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Asset, error) {
+	return scanAsset(db.QueryRow(ctx, `SELECT `+assetCols+` FROM ferp_assets WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 // UpdateAsset edits a non-retired asset's label, serial and warehouse.
-func (s *PGStore) UpdateAsset(ctx context.Context, entityID int64, id int64, label, serial string, warehouseID *int64, rowVersion int64) (Asset, error) {
-	a, err := s.AssetByID(ctx, entityID, id)
+func (s *PGStore) UpdateAsset(ctx context.Context, db platform.DBTX, entityID int64, id int64, label, serial string, warehouseID *int64, rowVersion int64) (Asset, error) {
+	a, err := s.AssetByID(ctx, db, entityID, id)
 	if err != nil {
 		return Asset{}, err
 	}
@@ -131,7 +132,7 @@ func (s *PGStore) UpdateAsset(ctx context.Context, entityID int64, id int64, lab
 	if strings.TrimSpace(label) == "" {
 		return Asset{}, errors.New("assets: label required")
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_assets SET label=$1, serial=$2, warehouse_id=$3,
+	tag, err := db.Exec(ctx, `UPDATE ferp_assets SET label=$1, serial=$2, warehouse_id=$3,
 		updated_at=now(), row_version=row_version+1 WHERE id=$4 AND entity_id=$5 AND row_version=$6`,
 		label, serial, warehouseID, id, entityID, rowVersion)
 	if err != nil {
@@ -147,8 +148,8 @@ func (s *PGStore) UpdateAsset(ctx context.Context, entityID int64, id int64, lab
 	return a, nil
 }
 
-func (s *PGStore) ListAssets(ctx context.Context, entityID int64, limit, offset int) ([]Asset, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+assetCols+` FROM ferp_assets
+func (s *PGStore) ListAssets(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Asset, error) {
+	rows, err := db.Query(ctx, `SELECT `+assetCols+` FROM ferp_assets
 		WHERE entity_id=$1 ORDER BY code LIMIT $2 OFFSET $3`, entityID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -165,8 +166,8 @@ func (s *PGStore) ListAssets(ctx context.Context, entityID int64, limit, offset 
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetAssetStatus(ctx context.Context, entityID int64, id int64, to AssetStatus, rowVersion int64) (Asset, error) {
-	a, err := s.AssetByID(ctx, entityID, id)
+func (s *PGStore) SetAssetStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to AssetStatus, rowVersion int64) (Asset, error) {
+	a, err := s.AssetByID(ctx, db, entityID, id)
 	if err != nil {
 		return Asset{}, err
 	}
@@ -176,7 +177,7 @@ func (s *PGStore) SetAssetStatus(ctx context.Context, entityID int64, id int64, 
 	if !a.CanTransition(to) {
 		return Asset{}, errors.New("assets: illegal transition")
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_assets SET status=$1, updated_at=now(), row_version=row_version+1
+	tag, err := db.Exec(ctx, `UPDATE ferp_assets SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
 	if err != nil {
 		return Asset{}, err
@@ -203,7 +204,7 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
-func (m *MemoryStore) CreateAsset(_ context.Context, a *Asset) error {
+func (m *MemoryStore) CreateAsset(_ context.Context, _ platform.DBTX, a *Asset) error {
 	if err := a.Validate(); err != nil {
 		return err
 	}
@@ -220,7 +221,7 @@ func (m *MemoryStore) CreateAsset(_ context.Context, a *Asset) error {
 	return nil
 }
 
-func (m *MemoryStore) AssetByID(_ context.Context, entityID int64, id int64) (Asset, error) {
+func (m *MemoryStore) AssetByID(_ context.Context, _ platform.DBTX, entityID int64, id int64) (Asset, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.assets[id]
@@ -230,7 +231,7 @@ func (m *MemoryStore) AssetByID(_ context.Context, entityID int64, id int64) (As
 	return a, nil
 }
 
-func (m *MemoryStore) UpdateAsset(_ context.Context, entityID int64, id int64, label, serial string, warehouseID *int64, rowVersion int64) (Asset, error) {
+func (m *MemoryStore) UpdateAsset(_ context.Context, _ platform.DBTX, entityID int64, id int64, label, serial string, warehouseID *int64, rowVersion int64) (Asset, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.assets[id]
@@ -254,7 +255,7 @@ func (m *MemoryStore) UpdateAsset(_ context.Context, entityID int64, id int64, l
 	return a, nil
 }
 
-func (m *MemoryStore) ListAssets(_ context.Context, entityID int64, limit, offset int) ([]Asset, error) {
+func (m *MemoryStore) ListAssets(_ context.Context, _ platform.DBTX, entityID int64, limit, offset int) ([]Asset, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Asset
@@ -273,7 +274,7 @@ func (m *MemoryStore) ListAssets(_ context.Context, entityID int64, limit, offse
 	return out, nil
 }
 
-func (m *MemoryStore) SetAssetStatus(_ context.Context, entityID int64, id int64, to AssetStatus, rowVersion int64) (Asset, error) {
+func (m *MemoryStore) SetAssetStatus(_ context.Context, _ platform.DBTX, entityID int64, id int64, to AssetStatus, rowVersion int64) (Asset, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.assets[id]

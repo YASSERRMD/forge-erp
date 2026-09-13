@@ -17,6 +17,7 @@ import (
 type Deps struct {
 	Store Store
 	Bus   platform.Bus
+	DB    platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -111,7 +112,7 @@ func (h *Handler) CreateEvent(w http.ResponseWriter, r *http.Request) {
 	e.ID = 0
 	e.EntityID = entityOf(r)
 	e.Status = OrgEventDraft
-	if err := h.deps.Store.CreateEvent(r.Context(), &e); err != nil {
+	if err := h.deps.Store.CreateEvent(r.Context(), h.deps.DB, &e); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -121,7 +122,7 @@ func (h *Handler) CreateEvent(w http.ResponseWriter, r *http.Request) {
 
 // ListEvents lists events.
 func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListEvents(r.Context(), entityOf(r))
+	list, err := h.deps.Store.ListEvents(r.Context(), h.deps.DB, entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -141,7 +142,7 @@ func (h *Handler) SetEventStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	e, err := h.deps.Store.SetEventStatus(r.Context(), entityOf(r), id, OrgEventStatus(in.Status), in.RowVersion)
+	e, err := h.deps.Store.SetEventStatus(r.Context(), h.deps.DB, entityOf(r), id, OrgEventStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -165,7 +166,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	reg.EntityID = entityOf(r)
 	reg.EventID = eid
 	reg.Status = RegRegistered
-	if err := h.deps.Store.Register(r.Context(), &reg); err != nil {
+	if err := h.deps.Store.Register(r.Context(), h.deps.DB, &reg); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -180,7 +181,7 @@ func (h *Handler) ListRegistrations(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.RegistrationsOf(r.Context(), eid)
+	list, err := h.deps.Store.RegistrationsOf(r.Context(), h.deps.DB, eid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -200,7 +201,7 @@ func (h *Handler) SetRegistrationStatus(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	reg, err := h.deps.Store.SetRegistrationStatus(r.Context(), entityOf(r), id, RegistrationStatus(in.Status))
+	reg, err := h.deps.Store.SetRegistrationStatus(r.Context(), h.deps.DB, entityOf(r), id, RegistrationStatus(in.Status))
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -218,7 +219,7 @@ func (h *Handler) CreatePosition(w http.ResponseWriter, r *http.Request) {
 	p.ID = 0
 	p.EntityID = entityOf(r)
 	p.Status = PositionDraft
-	if err := h.deps.Store.CreatePosition(r.Context(), &p); err != nil {
+	if err := h.deps.Store.CreatePosition(r.Context(), h.deps.DB, &p); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -227,7 +228,7 @@ func (h *Handler) CreatePosition(w http.ResponseWriter, r *http.Request) {
 
 // ListPositions lists job postings.
 func (h *Handler) ListPositions(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListPositions(r.Context(), entityOf(r))
+	list, err := h.deps.Store.ListPositions(r.Context(), h.deps.DB, entityOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -247,7 +248,7 @@ func (h *Handler) SetPositionStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	p, err := h.deps.Store.SetPositionStatus(r.Context(), entityOf(r), id, PositionStatus(in.Status), in.RowVersion)
+	p, err := h.deps.Store.SetPositionStatus(r.Context(), h.deps.DB, entityOf(r), id, PositionStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -271,7 +272,7 @@ func (h *Handler) Apply(w http.ResponseWriter, r *http.Request) {
 	a.EntityID = entityOf(r)
 	a.PositionID = pid
 	a.Status = AppReceived
-	if err := h.deps.Store.Apply(r.Context(), &a); err != nil {
+	if err := h.deps.Store.Apply(r.Context(), h.deps.DB, &a); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -286,7 +287,7 @@ func (h *Handler) ListApplications(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.ApplicationsOf(r.Context(), pid)
+	list, err := h.deps.Store.ApplicationsOf(r.Context(), h.deps.DB, pid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -306,7 +307,7 @@ func (h *Handler) SetApplicationStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a, err := h.deps.Store.SetApplicationStatus(r.Context(), entityOf(r), id, ApplicationStatus(in.Status), in.RowVersion)
+	a, err := h.deps.Store.SetApplicationStatus(r.Context(), h.deps.DB, entityOf(r), id, ApplicationStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

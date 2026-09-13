@@ -19,6 +19,7 @@ import (
 // Deps wires handlers to persistence, providers, webhook secret and the bus.
 type Deps struct {
 	Store         Store
+	DB            platform.DBTX
 	Providers     *Registry
 	WebhookSecret string
 	Tolerance     time.Duration
@@ -134,12 +135,12 @@ func (h *Handler) CreateIntent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	if err := h.deps.Store.CreateAttempt(r.Context(), a); err != nil {
+	if err := h.deps.Store.CreateAttempt(r.Context(), h.deps.DB, a); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
 	if in.Provider == ProviderManual {
-		settled, err := h.deps.Store.SetAttemptStatus(r.Context(), entityOf(r), a.ID, AttemptSucceeded, a.RowVersion)
+		settled, err := h.deps.Store.SetAttemptStatus(r.Context(), h.deps.DB, entityOf(r), a.ID, AttemptSucceeded, a.RowVersion)
 		if err != nil {
 			writeErr(w, storeErrorCode(err), err.Error())
 			return
@@ -157,7 +158,7 @@ func (h *Handler) ListAttempts(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	list, err := h.deps.Store.ListAttempts(r.Context(), entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListAttempts(r.Context(), h.deps.DB, entityOf(r), limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -182,7 +183,7 @@ func (h *Handler) SetAttemptStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a, err := h.deps.Store.SetAttemptStatus(r.Context(), entityOf(r), id, AttemptStatus(in.Status), in.RowVersion)
+	a, err := h.deps.Store.SetAttemptStatus(r.Context(), h.deps.DB, entityOf(r), id, AttemptStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -218,7 +219,7 @@ func (h *Handler) StripeWebhook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad event")
 		return
 	}
-	a, err := h.deps.Store.AttemptByID(r.Context(), entityOf(r), ev.AttemptID)
+	a, err := h.deps.Store.AttemptByID(r.Context(), h.deps.DB, entityOf(r), ev.AttemptID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -237,7 +238,7 @@ func (h *Handler) StripeWebhook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "payments: unhandled event type")
 		return
 	}
-	upd, err := h.deps.Store.SetAttemptStatus(r.Context(), entityOf(r), a.ID, to, a.RowVersion)
+	upd, err := h.deps.Store.SetAttemptStatus(r.Context(), h.deps.DB, entityOf(r), a.ID, to, a.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

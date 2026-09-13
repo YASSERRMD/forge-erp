@@ -10,22 +10,23 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // Store is the persistence contract for till records (checkout orchestration
 // lives in the handler over the catalog/sales seams).
 type Store interface {
-	CreateTerminal(ctx context.Context, t *Terminal) error
-	TerminalByID(ctx context.Context, entityID, id int64) (Terminal, error)
-	ListTerminals(ctx context.Context, entityID int64) ([]Terminal, error)
-	OpenSession(ctx context.Context, s *Session) error
-	SessionByID(ctx context.Context, entityID, id int64) (Session, error)
-	CloseSession(ctx context.Context, entityID, id int64, rowVersion int64) (Session, error)
-	CreateSale(ctx context.Context, s *Sale) error
-	SaleByID(ctx context.Context, entityID, id int64) (Sale, error)
-	SalesOfSession(ctx context.Context, sessionID int64) ([]Sale, error)
-	VoidSale(ctx context.Context, entityID, id int64) (Sale, error)
-	MarkReturned(ctx context.Context, entityID, id int64) (Sale, error)
+	CreateTerminal(ctx context.Context, db platform.DBTX, t *Terminal) error
+	TerminalByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Terminal, error)
+	ListTerminals(ctx context.Context, db platform.DBTX, entityID int64) ([]Terminal, error)
+	OpenSession(ctx context.Context, db platform.DBTX, s *Session) error
+	SessionByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Session, error)
+	CloseSession(ctx context.Context, db platform.DBTX, entityID, id int64, rowVersion int64) (Session, error)
+	CreateSale(ctx context.Context, db platform.DBTX, s *Sale) error
+	SaleByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Sale, error)
+	SalesOfSession(ctx context.Context, db platform.DBTX, sessionID int64) ([]Sale, error)
+	VoidSale(ctx context.Context, db platform.DBTX, entityID, id int64) (Sale, error)
+	MarkReturned(ctx context.Context, db platform.DBTX, entityID, id int64) (Sale, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -46,23 +47,23 @@ func scanTerminal(row pgx.Row) (Terminal, error) {
 	return t, err
 }
 
-func (s *PGStore) CreateTerminal(ctx context.Context, t *Terminal) error {
+func (s *PGStore) CreateTerminal(ctx context.Context, db platform.DBTX, t *Terminal) error {
 	if err := t.Validate(); err != nil {
 		return err
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_pos_terminals
+	return db.QueryRow(ctx, `INSERT INTO ferp_pos_terminals
 		(entity_id, code, label, warehouse_id, status)
 		VALUES ($1,$2,$3,$4,$5) RETURNING id, row_version`,
 		t.EntityID, t.Code, t.Label, t.WarehouseID, t.Status,
 	).Scan(&t.ID, &t.RowVersion)
 }
 
-func (s *PGStore) TerminalByID(ctx context.Context, entityID, id int64) (Terminal, error) {
-	return scanTerminal(s.pool.QueryRow(ctx, `SELECT `+terminalCols+` FROM ferp_pos_terminals WHERE id=$1 AND entity_id=$2`, id, entityID))
+func (s *PGStore) TerminalByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Terminal, error) {
+	return scanTerminal(db.QueryRow(ctx, `SELECT `+terminalCols+` FROM ferp_pos_terminals WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
-func (s *PGStore) ListTerminals(ctx context.Context, entityID int64) ([]Terminal, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+terminalCols+` FROM ferp_pos_terminals WHERE entity_id=$1 ORDER BY code`, entityID)
+func (s *PGStore) ListTerminals(ctx context.Context, db platform.DBTX, entityID int64) ([]Terminal, error) {
+	rows, err := db.Query(ctx, `SELECT `+terminalCols+` FROM ferp_pos_terminals WHERE entity_id=$1 ORDER BY code`, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -90,30 +91,30 @@ func scanSession(row pgx.Row) (Session, error) {
 	return se, err
 }
 
-func (s *PGStore) OpenSession(ctx context.Context, se *Session) error {
+func (s *PGStore) OpenSession(ctx context.Context, db platform.DBTX, se *Session) error {
 	if err := se.Validate(); err != nil {
 		return err
 	}
-	t, err := s.TerminalByID(ctx, se.EntityID, se.TerminalID)
+	t, err := s.TerminalByID(ctx, db, se.EntityID, se.TerminalID)
 	if err != nil {
 		return err
 	}
 	if t.Status != TerminalActive {
 		return errors.New("pos: terminal inactive")
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_pos_sessions
+	return db.QueryRow(ctx, `INSERT INTO ferp_pos_sessions
 		(entity_id, terminal_id, cashier, opening_float, status)
 		VALUES ($1,$2,$3,$4,0) RETURNING id, opened_at, row_version`,
 		se.EntityID, se.TerminalID, se.Cashier, se.OpeningFloat,
 	).Scan(&se.ID, &se.OpenedAt, &se.RowVersion)
 }
 
-func (s *PGStore) SessionByID(ctx context.Context, entityID, id int64) (Session, error) {
-	return scanSession(s.pool.QueryRow(ctx, `SELECT `+sessionCols+` FROM ferp_pos_sessions WHERE id=$1 AND entity_id=$2`, id, entityID))
+func (s *PGStore) SessionByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Session, error) {
+	return scanSession(db.QueryRow(ctx, `SELECT `+sessionCols+` FROM ferp_pos_sessions WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
-func (s *PGStore) CloseSession(ctx context.Context, entityID, id int64, rowVersion int64) (Session, error) {
-	se, err := s.SessionByID(ctx, entityID, id)
+func (s *PGStore) CloseSession(ctx context.Context, db platform.DBTX, entityID, id int64, rowVersion int64) (Session, error) {
+	se, err := s.SessionByID(ctx, db, entityID, id)
 	if err != nil {
 		return Session{}, err
 	}
@@ -124,7 +125,7 @@ func (s *PGStore) CloseSession(ctx context.Context, entityID, id int64, rowVersi
 		return Session{}, errors.New("pos: session already closed")
 	}
 	now := time.Now().UTC()
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_pos_sessions SET status=1, closed_at=$1, row_version=row_version+1
+	tag, err := db.Exec(ctx, `UPDATE ferp_pos_sessions SET status=1, closed_at=$1, row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, now, id, entityID, rowVersion)
 	if err != nil {
 		return Session{}, err
@@ -156,9 +157,9 @@ func scanSale(row pgx.Row) (Sale, error) {
 	return sa, nil
 }
 
-func (s *PGStore) CreateSale(ctx context.Context, sa *Sale) error {
+func (s *PGStore) CreateSale(ctx context.Context, db platform.DBTX, sa *Sale) error {
 	raw, _ := json.Marshal(sa.Lines)
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_pos_sales
+	return db.QueryRow(ctx, `INSERT INTO ferp_pos_sales
 		(entity_id, session_id, ref, org_id, lines, total_gross, method, tendered, change, status, invoice_id, created_by)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, created_at`,
 		sa.EntityID, sa.SessionID, sa.Ref, sa.OrgID, raw, sa.TotalGross, sa.Method,
@@ -166,12 +167,12 @@ func (s *PGStore) CreateSale(ctx context.Context, sa *Sale) error {
 	).Scan(&sa.ID, &sa.CreatedAt)
 }
 
-func (s *PGStore) SaleByID(ctx context.Context, entityID, id int64) (Sale, error) {
-	return scanSale(s.pool.QueryRow(ctx, `SELECT `+saleCols+` FROM ferp_pos_sales WHERE id=$1 AND entity_id=$2`, id, entityID))
+func (s *PGStore) SaleByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Sale, error) {
+	return scanSale(db.QueryRow(ctx, `SELECT `+saleCols+` FROM ferp_pos_sales WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
-func (s *PGStore) SalesOfSession(ctx context.Context, sessionID int64) ([]Sale, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+saleCols+` FROM ferp_pos_sales WHERE session_id=$1 ORDER BY id`, sessionID)
+func (s *PGStore) SalesOfSession(ctx context.Context, db platform.DBTX, sessionID int64) ([]Sale, error) {
+	rows, err := db.Query(ctx, `SELECT `+saleCols+` FROM ferp_pos_sales WHERE session_id=$1 ORDER BY id`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -187,15 +188,15 @@ func (s *PGStore) SalesOfSession(ctx context.Context, sessionID int64) ([]Sale, 
 	return out, rows.Err()
 }
 
-func (s *PGStore) VoidSale(ctx context.Context, entityID, id int64) (Sale, error) {
-	sa, err := s.SaleByID(ctx, entityID, id)
+func (s *PGStore) VoidSale(ctx context.Context, db platform.DBTX, entityID, id int64) (Sale, error) {
+	sa, err := s.SaleByID(ctx, db, entityID, id)
 	if err != nil {
 		return Sale{}, err
 	}
 	if sa.Status != SaleCompleted {
 		return Sale{}, errors.New("pos: only completed sales can be voided")
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_pos_sales SET status=-1 WHERE id=$1 AND entity_id=$2 AND status=1`, id, entityID)
+	tag, err := db.Exec(ctx, `UPDATE ferp_pos_sales SET status=-1 WHERE id=$1 AND entity_id=$2 AND status=1`, id, entityID)
 	if err != nil {
 		return Sale{}, err
 	}
@@ -206,15 +207,15 @@ func (s *PGStore) VoidSale(ctx context.Context, entityID, id int64) (Sale, error
 	return sa, nil
 }
 
-func (s *PGStore) MarkReturned(ctx context.Context, entityID, id int64) (Sale, error) {
-	sa, err := s.SaleByID(ctx, entityID, id)
+func (s *PGStore) MarkReturned(ctx context.Context, db platform.DBTX, entityID, id int64) (Sale, error) {
+	sa, err := s.SaleByID(ctx, db, entityID, id)
 	if err != nil {
 		return Sale{}, err
 	}
 	if sa.Status != SaleCompleted {
 		return Sale{}, errors.New("pos: only completed sales can be returned")
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_pos_sales SET status=2 WHERE id=$1 AND entity_id=$2 AND status=1`, id, entityID)
+	tag, err := db.Exec(ctx, `UPDATE ferp_pos_sales SET status=2 WHERE id=$1 AND entity_id=$2 AND status=1`, id, entityID)
 	if err != nil {
 		return Sale{}, err
 	}
@@ -243,7 +244,7 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
-func (m *MemoryStore) CreateTerminal(_ context.Context, t *Terminal) error {
+func (m *MemoryStore) CreateTerminal(_ context.Context, _ platform.DBTX, t *Terminal) error {
 	if err := t.Validate(); err != nil {
 		return err
 	}
@@ -260,7 +261,7 @@ func (m *MemoryStore) CreateTerminal(_ context.Context, t *Terminal) error {
 	return nil
 }
 
-func (m *MemoryStore) TerminalByID(_ context.Context, entityID, id int64) (Terminal, error) {
+func (m *MemoryStore) TerminalByID(_ context.Context, _ platform.DBTX, entityID, id int64) (Terminal, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, ok := m.terminals[id]
@@ -270,7 +271,7 @@ func (m *MemoryStore) TerminalByID(_ context.Context, entityID, id int64) (Termi
 	return t, nil
 }
 
-func (m *MemoryStore) ListTerminals(_ context.Context, entityID int64) ([]Terminal, error) {
+func (m *MemoryStore) ListTerminals(_ context.Context, _ platform.DBTX, entityID int64) ([]Terminal, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Terminal
@@ -282,7 +283,7 @@ func (m *MemoryStore) ListTerminals(_ context.Context, entityID int64) ([]Termin
 	return out, nil
 }
 
-func (m *MemoryStore) OpenSession(_ context.Context, se *Session) error {
+func (m *MemoryStore) OpenSession(_ context.Context, _ platform.DBTX, se *Session) error {
 	if err := se.Validate(); err != nil {
 		return err
 	}
@@ -306,7 +307,7 @@ func (m *MemoryStore) OpenSession(_ context.Context, se *Session) error {
 	return nil
 }
 
-func (m *MemoryStore) SessionByID(_ context.Context, entityID, id int64) (Session, error) {
+func (m *MemoryStore) SessionByID(_ context.Context, _ platform.DBTX, entityID, id int64) (Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	se, ok := m.sessions[id]
@@ -316,7 +317,7 @@ func (m *MemoryStore) SessionByID(_ context.Context, entityID, id int64) (Sessio
 	return se, nil
 }
 
-func (m *MemoryStore) CloseSession(_ context.Context, entityID, id int64, rowVersion int64) (Session, error) {
+func (m *MemoryStore) CloseSession(_ context.Context, _ platform.DBTX, entityID, id int64, rowVersion int64) (Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	se, ok := m.sessions[id]
@@ -337,7 +338,7 @@ func (m *MemoryStore) CloseSession(_ context.Context, entityID, id int64, rowVer
 	return se, nil
 }
 
-func (m *MemoryStore) CreateSale(_ context.Context, sa *Sale) error {
+func (m *MemoryStore) CreateSale(_ context.Context, _ platform.DBTX, sa *Sale) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.sales {
@@ -351,7 +352,7 @@ func (m *MemoryStore) CreateSale(_ context.Context, sa *Sale) error {
 	return nil
 }
 
-func (m *MemoryStore) SaleByID(_ context.Context, entityID, id int64) (Sale, error) {
+func (m *MemoryStore) SaleByID(_ context.Context, _ platform.DBTX, entityID, id int64) (Sale, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sa, ok := m.sales[id]
@@ -361,7 +362,7 @@ func (m *MemoryStore) SaleByID(_ context.Context, entityID, id int64) (Sale, err
 	return sa, nil
 }
 
-func (m *MemoryStore) SalesOfSession(_ context.Context, sessionID int64) ([]Sale, error) {
+func (m *MemoryStore) SalesOfSession(_ context.Context, _ platform.DBTX, sessionID int64) ([]Sale, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Sale
@@ -373,7 +374,7 @@ func (m *MemoryStore) SalesOfSession(_ context.Context, sessionID int64) ([]Sale
 	return out, nil
 }
 
-func (m *MemoryStore) VoidSale(_ context.Context, entityID, id int64) (Sale, error) {
+func (m *MemoryStore) VoidSale(_ context.Context, _ platform.DBTX, entityID, id int64) (Sale, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sa, ok := m.sales[id]
@@ -388,7 +389,7 @@ func (m *MemoryStore) VoidSale(_ context.Context, entityID, id int64) (Sale, err
 	return sa, nil
 }
 
-func (m *MemoryStore) MarkReturned(_ context.Context, entityID, id int64) (Sale, error) {
+func (m *MemoryStore) MarkReturned(_ context.Context, _ platform.DBTX, entityID, id int64) (Sale, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sa, ok := m.sales[id]

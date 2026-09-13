@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 )
 
@@ -26,15 +27,15 @@ type SupplierPayment struct {
 
 // Store is the persistence contract for procurement.
 type Store interface {
-	CreateDoc(ctx context.Context, d *Document, yearMonth string) error
-	DocByID(ctx context.Context, entityID, id int64) (Document, error)
-	ListDocs(ctx context.Context, entityID int64, t documents.DocType, limit, offset int) ([]Document, error)
-	SetStatus(ctx context.Context, entityID, id int64, to int16) (Document, error)
-	SetApproval(ctx context.Context, entityID, id int64, approverID int64) (Document, error)
-	UpsertPrice(ctx context.Context, p *SupplierPrice) error
-	PricesFor(ctx context.Context, entityID, productID, orgID int64) ([]SupplierPrice, error)
-	RecordPayment(ctx context.Context, p *SupplierPayment, invoiceIDs []int64, yearMonth string) ([]int64, error)
-	InvoiceBalance(ctx context.Context, entityID, invoiceID int64) (int64, error)
+	CreateDoc(ctx context.Context, db platform.DBTX, d *Document, yearMonth string) error
+	DocByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Document, error)
+	ListDocs(ctx context.Context, db platform.DBTX, entityID int64, t documents.DocType, limit, offset int) ([]Document, error)
+	SetStatus(ctx context.Context, db platform.DBTX, entityID, id int64, to int16) (Document, error)
+	SetApproval(ctx context.Context, db platform.DBTX, entityID, id int64, approverID int64) (Document, error)
+	UpsertPrice(ctx context.Context, db platform.DBTX, p *SupplierPrice) error
+	PricesFor(ctx context.Context, db platform.DBTX, entityID, productID, orgID int64) ([]SupplierPrice, error)
+	RecordPayment(ctx context.Context, db platform.DBTX, p *SupplierPayment, invoiceIDs []int64, yearMonth string) ([]int64, error)
+	InvoiceBalance(ctx context.Context, db platform.DBTX, entityID, invoiceID int64) (int64, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -79,7 +80,7 @@ func loadLines(ctx context.Context, q queryFunc, docID int64) ([]documents.Line,
 	return out, rows.Err()
 }
 
-func (s *PGStore) CreateDoc(ctx context.Context, d *Document, yearMonth string) error {
+func (s *PGStore) CreateDoc(ctx context.Context, _ platform.DBTX, d *Document, yearMonth string) error {
 	if err := d.Validate(); err != nil {
 		return err
 	}
@@ -128,12 +129,12 @@ func (s *PGStore) CreateDoc(ctx context.Context, d *Document, yearMonth string) 
 	return tx.Commit(ctx)
 }
 
-func (s *PGStore) DocByID(ctx context.Context, entityID, id int64) (Document, error) {
-	d, err := scanDoc(s.pool.QueryRow(ctx, `SELECT `+docCols+` FROM ferp_supplier_docs WHERE id=$1 AND entity_id=$2`, id, entityID))
+func (s *PGStore) DocByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Document, error) {
+	d, err := scanDoc(db.QueryRow(ctx, `SELECT `+docCols+` FROM ferp_supplier_docs WHERE id=$1 AND entity_id=$2`, id, entityID))
 	if err != nil {
 		return Document{}, err
 	}
-	lines, err := loadLines(ctx, s.pool.Query, id)
+	lines, err := loadLines(ctx, db.Query, id)
 	if err != nil {
 		return Document{}, err
 	}
@@ -141,8 +142,8 @@ func (s *PGStore) DocByID(ctx context.Context, entityID, id int64) (Document, er
 	return d, nil
 }
 
-func (s *PGStore) SetStatus(ctx context.Context, entityID, id int64, to int16) (Document, error) {
-	d, err := s.DocByID(ctx, entityID, id)
+func (s *PGStore) SetStatus(ctx context.Context, db platform.DBTX, entityID, id int64, to int16) (Document, error) {
+	d, err := s.DocByID(ctx, db, entityID, id)
 	if err != nil {
 		return Document{}, err
 	}
@@ -153,7 +154,7 @@ func (s *PGStore) SetStatus(ctx context.Context, entityID, id int64, to int16) (
 		d.RequiresApproval(DefaultApprovalThreshold) && d.ApprovedBy == nil {
 		return Document{}, errors.New("procurement: order above threshold requires approval")
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_supplier_docs SET status=$1, updated_at=now(), row_version=row_version+1
+	tag, err := db.Exec(ctx, `UPDATE ferp_supplier_docs SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, d.RowVersion)
 	if err != nil {
 		return Document{}, err
@@ -167,8 +168,8 @@ func (s *PGStore) SetStatus(ctx context.Context, entityID, id int64, to int16) (
 }
 
 // ListDocs pages supplier documents of one family.
-func (s *PGStore) ListDocs(ctx context.Context, entityID int64, t documents.DocType, limit, offset int) ([]Document, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+docCols+` FROM ferp_supplier_docs
+func (s *PGStore) ListDocs(ctx context.Context, db platform.DBTX, entityID int64, t documents.DocType, limit, offset int) ([]Document, error) {
+	rows, err := db.Query(ctx, `SELECT `+docCols+` FROM ferp_supplier_docs
 		WHERE entity_id=$1 AND type=$2 ORDER BY id DESC LIMIT $3 OFFSET $4`,
 		entityID, string(t), limit, offset)
 	if err != nil {
@@ -187,15 +188,15 @@ func (s *PGStore) ListDocs(ctx context.Context, entityID int64, t documents.DocT
 }
 
 // SetApproval stamps an approver on an order (unblocks above-threshold validation).
-func (s *PGStore) SetApproval(ctx context.Context, entityID, id int64, approverID int64) (Document, error) {
-	d, err := s.DocByID(ctx, entityID, id)
+func (s *PGStore) SetApproval(ctx context.Context, db platform.DBTX, entityID, id int64, approverID int64) (Document, error) {
+	d, err := s.DocByID(ctx, db, entityID, id)
 	if err != nil {
 		return Document{}, err
 	}
 	if d.Type != documents.TypeSupplierOrder {
 		return Document{}, errors.New("procurement: approval applies to supplier orders")
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_supplier_docs SET approved_by=$1, updated_at=now(), row_version=row_version+1
+	tag, err := db.Exec(ctx, `UPDATE ferp_supplier_docs SET approved_by=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, approverID, id, entityID, d.RowVersion)
 	if err != nil {
 		return Document{}, err
@@ -208,15 +209,15 @@ func (s *PGStore) SetApproval(ctx context.Context, entityID, id int64, approverI
 	return d, nil
 }
 
-func (s *PGStore) UpsertPrice(ctx context.Context, p *SupplierPrice) error {
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_supplier_prices (entity_id, product_id, org_id, unit_net, currency)
+func (s *PGStore) UpsertPrice(ctx context.Context, db platform.DBTX, p *SupplierPrice) error {
+	return db.QueryRow(ctx, `INSERT INTO ferp_supplier_prices (entity_id, product_id, org_id, unit_net, currency)
 		VALUES ($1,$2,$3,$4,$5)
 		ON CONFLICT (entity_id, product_id, org_id) DO UPDATE SET unit_net=$4, currency=$5
 		RETURNING id`, p.EntityID, p.ProductID, p.OrgID, p.UnitNet, p.Currency).Scan(&p.ID)
 }
 
-func (s *PGStore) PricesFor(ctx context.Context, entityID, productID, orgID int64) ([]SupplierPrice, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, product_id, org_id, unit_net, currency
+func (s *PGStore) PricesFor(ctx context.Context, db platform.DBTX, entityID, productID, orgID int64) ([]SupplierPrice, error) {
+	rows, err := db.Query(ctx, `SELECT id, entity_id, product_id, org_id, unit_net, currency
 		FROM ferp_supplier_prices WHERE entity_id=$1 AND product_id=$2 AND org_id=$3`,
 		entityID, productID, orgID)
 	if err != nil {
@@ -234,7 +235,7 @@ func (s *PGStore) PricesFor(ctx context.Context, entityID, productID, orgID int6
 	return out, rows.Err()
 }
 
-func (s *PGStore) RecordPayment(ctx context.Context, p *SupplierPayment, invoiceIDs []int64, yearMonth string) ([]int64, error) {
+func (s *PGStore) RecordPayment(ctx context.Context, _ platform.DBTX, p *SupplierPayment, invoiceIDs []int64, yearMonth string) ([]int64, error) {
 	if p.Amount <= 0 {
 		return nil, errors.New("procurement: payment amount must be positive")
 	}
@@ -305,15 +306,15 @@ func (s *PGStore) RecordPayment(ctx context.Context, p *SupplierPayment, invoice
 	return applied, tx.Commit(ctx)
 }
 
-func (s *PGStore) InvoiceBalance(ctx context.Context, entityID, invoiceID int64) (int64, error) {
+func (s *PGStore) InvoiceBalance(ctx context.Context, db platform.DBTX, entityID, invoiceID int64) (int64, error) {
 	var gross, paid int64
-	if err := s.pool.QueryRow(ctx, `SELECT total_gross FROM ferp_supplier_docs WHERE id=$1 AND entity_id=$2 AND type='supplier_invoice'`, invoiceID, entityID).Scan(&gross); err != nil {
+	if err := db.QueryRow(ctx, `SELECT total_gross FROM ferp_supplier_docs WHERE id=$1 AND entity_id=$2 AND type='supplier_invoice'`, invoiceID, entityID).Scan(&gross); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, identity.ErrNotFound
 		}
 		return 0, err
 	}
-	_ = s.pool.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0) FROM ferp_supplier_allocations WHERE invoice_id=$1`, invoiceID).Scan(&paid)
+	_ = db.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0) FROM ferp_supplier_allocations WHERE invoice_id=$1`, invoiceID).Scan(&paid)
 	return gross - paid, nil
 }
 
@@ -340,7 +341,7 @@ func (m *MemoryStore) ref(entityID int64, t documents.DocType, ym string) string
 	return documents.NextRef(t, ym, m.counters[k])
 }
 
-func (m *MemoryStore) CreateDoc(_ context.Context, d *Document, yearMonth string) error {
+func (m *MemoryStore) CreateDoc(_ context.Context, _ platform.DBTX, d *Document, yearMonth string) error {
 	if err := d.Validate(); err != nil {
 		return err
 	}
@@ -358,7 +359,7 @@ func (m *MemoryStore) CreateDoc(_ context.Context, d *Document, yearMonth string
 	return nil
 }
 
-func (m *MemoryStore) DocByID(_ context.Context, entityID, id int64) (Document, error) {
+func (m *MemoryStore) DocByID(_ context.Context, _ platform.DBTX, entityID, id int64) (Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, ok := m.docs[id]
@@ -368,7 +369,7 @@ func (m *MemoryStore) DocByID(_ context.Context, entityID, id int64) (Document, 
 	return d, nil
 }
 
-func (m *MemoryStore) SetStatus(_ context.Context, entityID, id int64, to int16) (Document, error) {
+func (m *MemoryStore) SetStatus(_ context.Context, _ platform.DBTX, entityID, id int64, to int16) (Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, ok := m.docs[id]
@@ -389,7 +390,7 @@ func (m *MemoryStore) SetStatus(_ context.Context, entityID, id int64, to int16)
 }
 
 // ListDocs pages supplier documents of one family.
-func (m *MemoryStore) ListDocs(_ context.Context, entityID int64, t documents.DocType, limit, offset int) ([]Document, error) {
+func (m *MemoryStore) ListDocs(_ context.Context, _ platform.DBTX, entityID int64, t documents.DocType, limit, offset int) ([]Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Document
@@ -409,7 +410,7 @@ func (m *MemoryStore) ListDocs(_ context.Context, entityID int64, t documents.Do
 }
 
 // SetApproval stamps an approver on an order.
-func (m *MemoryStore) SetApproval(_ context.Context, entityID, id int64, approverID int64) (Document, error) {
+func (m *MemoryStore) SetApproval(_ context.Context, _ platform.DBTX, entityID, id int64, approverID int64) (Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, ok := m.docs[id]
@@ -425,7 +426,7 @@ func (m *MemoryStore) SetApproval(_ context.Context, entityID, id int64, approve
 	return d, nil
 }
 
-func (m *MemoryStore) UpsertPrice(_ context.Context, p *SupplierPrice) error {
+func (m *MemoryStore) UpsertPrice(_ context.Context, _ platform.DBTX, p *SupplierPrice) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i, e := range m.prices {
@@ -441,7 +442,7 @@ func (m *MemoryStore) UpsertPrice(_ context.Context, p *SupplierPrice) error {
 	return nil
 }
 
-func (m *MemoryStore) PricesFor(_ context.Context, entityID, productID, orgID int64) ([]SupplierPrice, error) {
+func (m *MemoryStore) PricesFor(_ context.Context, _ platform.DBTX, entityID, productID, orgID int64) ([]SupplierPrice, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []SupplierPrice
@@ -453,7 +454,7 @@ func (m *MemoryStore) PricesFor(_ context.Context, entityID, productID, orgID in
 	return out, nil
 }
 
-func (m *MemoryStore) RecordPayment(_ context.Context, p *SupplierPayment, invoiceIDs []int64, yearMonth string) ([]int64, error) {
+func (m *MemoryStore) RecordPayment(_ context.Context, _ platform.DBTX, p *SupplierPayment, invoiceIDs []int64, yearMonth string) ([]int64, error) {
 	if p.Amount <= 0 {
 		return nil, errors.New("procurement: payment amount must be positive")
 	}
@@ -497,7 +498,7 @@ func (m *MemoryStore) RecordPayment(_ context.Context, p *SupplierPayment, invoi
 	return applied, nil
 }
 
-func (m *MemoryStore) InvoiceBalance(_ context.Context, entityID, invoiceID int64) (int64, error) {
+func (m *MemoryStore) InvoiceBalance(_ context.Context, _ platform.DBTX, entityID, invoiceID int64) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	inv, ok := m.docs[invoiceID]

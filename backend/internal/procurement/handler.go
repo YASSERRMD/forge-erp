@@ -19,6 +19,7 @@ type Deps struct {
 	Store   Store
 	Catalog catalog.Store
 	Bus     platform.Bus
+	DB      platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates.
@@ -84,7 +85,7 @@ func (h *Handler) CreateDoc(w http.ResponseWriter, r *http.Request) {
 			if l.ProductID == 0 {
 				continue
 			}
-			prices, err := h.deps.Store.PricesFor(r.Context(), d.EntityID, l.ProductID, d.OrgID)
+			prices, err := h.deps.Store.PricesFor(r.Context(), h.deps.DB, d.EntityID, l.ProductID, d.OrgID)
 			if err != nil {
 				writeErr(w, http.StatusInternalServerError, "price lookup failed")
 				return
@@ -95,7 +96,7 @@ func (h *Handler) CreateDoc(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if err := h.deps.Store.CreateDoc(r.Context(), &d, yearMonth()); err != nil {
+	if err := h.deps.Store.CreateDoc(r.Context(), h.deps.DB, &d, yearMonth()); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -110,7 +111,7 @@ func (h *Handler) ListDocs(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	list, err := h.deps.Store.ListDocs(r.Context(), entityOf(r), t, limit, offset)
+	list, err := h.deps.Store.ListDocs(r.Context(), h.deps.DB, entityOf(r), t, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -133,7 +134,7 @@ func (h *Handler) load(w http.ResponseWriter, r *http.Request) (Document, bool) 
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return Document{}, false
 	}
-	d, err := h.deps.Store.DocByID(r.Context(), entityOf(r), id)
+	d, err := h.deps.Store.DocByID(r.Context(), h.deps.DB, entityOf(r), id)
 	if err != nil || d.EntityID != entityOf(r) {
 		writeErr(w, http.StatusNotFound, "document not found")
 		return Document{}, false
@@ -155,7 +156,7 @@ func (h *Handler) SetStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	d, err := h.deps.Store.SetStatus(r.Context(), entityOf(r), id, req.To)
+	d, err := h.deps.Store.SetStatus(r.Context(), h.deps.DB, entityOf(r), id, req.To)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -183,7 +184,7 @@ func (h *Handler) ConvertDoc(w http.ResponseWriter, r *http.Request) {
 	}
 	next.EntityID = entityOf(r)
 	out := &next
-	if err := h.deps.Store.CreateDoc(r.Context(), out, yearMonth()); err != nil {
+	if err := h.deps.Store.CreateDoc(r.Context(), h.deps.DB, out, yearMonth()); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -197,7 +198,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, _ := identity.AuthUser(r)
-	updated, err := h.deps.Store.SetApproval(r.Context(), entityOf(r), d.ID, u.ID)
+	updated, err := h.deps.Store.SetApproval(r.Context(), h.deps.DB, entityOf(r), d.ID, u.ID)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -216,7 +217,7 @@ func (h *Handler) UpsertPrice(w http.ResponseWriter, r *http.Request) {
 	if p.Currency == "" {
 		p.Currency = "USD"
 	}
-	if err := h.deps.Store.UpsertPrice(r.Context(), &p); err != nil {
+	if err := h.deps.Store.UpsertPrice(r.Context(), h.deps.DB, &p); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -246,7 +247,7 @@ func (h *Handler) RecordPayment(w http.ResponseWriter, r *http.Request) {
 	}
 	p := &SupplierPayment{EntityID: entityOf(r), OrgID: req.OrgID, Amount: req.Amount,
 		Currency: req.Currency, Method: req.Method}
-	applied, err := h.deps.Store.RecordPayment(r.Context(), p, req.InvoiceIDs, yearMonth())
+	applied, err := h.deps.Store.RecordPayment(r.Context(), h.deps.DB, p, req.InvoiceIDs, yearMonth())
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -290,12 +291,12 @@ func (h *Handler) Receive(w http.ResponseWriter, r *http.Request) {
 		m := catalog.StockMovement{EntityID: entityOf(r), ProductID: l.ProductID,
 			WarehouseID: l.WarehouseID, Qty: l.Qty, UnitCost: l.UnitCost,
 			Reason: catalog.ReasonReceipt, Ref: d.Ref}
-		if _, err := h.deps.Catalog.AppendMovement(r.Context(), &m, false); err != nil {
+		if _, err := h.deps.Catalog.AppendMovement(r.Context(), h.deps.DB, &m, false); err != nil {
 			writeErr(w, storeErrorCode(err), err.Error())
 			return
 		}
 	}
-	closed, err := h.deps.Store.SetStatus(r.Context(), entityOf(r), d.ID, Stage2) // reception: validated → closed
+	closed, err := h.deps.Store.SetStatus(r.Context(), h.deps.DB, entityOf(r), d.ID, Stage2) // reception: validated → closed
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return

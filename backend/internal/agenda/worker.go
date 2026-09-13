@@ -2,6 +2,8 @@ package agenda
 
 import (
 	"context"
+
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"log"
 	"time"
 )
@@ -11,6 +13,7 @@ import (
 // MarkReminded; failures are logged and retried next tick.
 type Worker struct {
 	Store    Store
+	DB       platform.DBTX
 	Interval time.Duration
 	Now      func() time.Time
 	Logger   *log.Logger
@@ -22,13 +25,13 @@ func (w *Worker) RunOnce(ctx context.Context) (int, error) {
 	if w.Now != nil {
 		now = w.Now()
 	}
-	due, err := w.Store.DueRemindersAll(ctx, now, 100)
+	due, err := w.Store.DueRemindersAll(ctx, w.DB, now, 100)
 	if err != nil {
 		return 0, err
 	}
 	sent := 0
 	for _, e := range due {
-		if err := w.Store.MarkReminded(ctx, e.EntityID, e.ID); err != nil {
+		if err := w.Store.MarkReminded(ctx, w.DB, e.EntityID, e.ID); err != nil {
 			if w.Logger != nil {
 				w.Logger.Printf("agenda: reminder %d failed: %v", e.ID, err)
 			}

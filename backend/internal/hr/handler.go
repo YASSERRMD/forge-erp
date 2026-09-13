@@ -17,12 +17,13 @@ import (
 
 // Finance abstracts the ledger posting used when paying expenses.
 type Finance interface {
-	PostEntry(ctx context.Context, e *finance.Entry) error
+	PostEntry(ctx context.Context, db platform.DBTX, e *finance.Entry) error
 }
 
 // Deps wires handlers to persistence and the event bus.
 type Deps struct {
 	Store   Store
+	DB      platform.DBTX
 	Finance Finance // nil disables expense payout posting
 	Bus     platform.Bus
 }
@@ -131,7 +132,7 @@ func (h *Handler) CreateLeave(w http.ResponseWriter, r *http.Request) {
 	l.ID = 0
 	l.EntityID = entityOf(r)
 	l.Status = LeaveDraft
-	if err := h.deps.Store.CreateLeave(r.Context(), &l); err != nil {
+	if err := h.deps.Store.CreateLeave(r.Context(), h.deps.DB, &l); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -142,7 +143,7 @@ func (h *Handler) CreateLeave(w http.ResponseWriter, r *http.Request) {
 // ListLeaves pages leave requests, optionally filtered by user.
 func (h *Handler) ListLeaves(w http.ResponseWriter, r *http.Request) {
 	limit, offset, user := page(r)
-	list, err := h.deps.Store.LeavesOf(r.Context(), entityOf(r), user, limit, offset)
+	list, err := h.deps.Store.LeavesOf(r.Context(), h.deps.DB, entityOf(r), user, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -162,7 +163,7 @@ func (h *Handler) SetLeaveStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	l, err := h.deps.Store.SetLeaveStatus(r.Context(), entityOf(r), id, LeaveStatus(in.Status), in.RowVersion)
+	l, err := h.deps.Store.SetLeaveStatus(r.Context(), h.deps.DB, entityOf(r), id, LeaveStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -180,7 +181,7 @@ func (h *Handler) CreateExpense(w http.ResponseWriter, r *http.Request) {
 	rep.ID = 0
 	rep.EntityID = entityOf(r)
 	rep.Status = ExpenseDraft
-	if err := h.deps.Store.CreateExpense(r.Context(), &rep); err != nil {
+	if err := h.deps.Store.CreateExpense(r.Context(), h.deps.DB, &rep); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -191,7 +192,7 @@ func (h *Handler) CreateExpense(w http.ResponseWriter, r *http.Request) {
 // ListExpenses pages expense reports, optionally filtered by user.
 func (h *Handler) ListExpenses(w http.ResponseWriter, r *http.Request) {
 	limit, offset, user := page(r)
-	list, err := h.deps.Store.ExpensesOf(r.Context(), entityOf(r), user, limit, offset)
+	list, err := h.deps.Store.ExpensesOf(r.Context(), h.deps.DB, entityOf(r), user, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -214,7 +215,7 @@ func (h *Handler) AddExpenseLine(w http.ResponseWriter, r *http.Request) {
 	l.ID = 0
 	l.EntityID = entityOf(r)
 	l.ReportID = rid
-	if err := h.deps.Store.AddExpenseLine(r.Context(), &l); err != nil {
+	if err := h.deps.Store.AddExpenseLine(r.Context(), h.deps.DB, &l); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -233,7 +234,7 @@ func (h *Handler) SetExpenseStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	rep, err := h.deps.Store.SetExpenseStatus(r.Context(), entityOf(r), id, ExpenseStatus(in.Status), in.RowVersion)
+	rep, err := h.deps.Store.SetExpenseStatus(r.Context(), h.deps.DB, entityOf(r), id, ExpenseStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
@@ -270,14 +271,14 @@ func (h *Handler) PayExpense(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "hr: journal, expense and bank accounts required")
 		return
 	}
-	paid, err := h.deps.Store.SetExpenseStatus(r.Context(), entityOf(r), id, ExpensePaid, in.RowVersion)
+	paid, err := h.deps.Store.SetExpenseStatus(r.Context(), h.deps.DB, entityOf(r), id, ExpensePaid, in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
-	total, err := h.deps.Store.ExpenseTotal(r.Context(), entityOf(r), id)
+	total, err := h.deps.Store.ExpenseTotal(r.Context(), h.deps.DB, entityOf(r), id)
 	if err != nil {
-		_, _ = h.deps.Store.SetExpenseStatus(r.Context(), entityOf(r), id, ExpenseApproved, paid.RowVersion)
+		_, _ = h.deps.Store.SetExpenseStatus(r.Context(), h.deps.DB, entityOf(r), id, ExpenseApproved, paid.RowVersion)
 		writeErr(w, http.StatusInternalServerError, "total failed")
 		return
 	}
@@ -287,8 +288,8 @@ func (h *Handler) PayExpense(w http.ResponseWriter, r *http.Request) {
 			{AccountID: in.ExpenseAccount, Label: "Expense " + paid.Ref, Debit: total},
 			{AccountID: in.BankAccount, Label: "Expense " + paid.Ref, Credit: total},
 		}}
-	if err := h.deps.Finance.PostEntry(r.Context(), entry); err != nil {
-		_, _ = h.deps.Store.SetExpenseStatus(r.Context(), entityOf(r), id, ExpenseApproved, paid.RowVersion)
+	if err := h.deps.Finance.PostEntry(r.Context(), h.deps.DB, entry); err != nil {
+		_, _ = h.deps.Store.SetExpenseStatus(r.Context(), h.deps.DB, entityOf(r), id, ExpenseApproved, paid.RowVersion)
 		writeErr(w, http.StatusBadGateway, "ledger posting failed; report reverted to approved")
 		return
 	}
@@ -305,7 +306,7 @@ func (h *Handler) CreateSalary(w http.ResponseWriter, r *http.Request) {
 	s.ID = 0
 	s.EntityID = entityOf(r)
 	s.Status = SalaryDraft
-	if err := h.deps.Store.CreateSalary(r.Context(), &s); err != nil {
+	if err := h.deps.Store.CreateSalary(r.Context(), h.deps.DB, &s); err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
 	}
@@ -316,7 +317,7 @@ func (h *Handler) CreateSalary(w http.ResponseWriter, r *http.Request) {
 // ListSalaries lists salary records, optionally filtered by user.
 func (h *Handler) ListSalaries(w http.ResponseWriter, r *http.Request) {
 	_, _, user := page(r)
-	list, err := h.deps.Store.SalariesOf(r.Context(), entityOf(r), user)
+	list, err := h.deps.Store.SalariesOf(r.Context(), h.deps.DB, entityOf(r), user)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -336,7 +337,7 @@ func (h *Handler) SetSalaryStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	s, err := h.deps.Store.SetSalaryStatus(r.Context(), entityOf(r), id, SalaryStatus(in.Status), in.RowVersion)
+	s, err := h.deps.Store.SetSalaryStatus(r.Context(), h.deps.DB, entityOf(r), id, SalaryStatus(in.Status), in.RowVersion)
 	if err != nil {
 		writeErr(w, storeErrorCode(err), err.Error())
 		return
