@@ -2,6 +2,8 @@ package finance
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -131,5 +133,60 @@ func TestPGStorePostAndTrial(t *testing.T) {
 	}
 	if dr != cr || dr != 1200 {
 		t.Fatalf("trial dr=%d cr=%d", dr, cr)
+	}
+}
+
+// TestPGConcurrentPostChain posts 50 entries to one entity from 50
+// goroutines (Phase 0 task 5): the advisory lock serializes writers so every
+// post succeeds exactly once and the chain verifies clean.
+func TestPGConcurrentPostChain(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
+	now := time.Now().UTC()
+	dr := &Account{EntityID: 1, Code: "601000", Label: "Supplies", Type: "expense"}
+	cr := &Account{EntityID: 1, Code: "512001", Label: "Bank", Type: "asset"}
+	for _, a := range []*Account{dr, cr} {
+		if err := st.CreateAccount(ctx, pool, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	j := &Journal{EntityID: 1, Code: "ACH", Label: "Purchases"}
+	if err := st.CreateJournal(ctx, pool, j); err != nil {
+		t.Fatal(err)
+	}
+	const posters = 50
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make([]error, posters)
+	for i := 0; i < posters; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			e := &Entry{EntityID: 1, JournalID: j.ID, Ref: fmt.Sprintf("CC-%04d", i), Date: now,
+				Lines: []EntryLine{
+					{AccountID: dr.ID, Debit: 100},
+					{AccountID: cr.ID, Credit: 100},
+				}}
+			errs[i] = st.PostEntry(ctx, pool, e)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("poster %d: %v", i, err)
+		}
+	}
+	ents, err := st.EntriesByJournal(ctx, pool, j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ents) != posters {
+		t.Fatalf("entries = %d want %d", len(ents), posters)
+	}
+	if err := VerifyChain(ents); err != nil {
+		t.Fatalf("chain: %v", err)
 	}
 }

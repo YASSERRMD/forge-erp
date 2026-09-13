@@ -145,6 +145,13 @@ func (s *PGStore) PostEntry(ctx context.Context, db platform.DBTX, e *Entry) err
 	if err != nil {
 		return err
 	}
+	// Serialize posters per entity so concurrent writers queue on the chain
+	// head instead of forking it. Xact-scoped: released at commit/rollback.
+	// The UNIQUE (entity_id, prev_hash) constraint backstops any path that
+	// bypasses this lock.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('ferp_entries')::bigint, $1)`, e.EntityID); err != nil {
+		return finish(err)
+	}
 	// Fiscal-year lock: entry date must fall in an unlocked year (or no year defined).
 	var locked bool
 	err = tx.QueryRow(ctx, `SELECT COALESCE(BOOL_OR(locked), FALSE) FROM ferp_fiscal_years
