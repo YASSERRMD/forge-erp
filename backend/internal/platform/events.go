@@ -8,11 +8,12 @@ import (
 // Event is the unit of cross-module communication.
 // Subject convention: forgeerp.<context>.<event>.v1 (MASTER §3).
 type Event struct {
-	Subject string
-	Entity  string
-	ID      int64
-	ActorID *int64
-	Payload map[string]any
+	Subject  string         `json:"subject"`
+	Entity   string         `json:"entity"` // scope name, e.g. "organization"
+	EntityID int64          `json:"entity_id"`
+	ID       int64          `json:"id"`
+	ActorID  *int64         `json:"actor_id,omitempty"`
+	Payload  map[string]any `json:"payload,omitempty"`
 }
 
 // Bus is the publish/subscribe contract. The in-process MemoryBus implements it

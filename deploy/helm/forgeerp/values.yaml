@@ -1,4 +1,4 @@
-replicaCount: 2
+replicaCount: 1
 image:
   repository: forgeerp/api
   tag: "0.1.0"

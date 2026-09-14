@@ -1,6 +1,7 @@
 package documentsvc
 
 import (
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -26,27 +28,31 @@ func TestShareRoundTrip(t *testing.T) {
 	if err != nil || len(tok) != 64 {
 		t.Fatalf("token=%q err=%v", tok, err)
 	}
-	if err := st.CreateShare(ctx, &ShareToken{Token: tok, EntityID: 1,
+	if err := st.CreateShare(ctx, nil, &ShareToken{Token: tok, EntityID: 1,
 		DocID: d.ID, ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatalf("share: %v", err)
 	}
-	got, err := st.ShareTarget(ctx, tok)
+	got, err := st.ShareTarget(ctx, nil, tok)
 	if err != nil || got.DocID != d.ID {
 		t.Fatalf("target=%+v err=%v", got, err)
 	}
 	expired := &ShareToken{Token: "old", EntityID: 1, DocID: d.ID,
 		ExpiresAt: time.Now().UTC().Add(-time.Hour)}
-	if err := st.CreateShare(ctx, expired); err != nil {
+	if err := st.CreateShare(ctx, nil, expired); err != nil {
 		t.Fatalf("expired share: %v", err)
 	}
-	if _, err := st.ShareTarget(ctx, "old"); err == nil {
+	if _, err := st.ShareTarget(ctx, nil, "old"); err == nil {
 		t.Error("expired token accepted")
 	}
 	// HTTP: share endpoint mints, public endpoint serves bytes.
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {
 		Routes(r, svc, func(_, _, _ string) func(http.Handler) http.Handler {
-			return func(next http.Handler) http.Handler { return next }
+			return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(platform.ContextWithEntity(r.Context(), 1)))
+		})
+	}
 		})
 	})
 	r.Get("/public/share/{token}", PublicShare(svc))
@@ -71,5 +77,25 @@ func TestShareRoundTrip(t *testing.T) {
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("bogus: code=%d want 404", rec.Code)
+	}
+}
+
+func TestPGShareRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
+	d := &Document{EntityID: 1, Scope: "sales", ObjectID: 1, Name: "pg.pdf",
+		MIME: "application/pdf", Size: 3, SHA256: "x", StorageKey: "pg/1.pdf"}
+	if err := st.Create(ctx, pool, d); err != nil {
+		t.Fatalf("doc: %v", err)
+	}
+	tok, _ := MintToken()
+	if err := st.CreateShare(ctx, pool, &ShareToken{Token: tok, EntityID: 1,
+		DocID: d.ID, ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+	got, err := st.ShareTarget(ctx, pool, tok)
+	if err != nil || got.DocID != d.ID {
+		t.Fatalf("target=%+v err=%v", got, err)
 	}
 }

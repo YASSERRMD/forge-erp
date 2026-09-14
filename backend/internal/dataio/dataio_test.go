@@ -1,6 +1,8 @@
 package dataio
 
 import (
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,10 +11,15 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
 func passthrough(_, _, _ string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler { return next }
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(platform.ContextWithEntity(r.Context(), 1)))
+		})
+	}
 }
 
 func testRouter() http.Handler {
@@ -73,5 +80,18 @@ func TestProductRoundTrip(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if !strings.Contains(rec.Body.String(), "WID-1,Widget,0,unit,19.90,2000,true") {
 		t.Fatalf("export=%q", rec.Body.String())
+	}
+}
+
+func TestPGOrgRoundTrip(t *testing.T) {
+	pool := pgtest.Pool(t)
+	pst := partners.NewPGStore(pool)
+	o := &partners.Organization{EntityID: 1, Name: "PG IO", IsCustomer: true, CustomerCode: "PGIO"}
+	if err := pst.CreateOrg(context.Background(), pool, o); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	list, err := pst.ListOrgs(context.Background(), pool, 1, 50, 0)
+	if err != nil || len(list) != 1 || list[0].CustomerCode != "PGIO" {
+		t.Fatalf("list=%+v err=%v", list, err)
 	}
 }

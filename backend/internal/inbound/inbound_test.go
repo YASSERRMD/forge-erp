@@ -1,18 +1,26 @@
 package inbound
 
 import (
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/YASSERRMD/forge-erp/backend/internal/services"
+	"github.com/go-chi/chi/v5"
 )
 
 func passthrough(_, _, _ string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler { return next }
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(platform.ContextWithEntity(r.Context(), 1)))
+		})
+	}
 }
 
 func TestGatewayFlow(t *testing.T) {
@@ -53,8 +61,30 @@ func TestGatewayFlow(t *testing.T) {
 	if tk.Status != services.TicketOpen {
 		t.Fatalf("ticket status=%d", tk.Status)
 	}
-	msgs, err := tickets.MessagesOf(t.Context(), tk.ID)
+	msgs, err := tickets.MessagesOf(t.Context(), nil, tk.ID)
 	if err != nil || len(msgs) != 1 || msgs[0].Author != "client@x.io" {
 		t.Fatalf("messages=%+v err=%v", msgs, err)
+	}
+}
+
+func TestPGGatewayFlow(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
+	tickets := services.NewPGStore(pool)
+	if err := st.UpsertMailbox(ctx, pool, &Mailbox{EntityID: 1, Code: "PG",
+		Host: "mail.example.com", Port: 993, Active: true}); err != nil {
+		t.Fatalf("mailbox: %v", err)
+	}
+	mb, err := st.MailboxByCode(ctx, pool, 1, "PG")
+	if err != nil || !mb.Active {
+		t.Fatalf("mailbox=%+v err=%v", mb, err)
+	}
+	tk := &services.Ticket{EntityID: 1, Ref: "PG-T", Subject: "Hi", Priority: 2}
+	if err := tickets.CreateTicket(ctx, pool, tk); err != nil {
+		t.Fatalf("ticket: %v", err)
+	}
+	if err := st.RecordFetch(ctx, pool, 1, "PG", time.Now().UTC(), ""); err != nil {
+		t.Fatalf("fetch: %v", err)
 	}
 }

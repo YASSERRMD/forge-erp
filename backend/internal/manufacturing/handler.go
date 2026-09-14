@@ -3,21 +3,21 @@ package manufacturing
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // Deps wires handlers to persistence, the catalog ledger, and the event bus.
 type Deps struct {
 	Store  Store
+	DB     platform.DBTX
 	Ledger Ledger
 	Bus    platform.Bus
+	Pool   *pgxpool.Pool // transaction source for the produce service (nil in tests)
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -25,7 +25,7 @@ type Middleware func(module, entity, action string) func(http.Handler) http.Hand
 
 // Routes mounts the manufacturing surface (caller nests at /api/v1).
 func Routes(r chi.Router, d Deps, mw Middleware) {
-	h := &Handler{deps: d}
+	h := &Handler{deps: d, svc: NewService(d.Pool, d.Store, d.Ledger, d.Bus)}
 	r.With(mw("manufacturing", "bom", "write")).Post("/manufacturing/boms", h.CreateBOM)
 	r.With(mw("manufacturing", "bom", "read")).Get("/manufacturing/boms", h.ListBOMs)
 	r.With(mw("manufacturing", "bom", "read")).Get("/manufacturing/boms/{id}", h.GetBOM)
@@ -40,7 +40,10 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 }
 
 // Handler implements the manufacturing HTTP surface.
-type Handler struct{ deps Deps }
+type Handler struct {
+	deps Deps
+	svc  *Service
+}
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -57,30 +60,6 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
-func storeErrorCode(err error) int {
-	switch {
-	case errors.Is(err, identity.ErrNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, identity.ErrVersionConflict):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "duplicate"):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "not found"):
-		return http.StatusNotFound
-	case err != nil && strings.Contains(err.Error(), "conflict"):
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
-}
-
 func pathID(r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, name), 10, 64)
 	if err != nil || id <= 0 {
@@ -89,11 +68,11 @@ func pathID(r *http.Request, name string) (int64, bool) {
 	return id, true
 }
 
-func (h *Handler) publish(ctx context.Context, subject, entity string, id int64) {
+func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
 	if h.deps.Bus == nil {
 		return
 	}
-	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, ID: id})
+	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, EntityID: entityID, ID: id})
 }
 
 type statusIn struct {
@@ -103,30 +82,40 @@ type statusIn struct {
 
 // CreateBOM opens a draft bill of materials.
 func (h *Handler) CreateBOM(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var b BOM
 	if err := decode(r, &b); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	b.ID = 0
-	b.EntityID = entityOf(r)
+	b.EntityID = entityID
 	b.Status = BOMDraft
-	if err := h.deps.Store.CreateBOM(r.Context(), &b); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	if err := h.deps.Store.CreateBOM(r.Context(), h.deps.DB, &b); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), "forgeerp.manufacturing.bom.created.v1", "bom", b.ID)
+	h.publish(r.Context(), entityID, "forgeerp.manufacturing.bom.created.v1", "bom", b.ID)
 	writeJSON(w, http.StatusCreated, b)
 }
 
 // ListBOMs pages BOMs within the caller's entity.
 func (h *Handler) ListBOMs(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	list, err := h.deps.Store.ListBOMs(r.Context(), entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListBOMs(r.Context(), h.deps.DB, entityID, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -136,14 +125,19 @@ func (h *Handler) ListBOMs(w http.ResponseWriter, r *http.Request) {
 
 // GetBOM fetches one BOM.
 func (h *Handler) GetBOM(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	b, err := h.deps.Store.BOMByID(r.Context(), id)
+	b, err := h.deps.Store.BOMByID(r.Context(), h.deps.DB, entityID, id)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, b)
@@ -151,6 +145,11 @@ func (h *Handler) GetBOM(w http.ResponseWriter, r *http.Request) {
 
 // SetBOMStatus moves a BOM along its state machine.
 func (h *Handler) SetBOMStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -161,9 +160,9 @@ func (h *Handler) SetBOMStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	b, err := h.deps.Store.SetBOMStatus(r.Context(), id, BOMStatus(in.Status), in.RowVersion)
+	b, err := h.deps.Store.SetBOMStatus(r.Context(), h.deps.DB, entityID, id, BOMStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, b)
@@ -171,6 +170,11 @@ func (h *Handler) SetBOMStatus(w http.ResponseWriter, r *http.Request) {
 
 // AddLine appends a component line to a draft/active BOM.
 func (h *Handler) AddLine(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	bid, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -182,10 +186,10 @@ func (h *Handler) AddLine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	l.ID = 0
-	l.EntityID = entityOf(r)
+	l.EntityID = entityID
 	l.BOMID = bid
-	if err := h.deps.Store.AddLine(r.Context(), &l); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	if err := h.deps.Store.AddLine(r.Context(), h.deps.DB, &l); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, l)
@@ -198,7 +202,7 @@ func (h *Handler) ListLines(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.LinesOf(r.Context(), bid)
+	list, err := h.deps.Store.LinesOf(r.Context(), h.deps.DB, bid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -208,30 +212,40 @@ func (h *Handler) ListLines(w http.ResponseWriter, r *http.Request) {
 
 // CreateMO opens a draft manufacturing order.
 func (h *Handler) CreateMO(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var mo ManufacturingOrder
 	if err := decode(r, &mo); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	mo.ID = 0
-	mo.EntityID = entityOf(r)
+	mo.EntityID = entityID
 	mo.Status = MODraft
-	if err := h.deps.Store.CreateMO(r.Context(), &mo); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	if err := h.deps.Store.CreateMO(r.Context(), h.deps.DB, &mo); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), "forgeerp.manufacturing.mo.created.v1", "mo", mo.ID)
+	h.publish(r.Context(), entityID, "forgeerp.manufacturing.mo.created.v1", "mo", mo.ID)
 	writeJSON(w, http.StatusCreated, mo)
 }
 
 // ListMOs pages manufacturing orders within the caller's entity.
 func (h *Handler) ListMOs(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	list, err := h.deps.Store.ListMOs(r.Context(), entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListMOs(r.Context(), h.deps.DB, entityID, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -241,14 +255,19 @@ func (h *Handler) ListMOs(w http.ResponseWriter, r *http.Request) {
 
 // GetMO fetches one MO.
 func (h *Handler) GetMO(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	mo, err := h.deps.Store.MOByID(r.Context(), id)
+	mo, err := h.deps.Store.MOByID(r.Context(), h.deps.DB, entityID, id)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, mo)
@@ -256,6 +275,11 @@ func (h *Handler) GetMO(w http.ResponseWriter, r *http.Request) {
 
 // SetMOStatus moves an MO along its state machine.
 func (h *Handler) SetMOStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -266,42 +290,32 @@ func (h *Handler) SetMOStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	mo, err := h.deps.Store.SetMOStatus(r.Context(), id, MOStatus(in.Status), in.RowVersion)
+	mo, err := h.deps.Store.SetMOStatus(r.Context(), h.deps.DB, entityID, id, MOStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, mo)
 }
 
 // Produce consumes components and receipts the finished good through the
-// catalog ledger, then flips the MO to produced. 422 on insufficient stock.
+// catalog ledger, then flips the MO to produced — atomically via the produce
+// service. 422 on insufficient stock.
 func (h *Handler) Produce(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	mo, err := h.deps.Store.MOByID(r.Context(), id)
+	done, plan, err := h.svc.Produce(r.Context(), ProduceCmd{EntityID: entityID, MOID: id})
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	lines, err := h.deps.Store.LinesOf(r.Context(), mo.BOMID)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "lines failed")
-		return
-	}
-	plan, err := PostProduce(r.Context(), mo, lines, h.deps.Ledger)
-	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
-	}
-	done, err := h.deps.Store.MarkProduced(r.Context(), mo.ID, mo.RowVersion)
-	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
-	}
-	h.publish(r.Context(), "forgeerp.manufacturing.mo.produced.v1", "mo", done.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"mo": done, "plan": plan})
 }

@@ -7,6 +7,17 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: forgeerp
+          POSTGRES_PASSWORD: forgeerp
+          POSTGRES_DB: forgeerp_test
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+        ports: ["5432:5432"]
+    env:
+      TEST_DATABASE_URL: postgres://forgeerp:forgeerp@localhost:5432/forgeerp_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -16,7 +27,23 @@ jobs:
         run: |
           go build ./...
           go vet ./...
-          go test ./...
+          go test -race ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.1.6
+          working-directory: backend
+      - name: govulncheck
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          ~/go/bin/govulncheck ./...
+      - working-directory: backend
+        name: tenant-scoping guard
+        run: |
+          if grep -rn 'WHERE id=\$[0-9]' internal --include='*.go' --exclude='*_test.go' | grep -v 'entity_id'; then
+            echo "tenant-less id lookup detected (Phase 0 task 3)"; exit 1;
+          fi
 
   frontend:
     runs-on: ubuntu-latest
@@ -35,6 +62,26 @@ jobs:
 
   compose:
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose config >/dev/null
+      - name: validate compose config
+        run: docker compose config >/dev/null
+      - name: boot postgres + api
+        run: docker compose up -d --build postgres api
+      - name: wait for /readyz, check /healthz
+        run: |
+          deadline=$((SECONDS+180))
+          until [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/readyz)" = "200" ]; do
+            if [ $SECONDS -ge $deadline ]; then
+              echo "timed out waiting for /readyz 200"; exit 1
+            fi
+            sleep 3
+          done
+          curl -fsS http://localhost:8080/healthz >/dev/null
+      - name: dump compose logs on failure
+        if: failure()
+        run: docker compose logs postgres api
+      - name: tear down
+        if: always()
+        run: docker compose down -v

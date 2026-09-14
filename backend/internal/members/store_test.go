@@ -1,6 +1,7 @@
 package members
 
 import (
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,46 +10,51 @@ import (
 	"testing"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/go-chi/chi/v5"
 )
 
 func passthrough(_, _, _ string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler { return next }
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(platform.ContextWithEntity(r.Context(), 1)))
+		})
+	}
 }
 
 func TestMemberSubscriptionFlow(t *testing.T) {
 	ctx := context.Background()
 	m := NewMemoryStore()
 	ty := &MemberType{EntityID: 1, Code: "STD", Label: "Standard", AnnualFee: 5000}
-	if err := m.CreateType(ctx, ty); err != nil {
+	if err := m.CreateType(ctx, nil, ty); err != nil {
 		t.Fatalf("type: %v", err)
 	}
 	mb := &Member{EntityID: 1, Ref: "M-1", TypeID: ty.ID, FirstName: "Ada", LastName: "L"}
-	if err := m.CreateMember(ctx, mb); err != nil {
+	if err := m.CreateMember(ctx, nil, mb); err != nil {
 		t.Fatalf("member: %v", err)
 	}
-	if err := m.CreateMember(ctx, &Member{EntityID: 1, Ref: "M-2", TypeID: ty.ID}); err == nil {
+	if err := m.CreateMember(ctx, nil, &Member{EntityID: 1, Ref: "M-2", TypeID: ty.ID}); err == nil {
 		t.Error("nameless member accepted")
 	}
-	upd, err := m.SetMemberStatus(ctx, mb.ID, MemberActive, mb.RowVersion)
+	upd, err := m.SetMemberStatus(ctx, nil, 1, mb.ID, MemberActive, mb.RowVersion)
 	if err != nil {
 		t.Fatalf("activate: %v", err)
 	}
 	su := &Subscription{EntityID: 1, MemberID: mb.ID, Year: "2026", Amount: 5000}
-	if err := m.CreateSubscription(ctx, su); err != nil {
+	if err := m.CreateSubscription(ctx, nil, su); err != nil {
 		t.Fatalf("subscription: %v", err)
 	}
-	if err := m.CreateSubscription(ctx, &Subscription{EntityID: 1, MemberID: mb.ID, Year: "2026", Amount: 1}); err == nil {
+	if err := m.CreateSubscription(ctx, nil, &Subscription{EntityID: 1, MemberID: mb.ID, Year: "2026", Amount: 1}); err == nil {
 		t.Error("duplicate year accepted")
 	}
-	su2, err := m.SetSubscriptionStatus(ctx, su.ID, SubValidated, su.RowVersion)
+	su2, err := m.SetSubscriptionStatus(ctx, nil, 1, su.ID, SubValidated, su.RowVersion)
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	if _, err := m.SetSubscriptionStatus(ctx, su.ID, SubPaid, su2.RowVersion); err != nil {
+	if _, err := m.SetSubscriptionStatus(ctx, nil, 1, su.ID, SubPaid, su2.RowVersion); err != nil {
 		t.Fatalf("pay: %v", err)
 	}
-	if _, err := m.SetMemberStatus(ctx, mb.ID, MemberResigned, upd.RowVersion); err != nil {
+	if _, err := m.SetMemberStatus(ctx, nil, 1, mb.ID, MemberResigned, upd.RowVersion); err != nil {
 		t.Fatalf("resign: %v", err)
 	}
 }
@@ -59,18 +65,18 @@ func TestDonationFlow(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	d := &Donation{EntityID: 1, Ref: "DON-1", DonorName: "Grace Hopper",
 		Amount: 10000, DonatedAt: now, Method: "transfer"}
-	if err := m.CreateDonation(ctx, d); err != nil {
+	if err := m.CreateDonation(ctx, nil, d); err != nil {
 		t.Fatalf("donation: %v", err)
 	}
-	if err := m.CreateDonation(ctx, &Donation{EntityID: 1, Ref: "DON-2", DonorName: "x",
+	if err := m.CreateDonation(ctx, nil, &Donation{EntityID: 1, Ref: "DON-2", DonorName: "x",
 		Amount: 1, DonatedAt: now, Method: "crypto"}); err == nil {
 		t.Error("bad method accepted")
 	}
-	upd, err := m.SetDonationStatus(ctx, d.ID, DonationPaid, d.RowVersion)
+	upd, err := m.SetDonationStatus(ctx, nil, 1, d.ID, DonationPaid, d.RowVersion)
 	if err != nil {
 		t.Fatalf("pay: %v", err)
 	}
-	if _, err := m.SetDonationStatus(ctx, d.ID, DonationCanceled, upd.RowVersion); err == nil {
+	if _, err := m.SetDonationStatus(ctx, nil, 1, d.ID, DonationCanceled, upd.RowVersion); err == nil {
 		t.Error("paid→canceled accepted")
 	}
 }
@@ -104,5 +110,71 @@ func TestMembersAPI(t *testing.T) {
 	rec = post("/api/v1/members/9999/status", map[string]any{"status": 1, "row_version": 1})
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("missing: code=%d want 404", rec.Code)
+	}
+}
+
+func TestCrossTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemoryStore()
+	ty := &MemberType{EntityID: 1, Code: "X", Label: "X", AnnualFee: 100}
+	if err := m.CreateType(ctx, nil, ty); err != nil {
+		t.Fatalf("type: %v", err)
+	}
+	mb := &Member{EntityID: 1, Ref: "X-1", TypeID: ty.ID, FirstName: "Ada", LastName: "L"}
+	if err := m.CreateMember(ctx, nil, mb); err != nil {
+		t.Fatalf("member: %v", err)
+	}
+	if _, err := m.MemberByID(ctx, nil, 2, mb.ID); err == nil {
+		t.Error("cross-tenant MemberByID accepted")
+	}
+	if _, err := m.SetMemberStatus(ctx, nil, 2, mb.ID, MemberActive, mb.RowVersion); err == nil {
+		t.Error("cross-tenant SetMemberStatus accepted")
+	}
+	su := &Subscription{EntityID: 1, MemberID: mb.ID, Year: "2026", Amount: 100}
+	if err := m.CreateSubscription(ctx, nil, su); err != nil {
+		t.Fatalf("subscription: %v", err)
+	}
+	if subs, _ := m.SubscriptionsOf(ctx, nil, 2, mb.ID); len(subs) != 0 {
+		t.Fatalf("cross-tenant SubscriptionsOf=%d want empty", len(subs))
+	}
+	if _, err := m.SetSubscriptionStatus(ctx, nil, 2, su.ID, SubValidated, su.RowVersion); err == nil {
+		t.Error("cross-tenant SetSubscriptionStatus accepted")
+	}
+	if err := m.CreateSubscription(ctx, nil, &Subscription{EntityID: 2, MemberID: mb.ID, Year: "2027", Amount: 100}); err == nil {
+		t.Error("cross-tenant CreateSubscription accepted")
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	d := &Donation{EntityID: 1, Ref: "X-D", DonorName: "G", Amount: 500,
+		DonatedAt: now, Method: "transfer"}
+	if err := m.CreateDonation(ctx, nil, d); err != nil {
+		t.Fatalf("donation: %v", err)
+	}
+	if _, err := m.SetDonationStatus(ctx, nil, 2, d.ID, DonationPaid, d.RowVersion); err == nil {
+		t.Error("cross-tenant SetDonationStatus accepted")
+	}
+}
+
+func TestPGMemberFlow(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
+	ty := &MemberType{EntityID: 1, Code: "PG", Label: "PG", AnnualFee: 100}
+	if err := st.CreateType(ctx, pool, ty); err != nil {
+		t.Fatalf("type: %v", err)
+	}
+	mb := &Member{EntityID: 1, Ref: "PG-M", TypeID: ty.ID, FirstName: "A"}
+	if err := st.CreateMember(ctx, pool, mb); err != nil {
+		t.Fatalf("member: %v", err)
+	}
+	if _, err := st.SetMemberStatus(ctx, pool, 1, mb.ID, MemberActive, mb.RowVersion); err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+	d := &Donation{EntityID: 1, Ref: "PG-D", DonorName: "G", Amount: 500,
+		DonatedAt: time.Now().UTC(), Method: "transfer"}
+	if err := st.CreateDonation(ctx, pool, d); err != nil {
+		t.Fatalf("donation: %v", err)
+	}
+	if _, err := st.SetDonationStatus(ctx, pool, 1, d.ID, DonationPaid, d.RowVersion); err != nil {
+		t.Fatalf("pay: %v", err)
 	}
 }

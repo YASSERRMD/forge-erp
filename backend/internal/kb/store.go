@@ -6,13 +6,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 )
 
 // Article status.
@@ -41,13 +43,13 @@ type Article struct {
 // Validate checks article invariants.
 func (a Article) Validate() error {
 	if a.EntityID <= 0 {
-		return errors.New("kb: entity_id required")
+		return fmt.Errorf("kb: entity_id required: %w", platform.ErrValidation)
 	}
 	if strings.TrimSpace(a.Slug) == "" {
-		return errors.New("kb: slug required")
+		return fmt.Errorf("kb: slug required: %w", platform.ErrValidation)
 	}
 	if strings.TrimSpace(a.Title) == "" {
-		return errors.New("kb: title required")
+		return fmt.Errorf("kb: title required: %w", platform.ErrValidation)
 	}
 	return nil
 }
@@ -62,12 +64,12 @@ func (a Article) CanTransition(to ArticleStatus) bool {
 
 // Store is the persistence contract for the knowledge base.
 type Store interface {
-	CreateArticle(ctx context.Context, a *Article) error
-	ArticleByID(ctx context.Context, id int64) (Article, error)
-	UpdateArticle(ctx context.Context, id int64, title, body string, tags []string, rowVersion int64) (Article, error)
-	ListArticles(ctx context.Context, entityID int64, publishedOnly bool, limit, offset int) ([]Article, error)
-	SetArticleStatus(ctx context.Context, id int64, to ArticleStatus, rowVersion int64) (Article, error)
-	SearchArticles(ctx context.Context, entityID int64, q string, limit int) ([]Article, error)
+	CreateArticle(ctx context.Context, db platform.DBTX, a *Article) error
+	ArticleByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Article, error)
+	UpdateArticle(ctx context.Context, db platform.DBTX, entityID int64, id int64, title, body string, tags []string, rowVersion int64) (Article, error)
+	ListArticles(ctx context.Context, db platform.DBTX, entityID int64, publishedOnly bool, limit, offset int) ([]Article, error)
+	SetArticleStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to ArticleStatus, rowVersion int64) (Article, error)
+	SearchArticles(ctx context.Context, db platform.DBTX, entityID int64, q string, limit int) ([]Article, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -93,28 +95,28 @@ func scanArticle(row pgx.Row) (Article, error) {
 	return a, nil
 }
 
-func (s *PGStore) CreateArticle(ctx context.Context, a *Article) error {
+func (s *PGStore) CreateArticle(ctx context.Context, db platform.DBTX, a *Article) error {
 	if err := a.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	tags, _ := json.Marshal(a.Tags)
 	if tags == nil {
 		tags = []byte("[]")
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_articles
+	return db.QueryRow(ctx, `INSERT INTO ferp_articles
 		(entity_id, slug, title, body, tags, status, author)
 		VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, row_version`,
 		a.EntityID, a.Slug, a.Title, a.Body, tags, a.Status, a.Author,
 	).Scan(&a.ID, &a.RowVersion)
 }
 
-func (s *PGStore) ArticleByID(ctx context.Context, id int64) (Article, error) {
-	return scanArticle(s.pool.QueryRow(ctx, `SELECT `+articleCols+` FROM ferp_articles WHERE id=$1`, id))
+func (s *PGStore) ArticleByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Article, error) {
+	return scanArticle(db.QueryRow(ctx, `SELECT `+articleCols+` FROM ferp_articles WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
 // UpdateArticle edits a draft article (published must be unpublished first).
-func (s *PGStore) UpdateArticle(ctx context.Context, id int64, title, body string, tags []string, rowVersion int64) (Article, error) {
-	a, err := s.ArticleByID(ctx, id)
+func (s *PGStore) UpdateArticle(ctx context.Context, db platform.DBTX, entityID int64, id int64, title, body string, tags []string, rowVersion int64) (Article, error) {
+	a, err := s.ArticleByID(ctx, db, entityID, id)
 	if err != nil {
 		return Article{}, err
 	}
@@ -122,18 +124,18 @@ func (s *PGStore) UpdateArticle(ctx context.Context, id int64, title, body strin
 		return Article{}, identity.ErrVersionConflict
 	}
 	if a.Status != ArticleDraft {
-		return Article{}, errors.New("kb: only drafts are editable")
+		return Article{}, fmt.Errorf("kb: only drafts are editable: %w", platform.ErrValidation)
 	}
 	if strings.TrimSpace(title) == "" {
-		return Article{}, errors.New("kb: title required")
+		return Article{}, fmt.Errorf("kb: title required: %w", platform.ErrValidation)
 	}
 	raw, _ := json.Marshal(tags)
 	if raw == nil {
 		raw = []byte("[]")
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_articles SET title=$1, body=$2, tags=$3,
-		updated_at=now(), row_version=row_version+1 WHERE id=$4 AND row_version=$5`,
-		title, body, raw, id, rowVersion)
+	tag, err := db.Exec(ctx, `UPDATE ferp_articles SET title=$1, body=$2, tags=$3,
+		updated_at=now(), row_version=row_version+1 WHERE id=$4 AND entity_id=$5 AND row_version=$6`,
+		title, body, raw, id, entityID, rowVersion)
 	if err != nil {
 		return Article{}, err
 	}
@@ -147,14 +149,14 @@ func (s *PGStore) UpdateArticle(ctx context.Context, id int64, title, body strin
 	return a, nil
 }
 
-func (s *PGStore) ListArticles(ctx context.Context, entityID int64, publishedOnly bool, limit, offset int) ([]Article, error) {
+func (s *PGStore) ListArticles(ctx context.Context, db platform.DBTX, entityID int64, publishedOnly bool, limit, offset int) ([]Article, error) {
 	q := `SELECT ` + articleCols + ` FROM ferp_articles WHERE entity_id=$1`
 	args := []any{entityID}
 	if publishedOnly {
 		q += ` AND status=1`
 	}
 	q += ` ORDER BY updated_at DESC LIMIT $2 OFFSET $3`
-	rows, err := s.pool.Query(ctx, q, append(args, limit, offset)...)
+	rows, err := db.Query(ctx, q, append(args, limit, offset)...)
 	if err != nil {
 		return nil, err
 	}
@@ -170,8 +172,8 @@ func (s *PGStore) ListArticles(ctx context.Context, entityID int64, publishedOnl
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetArticleStatus(ctx context.Context, id int64, to ArticleStatus, rowVersion int64) (Article, error) {
-	a, err := s.ArticleByID(ctx, id)
+func (s *PGStore) SetArticleStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to ArticleStatus, rowVersion int64) (Article, error) {
+	a, err := s.ArticleByID(ctx, db, entityID, id)
 	if err != nil {
 		return Article{}, err
 	}
@@ -179,10 +181,10 @@ func (s *PGStore) SetArticleStatus(ctx context.Context, id int64, to ArticleStat
 		return Article{}, identity.ErrVersionConflict
 	}
 	if !a.CanTransition(to) {
-		return Article{}, errors.New("kb: illegal transition")
+		return Article{}, fmt.Errorf("kb: illegal transition: %w", platform.ErrValidation)
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_articles SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+	tag, err := db.Exec(ctx, `UPDATE ferp_articles SET status=$1, updated_at=now(), row_version=row_version+1
+		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
 	if err != nil {
 		return Article{}, err
 	}
@@ -194,9 +196,9 @@ func (s *PGStore) SetArticleStatus(ctx context.Context, id int64, to ArticleStat
 	return a, nil
 }
 
-func (s *PGStore) SearchArticles(ctx context.Context, entityID int64, q string, limit int) ([]Article, error) {
+func (s *PGStore) SearchArticles(ctx context.Context, db platform.DBTX, entityID int64, q string, limit int) ([]Article, error) {
 	q = "%" + strings.ToLower(strings.TrimSpace(q)) + "%"
-	rows, err := s.pool.Query(ctx, `SELECT `+articleCols+` FROM ferp_articles
+	rows, err := db.Query(ctx, `SELECT `+articleCols+` FROM ferp_articles
 		WHERE entity_id=$1 AND status=1 AND (LOWER(title) LIKE $2 OR LOWER(body) LIKE $2)
 		ORDER BY updated_at DESC LIMIT $3`, entityID, q, limit)
 	if err != nil {
@@ -228,15 +230,15 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
-func (m *MemoryStore) CreateArticle(_ context.Context, a *Article) error {
+func (m *MemoryStore) CreateArticle(_ context.Context, _ platform.DBTX, a *Article) error {
 	if err := a.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.articles {
 		if e.EntityID == a.EntityID && e.Slug == a.Slug {
-			return errors.New("kb: duplicate slug")
+			return fmt.Errorf("kb: duplicate slug: %w", platform.ErrConflict)
 		}
 	}
 	a.ID = m.next()
@@ -245,31 +247,31 @@ func (m *MemoryStore) CreateArticle(_ context.Context, a *Article) error {
 	return nil
 }
 
-func (m *MemoryStore) ArticleByID(_ context.Context, id int64) (Article, error) {
+func (m *MemoryStore) ArticleByID(_ context.Context, _ platform.DBTX, entityID int64, id int64) (Article, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.articles[id]
-	if !ok {
+	if !ok || a.EntityID != entityID {
 		return Article{}, identity.ErrNotFound
 	}
 	return a, nil
 }
 
-func (m *MemoryStore) UpdateArticle(_ context.Context, id int64, title, body string, tags []string, rowVersion int64) (Article, error) {
+func (m *MemoryStore) UpdateArticle(_ context.Context, _ platform.DBTX, entityID int64, id int64, title, body string, tags []string, rowVersion int64) (Article, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.articles[id]
-	if !ok {
+	if !ok || a.EntityID != entityID {
 		return Article{}, identity.ErrNotFound
 	}
 	if a.RowVersion != rowVersion {
 		return Article{}, identity.ErrVersionConflict
 	}
 	if a.Status != ArticleDraft {
-		return Article{}, errors.New("kb: only drafts are editable")
+		return Article{}, fmt.Errorf("kb: only drafts are editable: %w", platform.ErrValidation)
 	}
 	if strings.TrimSpace(title) == "" {
-		return Article{}, errors.New("kb: title required")
+		return Article{}, fmt.Errorf("kb: title required: %w", platform.ErrValidation)
 	}
 	a.Title = title
 	a.Body = body
@@ -279,7 +281,7 @@ func (m *MemoryStore) UpdateArticle(_ context.Context, id int64, title, body str
 	return a, nil
 }
 
-func (m *MemoryStore) ListArticles(_ context.Context, entityID int64, publishedOnly bool, limit, offset int) ([]Article, error) {
+func (m *MemoryStore) ListArticles(_ context.Context, _ platform.DBTX, entityID int64, publishedOnly bool, limit, offset int) ([]Article, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Article
@@ -298,18 +300,18 @@ func (m *MemoryStore) ListArticles(_ context.Context, entityID int64, publishedO
 	return out, nil
 }
 
-func (m *MemoryStore) SetArticleStatus(_ context.Context, id int64, to ArticleStatus, rowVersion int64) (Article, error) {
+func (m *MemoryStore) SetArticleStatus(_ context.Context, _ platform.DBTX, entityID int64, id int64, to ArticleStatus, rowVersion int64) (Article, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.articles[id]
-	if !ok {
+	if !ok || a.EntityID != entityID {
 		return Article{}, identity.ErrNotFound
 	}
 	if a.RowVersion != rowVersion {
 		return Article{}, identity.ErrVersionConflict
 	}
 	if !a.CanTransition(to) {
-		return Article{}, errors.New("kb: illegal transition")
+		return Article{}, fmt.Errorf("kb: illegal transition: %w", platform.ErrValidation)
 	}
 	a.Status = to
 	a.RowVersion++
@@ -317,7 +319,7 @@ func (m *MemoryStore) SetArticleStatus(_ context.Context, id int64, to ArticleSt
 	return a, nil
 }
 
-func (m *MemoryStore) SearchArticles(_ context.Context, entityID int64, q string, limit int) ([]Article, error) {
+func (m *MemoryStore) SearchArticles(_ context.Context, _ platform.DBTX, entityID int64, q string, limit int) ([]Article, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	q = strings.ToLower(strings.TrimSpace(q))

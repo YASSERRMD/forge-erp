@@ -3,20 +3,22 @@ package payments
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // Store is the persistence contract for payment attempts.
 type Store interface {
-	CreateAttempt(ctx context.Context, a *PaymentAttempt) error
-	AttemptByID(ctx context.Context, id int64) (PaymentAttempt, error)
-	AttemptByWebhook(ctx context.Context, entityID int64, key string) (PaymentAttempt, bool)
-	ListAttempts(ctx context.Context, entityID int64, limit, offset int) ([]PaymentAttempt, error)
-	SetAttemptStatus(ctx context.Context, id int64, to AttemptStatus, rowVersion int64) (PaymentAttempt, error)
+	CreateAttempt(ctx context.Context, db platform.DBTX, a *PaymentAttempt) error
+	AttemptByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (PaymentAttempt, error)
+	AttemptByWebhook(ctx context.Context, db platform.DBTX, entityID int64, key string) (PaymentAttempt, bool)
+	ListAttempts(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]PaymentAttempt, error)
+	SetAttemptStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to AttemptStatus, rowVersion int64) (PaymentAttempt, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -38,23 +40,23 @@ func scanAttempt(row pgx.Row) (PaymentAttempt, error) {
 	return a, err
 }
 
-func (s *PGStore) CreateAttempt(ctx context.Context, a *PaymentAttempt) error {
+func (s *PGStore) CreateAttempt(ctx context.Context, db platform.DBTX, a *PaymentAttempt) error {
 	if err := a.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_payment_attempts
+	return db.QueryRow(ctx, `INSERT INTO ferp_payment_attempts
 		(entity_id, ref, org_id, invoice_id, amount, currency, provider, status, webhook_key)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,'')) RETURNING id, row_version`,
 		a.EntityID, a.Ref, a.OrgID, a.InvoiceID, a.Amount, a.Currency, a.Provider, a.Status, a.WebhookKey,
 	).Scan(&a.ID, &a.RowVersion)
 }
 
-func (s *PGStore) AttemptByID(ctx context.Context, id int64) (PaymentAttempt, error) {
-	return scanAttempt(s.pool.QueryRow(ctx, `SELECT `+attemptCols+` FROM ferp_payment_attempts WHERE id=$1`, id))
+func (s *PGStore) AttemptByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (PaymentAttempt, error) {
+	return scanAttempt(db.QueryRow(ctx, `SELECT `+attemptCols+` FROM ferp_payment_attempts WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
-func (s *PGStore) AttemptByWebhook(ctx context.Context, entityID int64, key string) (PaymentAttempt, bool) {
-	a, err := scanAttempt(s.pool.QueryRow(ctx, `SELECT `+attemptCols+` FROM ferp_payment_attempts
+func (s *PGStore) AttemptByWebhook(ctx context.Context, db platform.DBTX, entityID int64, key string) (PaymentAttempt, bool) {
+	a, err := scanAttempt(db.QueryRow(ctx, `SELECT `+attemptCols+` FROM ferp_payment_attempts
 		WHERE entity_id=$1 AND webhook_key=$2`, entityID, key))
 	if err != nil {
 		return PaymentAttempt{}, false
@@ -62,8 +64,8 @@ func (s *PGStore) AttemptByWebhook(ctx context.Context, entityID int64, key stri
 	return a, true
 }
 
-func (s *PGStore) ListAttempts(ctx context.Context, entityID int64, limit, offset int) ([]PaymentAttempt, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+attemptCols+` FROM ferp_payment_attempts
+func (s *PGStore) ListAttempts(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]PaymentAttempt, error) {
+	rows, err := db.Query(ctx, `SELECT `+attemptCols+` FROM ferp_payment_attempts
 		WHERE entity_id=$1 ORDER BY id LIMIT $2 OFFSET $3`, entityID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -80,8 +82,8 @@ func (s *PGStore) ListAttempts(ctx context.Context, entityID int64, limit, offse
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetAttemptStatus(ctx context.Context, id int64, to AttemptStatus, rowVersion int64) (PaymentAttempt, error) {
-	a, err := s.AttemptByID(ctx, id)
+func (s *PGStore) SetAttemptStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to AttemptStatus, rowVersion int64) (PaymentAttempt, error) {
+	a, err := s.AttemptByID(ctx, db, entityID, id)
 	if err != nil {
 		return PaymentAttempt{}, err
 	}
@@ -89,10 +91,10 @@ func (s *PGStore) SetAttemptStatus(ctx context.Context, id int64, to AttemptStat
 		return PaymentAttempt{}, identity.ErrVersionConflict
 	}
 	if !a.CanTransition(to) {
-		return PaymentAttempt{}, errors.New("payments: illegal attempt transition")
+		return PaymentAttempt{}, fmt.Errorf("payments: illegal attempt transition: %w", platform.ErrValidation)
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_payment_attempts SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+	tag, err := db.Exec(ctx, `UPDATE ferp_payment_attempts SET status=$1, updated_at=now(), row_version=row_version+1
+		WHERE id=$2 AND row_version=$3 AND entity_id=$4`, to, id, rowVersion, entityID)
 	if err != nil {
 		return PaymentAttempt{}, err
 	}
@@ -118,18 +120,18 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
-func (m *MemoryStore) CreateAttempt(_ context.Context, a *PaymentAttempt) error {
+func (m *MemoryStore) CreateAttempt(_ context.Context, _ platform.DBTX, a *PaymentAttempt) error {
 	if err := a.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.attempts {
 		if e.EntityID == a.EntityID && e.Ref == a.Ref {
-			return errors.New("payments: duplicate attempt ref")
+			return fmt.Errorf("payments: duplicate attempt ref: %w", platform.ErrConflict)
 		}
 		if a.WebhookKey != "" && e.EntityID == a.EntityID && e.WebhookKey == a.WebhookKey {
-			return errors.New("payments: duplicate webhook key")
+			return fmt.Errorf("payments: duplicate webhook key: %w", platform.ErrConflict)
 		}
 	}
 	a.ID = m.next()
@@ -138,17 +140,17 @@ func (m *MemoryStore) CreateAttempt(_ context.Context, a *PaymentAttempt) error 
 	return nil
 }
 
-func (m *MemoryStore) AttemptByID(_ context.Context, id int64) (PaymentAttempt, error) {
+func (m *MemoryStore) AttemptByID(_ context.Context, _ platform.DBTX, entityID int64, id int64) (PaymentAttempt, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.attempts[id]
-	if !ok {
+	if !ok || a.EntityID != entityID {
 		return PaymentAttempt{}, identity.ErrNotFound
 	}
 	return a, nil
 }
 
-func (m *MemoryStore) AttemptByWebhook(_ context.Context, entityID int64, key string) (PaymentAttempt, bool) {
+func (m *MemoryStore) AttemptByWebhook(_ context.Context, _ platform.DBTX, entityID int64, key string) (PaymentAttempt, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, a := range m.attempts {
@@ -159,7 +161,7 @@ func (m *MemoryStore) AttemptByWebhook(_ context.Context, entityID int64, key st
 	return PaymentAttempt{}, false
 }
 
-func (m *MemoryStore) ListAttempts(_ context.Context, entityID int64, limit, offset int) ([]PaymentAttempt, error) {
+func (m *MemoryStore) ListAttempts(_ context.Context, _ platform.DBTX, entityID int64, limit, offset int) ([]PaymentAttempt, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []PaymentAttempt
@@ -178,18 +180,18 @@ func (m *MemoryStore) ListAttempts(_ context.Context, entityID int64, limit, off
 	return out, nil
 }
 
-func (m *MemoryStore) SetAttemptStatus(_ context.Context, id int64, to AttemptStatus, rowVersion int64) (PaymentAttempt, error) {
+func (m *MemoryStore) SetAttemptStatus(_ context.Context, _ platform.DBTX, entityID int64, id int64, to AttemptStatus, rowVersion int64) (PaymentAttempt, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.attempts[id]
-	if !ok {
+	if !ok || a.EntityID != entityID {
 		return PaymentAttempt{}, identity.ErrNotFound
 	}
 	if a.RowVersion != rowVersion {
 		return PaymentAttempt{}, identity.ErrVersionConflict
 	}
 	if !a.CanTransition(to) {
-		return PaymentAttempt{}, errors.New("payments: illegal attempt transition")
+		return PaymentAttempt{}, fmt.Errorf("payments: illegal attempt transition: %w", platform.ErrValidation)
 	}
 	a.Status = to
 	a.RowVersion++

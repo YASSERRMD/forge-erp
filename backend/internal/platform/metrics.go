@@ -6,6 +6,8 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // Metrics is a minimal Prometheus-compatible request counter set (OTel SDK wiring
@@ -30,12 +32,18 @@ func (m *Metrics) inc(route string) {
 	c.Add(1)
 }
 
-// Instrument counts requests by method + route pattern.
+// Instrument counts requests by method + chi route pattern. The pattern is
+// read after the handler runs (chi matches the route before executing the
+// middleware chain, so it is populated by then); unmatched requests share
+// one bucket instead of exploding cardinality on raw paths.
 func (m *Metrics) Instrument(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		route := r.Method + " " + r.URL.Path
-		m.inc(route)
 		next.ServeHTTP(w, r)
+		pattern := chi.RouteContext(r.Context()).RoutePattern()
+		if pattern == "" {
+			pattern = "unmatched"
+		}
+		m.inc(r.Method + " " + pattern)
 	})
 }
 

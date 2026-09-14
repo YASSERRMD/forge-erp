@@ -3,27 +3,29 @@ package members
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 )
 
 // Store is the persistence contract for the members context.
 type Store interface {
-	CreateType(ctx context.Context, t *MemberType) error
-	ListTypes(ctx context.Context, entityID int64) ([]MemberType, error)
-	CreateMember(ctx context.Context, m *Member) error
-	MemberByID(ctx context.Context, id int64) (Member, error)
-	ListMembers(ctx context.Context, entityID int64, limit, offset int) ([]Member, error)
-	SetMemberStatus(ctx context.Context, id int64, to MemberStatus, rowVersion int64) (Member, error)
-	CreateSubscription(ctx context.Context, s *Subscription) error
-	SetSubscriptionStatus(ctx context.Context, id int64, to SubscriptionStatus, rowVersion int64) (Subscription, error)
-	SubscriptionsOf(ctx context.Context, memberID int64) ([]Subscription, error)
-	CreateDonation(ctx context.Context, d *Donation) error
-	SetDonationStatus(ctx context.Context, id int64, to DonationStatus, rowVersion int64) (Donation, error)
-	ListDonations(ctx context.Context, entityID int64, limit, offset int) ([]Donation, error)
+	CreateType(ctx context.Context, db platform.DBTX, t *MemberType) error
+	ListTypes(ctx context.Context, db platform.DBTX, entityID int64) ([]MemberType, error)
+	CreateMember(ctx context.Context, db platform.DBTX, m *Member) error
+	MemberByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Member, error)
+	ListMembers(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Member, error)
+	SetMemberStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to MemberStatus, rowVersion int64) (Member, error)
+	CreateSubscription(ctx context.Context, db platform.DBTX, s *Subscription) error
+	SetSubscriptionStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to SubscriptionStatus, rowVersion int64) (Subscription, error)
+	SubscriptionsOf(ctx context.Context, db platform.DBTX, entityID int64, memberID int64) ([]Subscription, error)
+	CreateDonation(ctx context.Context, db platform.DBTX, d *Donation) error
+	SetDonationStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to DonationStatus, rowVersion int64) (Donation, error)
+	ListDonations(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Donation, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -32,17 +34,17 @@ type PGStore struct{ pool *pgxpool.Pool }
 // NewPGStore wraps a pool.
 func NewPGStore(pool *pgxpool.Pool) *PGStore { return &PGStore{pool: pool} }
 
-func (s *PGStore) CreateType(ctx context.Context, t *MemberType) error {
+func (s *PGStore) CreateType(ctx context.Context, db platform.DBTX, t *MemberType) error {
 	if err := t.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_member_types
+	return db.QueryRow(ctx, `INSERT INTO ferp_member_types
 		(entity_id, code, label, annual_fee) VALUES ($1,$2,$3,$4) RETURNING id`,
 		t.EntityID, t.Code, t.Label, t.AnnualFee).Scan(&t.ID)
 }
 
-func (s *PGStore) ListTypes(ctx context.Context, entityID int64) ([]MemberType, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, code, label, annual_fee, created_at
+func (s *PGStore) ListTypes(ctx context.Context, db platform.DBTX, entityID int64) ([]MemberType, error) {
+	rows, err := db.Query(ctx, `SELECT id, entity_id, code, label, annual_fee, created_at
 		FROM ferp_member_types WHERE entity_id=$1 ORDER BY code`, entityID)
 	if err != nil {
 		return nil, err
@@ -71,23 +73,28 @@ func scanMember(row pgx.Row) (Member, error) {
 	return m, err
 }
 
-func (s *PGStore) CreateMember(ctx context.Context, m *Member) error {
+func (s *PGStore) CreateMember(ctx context.Context, db platform.DBTX, m *Member) error {
 	if err := m.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_members
+	var typeID int64
+	if err := db.QueryRow(ctx, `SELECT id FROM ferp_member_types WHERE id=$1 AND entity_id=$2`,
+		m.TypeID, m.EntityID).Scan(&typeID); err != nil {
+		return fmt.Errorf("members: unknown type: %w", platform.ErrValidation)
+	}
+	return db.QueryRow(ctx, `INSERT INTO ferp_members
 		(entity_id, ref, type_id, first_name, last_name, company, email, status)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, row_version`,
 		m.EntityID, m.Ref, m.TypeID, m.FirstName, m.LastName, m.Company, m.Email, m.Status,
 	).Scan(&m.ID, &m.RowVersion)
 }
 
-func (s *PGStore) MemberByID(ctx context.Context, id int64) (Member, error) {
-	return scanMember(s.pool.QueryRow(ctx, `SELECT `+memberCols+` FROM ferp_members WHERE id=$1`, id))
+func (s *PGStore) MemberByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Member, error) {
+	return scanMember(db.QueryRow(ctx, `SELECT `+memberCols+` FROM ferp_members WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
-func (s *PGStore) ListMembers(ctx context.Context, entityID int64, limit, offset int) ([]Member, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+memberCols+` FROM ferp_members
+func (s *PGStore) ListMembers(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Member, error) {
+	rows, err := db.Query(ctx, `SELECT `+memberCols+` FROM ferp_members
 		WHERE entity_id=$1 ORDER BY ref LIMIT $2 OFFSET $3`, entityID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -104,8 +111,8 @@ func (s *PGStore) ListMembers(ctx context.Context, entityID int64, limit, offset
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetMemberStatus(ctx context.Context, id int64, to MemberStatus, rowVersion int64) (Member, error) {
-	m, err := s.MemberByID(ctx, id)
+func (s *PGStore) SetMemberStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to MemberStatus, rowVersion int64) (Member, error) {
+	m, err := s.MemberByID(ctx, db, entityID, id)
 	if err != nil {
 		return Member{}, err
 	}
@@ -113,10 +120,10 @@ func (s *PGStore) SetMemberStatus(ctx context.Context, id int64, to MemberStatus
 		return Member{}, identity.ErrVersionConflict
 	}
 	if !m.CanTransition(to) {
-		return Member{}, errors.New("members: illegal transition")
+		return Member{}, fmt.Errorf("members: illegal transition: %w", platform.ErrValidation)
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_members SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+	tag, err := db.Exec(ctx, `UPDATE ferp_members SET status=$1, updated_at=now(), row_version=row_version+1
+		WHERE id=$2 AND entity_id=$4 AND row_version=$3`, to, id, rowVersion, entityID)
 	if err != nil {
 		return Member{}, err
 	}
@@ -140,19 +147,22 @@ func scanSub(row pgx.Row) (Subscription, error) {
 	return su, err
 }
 
-func (s *PGStore) CreateSubscription(ctx context.Context, su *Subscription) error {
+func (s *PGStore) CreateSubscription(ctx context.Context, db platform.DBTX, su *Subscription) error {
 	if err := su.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_subscriptions
+	if _, err := s.MemberByID(ctx, db, su.EntityID, su.MemberID); err != nil {
+		return fmt.Errorf("members: unknown member: %w", platform.ErrValidation)
+	}
+	return db.QueryRow(ctx, `INSERT INTO ferp_subscriptions
 		(entity_id, member_id, year, amount, status)
 		VALUES ($1,$2,$3,$4,$5) RETURNING id, row_version`,
 		su.EntityID, su.MemberID, su.Year, su.Amount, su.Status,
 	).Scan(&su.ID, &su.RowVersion)
 }
 
-func (s *PGStore) SetSubscriptionStatus(ctx context.Context, id int64, to SubscriptionStatus, rowVersion int64) (Subscription, error) {
-	su, err := scanSub(s.pool.QueryRow(ctx, `SELECT `+subCols+` FROM ferp_subscriptions WHERE id=$1`, id))
+func (s *PGStore) SetSubscriptionStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to SubscriptionStatus, rowVersion int64) (Subscription, error) {
+	su, err := scanSub(db.QueryRow(ctx, `SELECT `+subCols+` FROM ferp_subscriptions WHERE id=$1 AND entity_id=$2`, id, entityID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Subscription{}, identity.ErrNotFound
 	}
@@ -163,10 +173,10 @@ func (s *PGStore) SetSubscriptionStatus(ctx context.Context, id int64, to Subscr
 		return Subscription{}, identity.ErrVersionConflict
 	}
 	if !su.CanTransition(to) {
-		return Subscription{}, errors.New("members: illegal transition")
+		return Subscription{}, fmt.Errorf("members: illegal transition: %w", platform.ErrValidation)
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_subscriptions SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+	tag, err := db.Exec(ctx, `UPDATE ferp_subscriptions SET status=$1, updated_at=now(), row_version=row_version+1
+		WHERE id=$2 AND entity_id=$4 AND row_version=$3`, to, id, rowVersion, entityID)
 	if err != nil {
 		return Subscription{}, err
 	}
@@ -178,8 +188,8 @@ func (s *PGStore) SetSubscriptionStatus(ctx context.Context, id int64, to Subscr
 	return su, nil
 }
 
-func (s *PGStore) SubscriptionsOf(ctx context.Context, memberID int64) ([]Subscription, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+subCols+` FROM ferp_subscriptions WHERE member_id=$1 ORDER BY year`, memberID)
+func (s *PGStore) SubscriptionsOf(ctx context.Context, db platform.DBTX, entityID int64, memberID int64) ([]Subscription, error) {
+	rows, err := db.Query(ctx, `SELECT `+subCols+` FROM ferp_subscriptions WHERE member_id=$1 AND entity_id=$2 ORDER BY year`, memberID, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -207,19 +217,19 @@ func scanDonation(row pgx.Row) (Donation, error) {
 	return d, err
 }
 
-func (s *PGStore) CreateDonation(ctx context.Context, d *Donation) error {
+func (s *PGStore) CreateDonation(ctx context.Context, db platform.DBTX, d *Donation) error {
 	if err := d.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_donations
+	return db.QueryRow(ctx, `INSERT INTO ferp_donations
 		(entity_id, ref, donor_name, org_id, amount, donated_at, method, status)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, row_version`,
 		d.EntityID, d.Ref, d.DonorName, d.OrgID, d.Amount, d.DonatedAt, d.Method, d.Status,
 	).Scan(&d.ID, &d.RowVersion)
 }
 
-func (s *PGStore) SetDonationStatus(ctx context.Context, id int64, to DonationStatus, rowVersion int64) (Donation, error) {
-	d, err := scanDonation(s.pool.QueryRow(ctx, `SELECT `+donationCols+` FROM ferp_donations WHERE id=$1`, id))
+func (s *PGStore) SetDonationStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to DonationStatus, rowVersion int64) (Donation, error) {
+	d, err := scanDonation(db.QueryRow(ctx, `SELECT `+donationCols+` FROM ferp_donations WHERE id=$1 AND entity_id=$2`, id, entityID))
 	if err != nil {
 		return Donation{}, err
 	}
@@ -227,10 +237,10 @@ func (s *PGStore) SetDonationStatus(ctx context.Context, id int64, to DonationSt
 		return Donation{}, identity.ErrVersionConflict
 	}
 	if !d.CanTransition(to) {
-		return Donation{}, errors.New("members: illegal transition")
+		return Donation{}, fmt.Errorf("members: illegal transition: %w", platform.ErrValidation)
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_donations SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+	tag, err := db.Exec(ctx, `UPDATE ferp_donations SET status=$1, updated_at=now(), row_version=row_version+1
+		WHERE id=$2 AND entity_id=$4 AND row_version=$3`, to, id, rowVersion, entityID)
 	if err != nil {
 		return Donation{}, err
 	}
@@ -242,8 +252,8 @@ func (s *PGStore) SetDonationStatus(ctx context.Context, id int64, to DonationSt
 	return d, nil
 }
 
-func (s *PGStore) ListDonations(ctx context.Context, entityID int64, limit, offset int) ([]Donation, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+donationCols+` FROM ferp_donations
+func (s *PGStore) ListDonations(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Donation, error) {
+	rows, err := db.Query(ctx, `SELECT `+donationCols+` FROM ferp_donations
 		WHERE entity_id=$1 ORDER BY donated_at LIMIT $2 OFFSET $3`, entityID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -280,15 +290,15 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
-func (m *MemoryStore) CreateType(_ context.Context, t *MemberType) error {
+func (m *MemoryStore) CreateType(_ context.Context, _ platform.DBTX, t *MemberType) error {
 	if err := t.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.types {
 		if e.EntityID == t.EntityID && e.Code == t.Code {
-			return errors.New("members: duplicate type code")
+			return fmt.Errorf("members: duplicate type code: %w", platform.ErrConflict)
 		}
 	}
 	t.ID = m.next()
@@ -296,7 +306,7 @@ func (m *MemoryStore) CreateType(_ context.Context, t *MemberType) error {
 	return nil
 }
 
-func (m *MemoryStore) ListTypes(_ context.Context, entityID int64) ([]MemberType, error) {
+func (m *MemoryStore) ListTypes(_ context.Context, _ platform.DBTX, entityID int64) ([]MemberType, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []MemberType
@@ -308,18 +318,19 @@ func (m *MemoryStore) ListTypes(_ context.Context, entityID int64) ([]MemberType
 	return out, nil
 }
 
-func (m *MemoryStore) CreateMember(_ context.Context, mb *Member) error {
+func (m *MemoryStore) CreateMember(_ context.Context, _ platform.DBTX, mb *Member) error {
 	if err := mb.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.types[mb.TypeID]; !ok {
-		return errors.New("members: unknown type")
+	ty, ok := m.types[mb.TypeID]
+	if !ok || ty.EntityID != mb.EntityID {
+		return fmt.Errorf("members: unknown type: %w", platform.ErrValidation)
 	}
 	for _, e := range m.members {
 		if e.EntityID == mb.EntityID && e.Ref == mb.Ref {
-			return errors.New("members: duplicate ref")
+			return fmt.Errorf("members: duplicate ref: %w", platform.ErrConflict)
 		}
 	}
 	mb.ID = m.next()
@@ -328,17 +339,17 @@ func (m *MemoryStore) CreateMember(_ context.Context, mb *Member) error {
 	return nil
 }
 
-func (m *MemoryStore) MemberByID(_ context.Context, id int64) (Member, error) {
+func (m *MemoryStore) MemberByID(_ context.Context, _ platform.DBTX, entityID int64, id int64) (Member, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	mb, ok := m.members[id]
-	if !ok {
+	if !ok || mb.EntityID != entityID {
 		return Member{}, identity.ErrNotFound
 	}
 	return mb, nil
 }
 
-func (m *MemoryStore) ListMembers(_ context.Context, entityID int64, limit, offset int) ([]Member, error) {
+func (m *MemoryStore) ListMembers(_ context.Context, _ platform.DBTX, entityID int64, limit, offset int) ([]Member, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Member
@@ -357,18 +368,18 @@ func (m *MemoryStore) ListMembers(_ context.Context, entityID int64, limit, offs
 	return out, nil
 }
 
-func (m *MemoryStore) SetMemberStatus(_ context.Context, id int64, to MemberStatus, rowVersion int64) (Member, error) {
+func (m *MemoryStore) SetMemberStatus(_ context.Context, _ platform.DBTX, entityID int64, id int64, to MemberStatus, rowVersion int64) (Member, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	mb, ok := m.members[id]
-	if !ok {
+	if !ok || mb.EntityID != entityID {
 		return Member{}, identity.ErrNotFound
 	}
 	if mb.RowVersion != rowVersion {
 		return Member{}, identity.ErrVersionConflict
 	}
 	if !mb.CanTransition(to) {
-		return Member{}, errors.New("members: illegal transition")
+		return Member{}, fmt.Errorf("members: illegal transition: %w", platform.ErrValidation)
 	}
 	mb.Status = to
 	mb.RowVersion++
@@ -376,18 +387,19 @@ func (m *MemoryStore) SetMemberStatus(_ context.Context, id int64, to MemberStat
 	return mb, nil
 }
 
-func (m *MemoryStore) CreateSubscription(_ context.Context, s *Subscription) error {
+func (m *MemoryStore) CreateSubscription(_ context.Context, _ platform.DBTX, s *Subscription) error {
 	if err := s.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.members[s.MemberID]; !ok {
-		return errors.New("members: unknown member")
+	mb, ok := m.members[s.MemberID]
+	if !ok || mb.EntityID != s.EntityID {
+		return fmt.Errorf("members: unknown member: %w", platform.ErrValidation)
 	}
 	for _, e := range m.subs {
 		if e.EntityID == s.EntityID && e.MemberID == s.MemberID && e.Year == s.Year {
-			return errors.New("members: duplicate subscription year")
+			return fmt.Errorf("members: duplicate subscription year: %w", platform.ErrConflict)
 		}
 	}
 	s.ID = m.next()
@@ -396,18 +408,18 @@ func (m *MemoryStore) CreateSubscription(_ context.Context, s *Subscription) err
 	return nil
 }
 
-func (m *MemoryStore) SetSubscriptionStatus(_ context.Context, id int64, to SubscriptionStatus, rowVersion int64) (Subscription, error) {
+func (m *MemoryStore) SetSubscriptionStatus(_ context.Context, _ platform.DBTX, entityID int64, id int64, to SubscriptionStatus, rowVersion int64) (Subscription, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.subs[id]
-	if !ok {
+	if !ok || s.EntityID != entityID {
 		return Subscription{}, identity.ErrNotFound
 	}
 	if s.RowVersion != rowVersion {
 		return Subscription{}, identity.ErrVersionConflict
 	}
 	if !s.CanTransition(to) {
-		return Subscription{}, errors.New("members: illegal transition")
+		return Subscription{}, fmt.Errorf("members: illegal transition: %w", platform.ErrValidation)
 	}
 	s.Status = to
 	s.RowVersion++
@@ -415,27 +427,27 @@ func (m *MemoryStore) SetSubscriptionStatus(_ context.Context, id int64, to Subs
 	return s, nil
 }
 
-func (m *MemoryStore) SubscriptionsOf(_ context.Context, memberID int64) ([]Subscription, error) {
+func (m *MemoryStore) SubscriptionsOf(_ context.Context, _ platform.DBTX, entityID int64, memberID int64) ([]Subscription, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Subscription
 	for _, s := range m.subs {
-		if s.MemberID == memberID {
+		if s.MemberID == memberID && s.EntityID == entityID {
 			out = append(out, s)
 		}
 	}
 	return out, nil
 }
 
-func (m *MemoryStore) CreateDonation(_ context.Context, d *Donation) error {
+func (m *MemoryStore) CreateDonation(_ context.Context, _ platform.DBTX, d *Donation) error {
 	if err := d.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.dons {
 		if e.EntityID == d.EntityID && e.Ref == d.Ref {
-			return errors.New("members: duplicate donation ref")
+			return fmt.Errorf("members: duplicate donation ref: %w", platform.ErrConflict)
 		}
 	}
 	d.ID = m.next()
@@ -444,18 +456,18 @@ func (m *MemoryStore) CreateDonation(_ context.Context, d *Donation) error {
 	return nil
 }
 
-func (m *MemoryStore) SetDonationStatus(_ context.Context, id int64, to DonationStatus, rowVersion int64) (Donation, error) {
+func (m *MemoryStore) SetDonationStatus(_ context.Context, _ platform.DBTX, entityID int64, id int64, to DonationStatus, rowVersion int64) (Donation, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, ok := m.dons[id]
-	if !ok {
+	if !ok || d.EntityID != entityID {
 		return Donation{}, identity.ErrNotFound
 	}
 	if d.RowVersion != rowVersion {
 		return Donation{}, identity.ErrVersionConflict
 	}
 	if !d.CanTransition(to) {
-		return Donation{}, errors.New("members: illegal transition")
+		return Donation{}, fmt.Errorf("members: illegal transition: %w", platform.ErrValidation)
 	}
 	d.Status = to
 	d.RowVersion++
@@ -463,7 +475,7 @@ func (m *MemoryStore) SetDonationStatus(_ context.Context, id int64, to Donation
 	return d, nil
 }
 
-func (m *MemoryStore) ListDonations(_ context.Context, entityID int64, limit, offset int) ([]Donation, error) {
+func (m *MemoryStore) ListDonations(_ context.Context, _ platform.DBTX, entityID int64, limit, offset int) ([]Donation, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Donation

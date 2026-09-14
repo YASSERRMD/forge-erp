@@ -3,21 +3,19 @@ package booking
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/go-chi/chi/v5"
 )
 
 // Deps wires handlers to persistence and the event bus.
 type Deps struct {
 	Store Store
 	Bus   platform.Bus
+	DB    platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -51,30 +49,6 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
-func storeErrorCode(err error) int {
-	switch {
-	case errors.Is(err, identity.ErrNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, identity.ErrVersionConflict):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "duplicate"):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "not found"):
-		return http.StatusNotFound
-	case err != nil && strings.Contains(err.Error(), "conflict"):
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
-}
-
 func pathID(r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, name), 10, 64)
 	if err != nil || id <= 0 {
@@ -83,11 +57,11 @@ func pathID(r *http.Request, name string) (int64, bool) {
 	return id, true
 }
 
-func (h *Handler) publish(ctx context.Context, subject, entity string, id int64) {
+func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
 	if h.deps.Bus == nil {
 		return
 	}
-	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, ID: id})
+	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, EntityID: entityID, ID: id})
 }
 
 type statusIn struct {
@@ -97,16 +71,21 @@ type statusIn struct {
 
 // CreateResource registers a bookable resource.
 func (h *Handler) CreateResource(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var res Resource
 	if err := decode(r, &res); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	res.ID = 0
-	res.EntityID = entityOf(r)
+	res.EntityID = entityID
 	res.Status = ResourceActive
-	if err := h.deps.Store.CreateResource(r.Context(), &res); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	if err := h.deps.Store.CreateResource(r.Context(), h.deps.DB, &res); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, res)
@@ -114,7 +93,12 @@ func (h *Handler) CreateResource(w http.ResponseWriter, r *http.Request) {
 
 // ListResources lists resources within the caller's entity.
 func (h *Handler) ListResources(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListResources(r.Context(), entityOf(r))
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	list, err := h.deps.Store.ListResources(r.Context(), h.deps.DB, entityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -124,24 +108,34 @@ func (h *Handler) ListResources(w http.ResponseWriter, r *http.Request) {
 
 // CreateBooking reserves a window after capacity checks (422 on overlap).
 func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var b Booking
 	if err := decode(r, &b); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	b.ID = 0
-	b.EntityID = entityOf(r)
+	b.EntityID = entityID
 	b.Status = BookingBooked
-	if err := h.deps.Store.CreateBooking(r.Context(), &b); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	if err := h.deps.Store.CreateBooking(r.Context(), h.deps.DB, &b); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), "forgeerp.booking.created.v1", "booking", b.ID)
+	h.publish(r.Context(), entityID, "forgeerp.booking.created.v1", "booking", b.ID)
 	writeJSON(w, http.StatusCreated, b)
 }
 
 // ListBookings lists a resource's bookings in [from, to).
 func (h *Handler) ListBookings(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	q := r.URL.Query()
 	resID, err := strconv.ParseInt(q.Get("resource_id"), 10, 64)
 	if err != nil || resID <= 0 {
@@ -154,7 +148,7 @@ func (h *Handler) ListBookings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "valid from/to (RFC3339) required")
 		return
 	}
-	list, err := h.deps.Store.BookingsOf(r.Context(), resID, from, to)
+	list, err := h.deps.Store.BookingsOf(r.Context(), h.deps.DB, entityID, resID, from, to)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -164,6 +158,11 @@ func (h *Handler) ListBookings(w http.ResponseWriter, r *http.Request) {
 
 // SetBookingStatus moves a booking along its lifecycle.
 func (h *Handler) SetBookingStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -174,9 +173,9 @@ func (h *Handler) SetBookingStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	b, err := h.deps.Store.SetBookingStatus(r.Context(), id, BookingStatus(in.Status), in.RowVersion)
+	b, err := h.deps.Store.SetBookingStatus(r.Context(), h.deps.DB, entityID, id, BookingStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, b)

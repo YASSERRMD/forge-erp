@@ -5,10 +5,16 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
+
+func isNotFound(err error) bool { return errors.Is(err, identity.ErrNotFound) }
 
 func signPayload(secret, payload string, ts int64) string {
 	mac := hmac.New(sha256.New, []byte(secret))
@@ -55,26 +61,62 @@ func TestMemoryIdempotency(t *testing.T) {
 	m := NewMemoryStore()
 	a := &PaymentAttempt{EntityID: 1, Ref: "ATT-1", OrgID: 7, Amount: 5000,
 		Currency: "USD", Provider: ProviderStripe, WebhookKey: "evt_1"}
-	if err := m.CreateAttempt(ctx, a); err != nil {
+	if err := m.CreateAttempt(ctx, nil, a); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	dup := &PaymentAttempt{EntityID: 1, Ref: "ATT-2", OrgID: 7, Amount: 5000,
 		Currency: "USD", Provider: ProviderStripe, WebhookKey: "evt_1"}
-	if err := m.CreateAttempt(ctx, dup); err == nil {
+	if err := m.CreateAttempt(ctx, nil, dup); err == nil {
 		t.Error("duplicate webhook key accepted")
 	}
-	got, ok := m.AttemptByWebhook(ctx, 1, "evt_1")
+	got, ok := m.AttemptByWebhook(ctx, nil, 1, "evt_1")
 	if !ok || got.ID != a.ID {
 		t.Fatalf("webhook lookup failed: %+v %v", got, ok)
 	}
-	upd, err := m.SetAttemptStatus(ctx, a.ID, AttemptSucceeded, a.RowVersion)
+	upd, err := m.SetAttemptStatus(ctx, nil, 1, a.ID, AttemptSucceeded, a.RowVersion)
 	if err != nil {
 		t.Fatalf("succeed: %v", err)
 	}
-	if _, err := m.SetAttemptStatus(ctx, a.ID, AttemptFailed, upd.RowVersion); err == nil {
+	if _, err := m.SetAttemptStatus(ctx, nil, 1, a.ID, AttemptFailed, upd.RowVersion); err == nil {
 		t.Error("succeeded→failed accepted")
 	}
-	if _, err := m.SetAttemptStatus(ctx, a.ID, AttemptRefunded, upd.RowVersion); err != nil {
+	if _, err := m.SetAttemptStatus(ctx, nil, 1, a.ID, AttemptRefunded, upd.RowVersion); err != nil {
 		t.Fatalf("refund: %v", err)
+	}
+}
+
+func TestPGAttemptFlow(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
+	a := &PaymentAttempt{EntityID: 1, Ref: "PG-A", OrgID: 1, Amount: 100,
+		Currency: "USD", Provider: ProviderManual}
+	if err := st.CreateAttempt(ctx, pool, a); err != nil {
+		t.Fatalf("attempt: %v", err)
+	}
+	upd, err := st.SetAttemptStatus(ctx, pool, 1, a.ID, AttemptSucceeded, a.RowVersion)
+	if err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	_ = upd
+	list, err := st.ListAttempts(ctx, pool, 1, 50, 0)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list=%d err=%v", len(list), err)
+	}
+}
+
+func TestCrossTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemoryStore()
+	a := &PaymentAttempt{EntityID: 1, Ref: "ATT-X", OrgID: 7, Amount: 5000,
+		Currency: "USD", Provider: ProviderStripe}
+	if err := m.CreateAttempt(ctx, nil, a); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := m.AttemptByID(ctx, nil, 2, a.ID); !isNotFound(err) {
+		t.Fatalf("cross-tenant AttemptByID err=%v want not-found", err)
+	}
+	if _, err := m.SetAttemptStatus(ctx, nil, 2, a.ID, AttemptSucceeded, a.RowVersion); !isNotFound(err) {
+		t.Fatalf("cross-tenant SetAttemptStatus err=%v want not-found", err)
 	}
 }

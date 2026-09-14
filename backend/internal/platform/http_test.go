@@ -10,7 +10,7 @@ import (
 )
 
 func TestHealthz(t *testing.T) {
-	h := Router(BuildInfo{Version: "test", Commit: "abc"})
+	h := Router(BuildInfo{Version: "test", Commit: "abc"}, nil)
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -36,8 +36,33 @@ func TestReadyzDegraded(t *testing.T) {
 	}
 }
 
+// TestReadyzWiredToPing proves the Router-level /readyz honors the DB ping
+// passed at the call site (Phase 0 task 6): failing ping → 503, healthy
+// ping → 200 with db:ok.
+func TestReadyzWiredToPing(t *testing.T) {
+	h := Router(BuildInfo{}, func() error { return errors.New("db down") })
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readyz with dead db = %d, want 503", rec.Code)
+	}
+	h = Router(BuildInfo{}, func() error { return nil })
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("readyz with live db = %d, want 200", rec.Code)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["db"] != "ok" {
+		t.Fatalf("readyz body = %v, want db:ok", body)
+	}
+}
+
 func TestSecurityHeaders(t *testing.T) {
-	h := Router(BuildInfo{})
+	h := Router(BuildInfo{}, nil)
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

@@ -1,6 +1,7 @@
 package sales
 
 import (
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -19,7 +20,11 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 func cstContext() context.Context { return context.Background() }
 
 func passthrough(_ string, _ string, _ string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler { return next }
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(platform.ContextWithEntity(r.Context(), 1)))
+		})
+	}
 }
 
 func testRouter() (http.Handler, *MemoryStore, *catalog.MemoryStore) {
@@ -79,10 +84,10 @@ func TestQuoteToCashChain(t *testing.T) {
 	ctx := cstContext()
 	p := &catalog.Product{EntityID: 1, SKU: "W-1", Name: "Widget", NetPrice: 500,
 		Status: catalog.ProductActive, StockTracked: true}
-	_ = cst.CreateProduct(ctx, p)
+	_ = cst.CreateProduct(ctx, nil, p)
 	wh := &catalog.Warehouse{EntityID: 1, Code: "MAIN", Label: "Main", Status: 1}
-	_ = cst.CreateWarehouse(ctx, wh)
-	if _, err := cst.AppendMovement(ctx, &catalog.StockMovement{EntityID: 1,
+	_ = cst.CreateWarehouse(ctx, nil, wh)
+	if _, err := cst.AppendMovement(ctx, nil, &catalog.StockMovement{EntityID: 1,
 		ProductID: p.ID, WarehouseID: wh.ID, Qty: 10, UnitCost: 300,
 		Reason: catalog.ReasonReceipt}, false); err != nil {
 		t.Fatal(err)
@@ -121,7 +126,7 @@ func TestQuoteToCashChain(t *testing.T) {
 	if frec.Code != http.StatusOK {
 		t.Fatalf("fulfill: code=%d body=%s", frec.Code, frec.Body.String())
 	}
-	lvl, _ := cst.Level(ctx, p.ID, wh.ID)
+	lvl, _ := cst.Level(ctx, nil, p.ID, wh.ID)
 	if lvl.Qty != 8 {
 		t.Fatalf("stock after fulfill: %+v", lvl)
 	}

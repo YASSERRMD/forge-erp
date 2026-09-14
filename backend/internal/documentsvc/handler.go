@@ -7,8 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/go-chi/chi/v5"
 )
 
 // Middleware builds Require-style RBAC gates.
@@ -26,15 +27,13 @@ func Routes(r chi.Router, svc *Service, mw Middleware) {
 // Handler implements the documents HTTP surface.
 type Handler struct{ svc *Service }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
 // Upload accepts one multipart file (field "file", plus scope + object_id fields).
 func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		http.Error(w, `{"error":"multipart required"}`, http.StatusBadRequest)
 		return
@@ -50,7 +49,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		objectID, _ = strconv.ParseInt(v, 10, 64)
 	}
 	u, _ := identity.AuthUser(r)
-	d, err := h.svc.Upload(r.Context(), entityOf(r), r.FormValue("scope"), objectID,
+	d, err := h.svc.Upload(r.Context(), entityID, r.FormValue("scope"), objectID,
 		hdr.Filename, hdr.Header.Get("Content-Type"), f, &u.ID)
 	if err != nil {
 		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusUnprocessableEntity)
@@ -63,11 +62,16 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 
 // List filters metadata by scope/object.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var objectID int64
 	if v := r.URL.Query().Get("object_id"); v != "" {
 		objectID, _ = strconv.ParseInt(v, 10, 64)
 	}
-	list, err := h.svc.Store.List(r.Context(), entityOf(r), r.URL.Query().Get("scope"), objectID)
+	list, err := h.svc.Store.List(r.Context(), h.svc.DB, entityID, r.URL.Query().Get("scope"), objectID)
 	if err != nil {
 		http.Error(w, `{"error":"list failed"}`, http.StatusInternalServerError)
 		return
@@ -78,13 +82,18 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 // Download streams stored bytes with the recorded MIME type.
 func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.Error(w, `{"error":"bad id"}`, http.StatusBadRequest)
 		return
 	}
-	d, err := h.svc.Store.ByID(r.Context(), id)
-	if err != nil || d.EntityID != entityOf(r) {
+	d, err := h.svc.Store.ByID(r.Context(), h.svc.DB, entityID, id)
+	if err != nil || d.EntityID != entityID {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 		return
 	}
@@ -105,13 +114,18 @@ func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
 
 // Share mints a bearer link for one file (default 7 days, max 90).
 func (h *Handler) Share(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
 		http.Error(w, `{"error":"bad id"}`, http.StatusBadRequest)
 		return
 	}
-	d, err := h.svc.Store.ByID(r.Context(), id)
-	if err != nil || d.EntityID != entityOf(r) {
+	d, err := h.svc.Store.ByID(r.Context(), h.svc.DB, entityID, id)
+	if err != nil || d.EntityID != entityID {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 		return
 	}
@@ -138,7 +152,7 @@ func (h *Handler) Share(w http.ResponseWriter, r *http.Request) {
 	}
 	st := &ShareToken{Token: token, EntityID: d.EntityID, DocID: d.ID,
 		ExpiresAt: time.Now().UTC().Add(time.Duration(body.ExpiresHours) * time.Hour)}
-	if err := sb.CreateShare(r.Context(), st); err != nil {
+	if err := sb.CreateShare(r.Context(), h.svc.DB, st); err != nil {
 		http.Error(w, `{"error":"share failed"}`, http.StatusInternalServerError)
 		return
 	}
@@ -161,12 +175,12 @@ func PublicShare(svc *Service) http.HandlerFunc {
 			http.Error(w, `{"error":"sharing unavailable"}`, http.StatusNotImplemented)
 			return
 		}
-		st, err := sb.ShareTarget(r.Context(), token)
+		st, err := sb.ShareTarget(r.Context(), svc.DB, token)
 		if err != nil {
 			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 			return
 		}
-		d, err := svc.Store.ByID(r.Context(), st.DocID)
+		d, err := svc.Store.ByID(r.Context(), svc.DB, st.EntityID, st.DocID)
 		if err != nil || d.EntityID != st.EntityID {
 			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 			return

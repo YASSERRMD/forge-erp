@@ -3,7 +3,34 @@ package catalog
 import (
 	"context"
 	"testing"
+
+	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
+
+func TestCrossTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	st := NewMemoryStore()
+
+	p := &Product{EntityID: 1, SKU: "X-TENANT", Name: "X", Type: ProductGoods,
+		NetPrice: 100, Status: ProductActive}
+	if err := 	st.CreateProduct(ctx, nil, p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ProductByID(ctx, nil, 2, p.ID); err != identity.ErrNotFound {
+		t.Fatalf("cross-tenant ProductByID: %v", err)
+	}
+	w := &Warehouse{EntityID: 1, Code: "XWH", Label: "X", Status: 1}
+	if err := st.CreateWarehouse(ctx, nil, w); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.WarehouseByID(ctx, nil, 2, w.ID); err != identity.ErrNotFound {
+		t.Fatalf("cross-tenant WarehouseByID: %v", err)
+	}
+	if _, err := st.ProductByID(ctx, nil, 1, p.ID); err != nil {
+		t.Fatalf("own-tenant ProductByID: %v", err)
+	}
+}
 
 func TestMemoryStoreProductAndStock(t *testing.T) {
 	ctx := context.Background()
@@ -11,19 +38,19 @@ func TestMemoryStoreProductAndStock(t *testing.T) {
 
 	p := &Product{EntityID: 1, SKU: "WID-1", Name: "Widget", Type: ProductGoods,
 		NetPrice: 100, VATRateBps: 2000, Status: ProductActive, StockTracked: true}
-	if err := st.CreateProduct(ctx, p); err != nil {
+	if err := st.CreateProduct(ctx, nil, p); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateProduct(ctx, &Product{EntityID: 1, SKU: "WID-1", Name: "Dupe"}); err == nil {
+	if err := st.CreateProduct(ctx, nil, &Product{EntityID: 1, SKU: "WID-1", Name: "Dupe"}); err == nil {
 		t.Fatal("duplicate SKU accepted")
 	}
 	w := &Warehouse{EntityID: 1, Code: "MAIN", Label: "Main", Status: 1}
-	if err := st.CreateWarehouse(ctx, w); err != nil {
+	if err := st.CreateWarehouse(ctx, nil, w); err != nil {
 		t.Fatal(err)
 	}
 
 	// Receive then ship; oversell blocked.
-	lvl, err := st.AppendMovement(ctx, &StockMovement{EntityID: 1, ProductID: p.ID,
+	lvl, err := st.AppendMovement(ctx, nil, &StockMovement{EntityID: 1, ProductID: p.ID,
 		WarehouseID: w.ID, Qty: 10, UnitCost: 80, Reason: ReasonReceipt, Ref: "RC-1"}, false)
 	if err != nil {
 		t.Fatal(err)
@@ -31,25 +58,52 @@ func TestMemoryStoreProductAndStock(t *testing.T) {
 	if lvl.Qty != 10 || lvl.TotalValue != 800 {
 		t.Fatalf("level: %+v", lvl)
 	}
-	if _, err := st.AppendMovement(ctx, &StockMovement{EntityID: 1, ProductID: p.ID,
+	if _, err := st.AppendMovement(ctx, nil, &StockMovement{EntityID: 1, ProductID: p.ID,
 		WarehouseID: w.ID, Qty: -4, Reason: ReasonShipment, Ref: "SH-1"}, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AppendMovement(ctx, &StockMovement{EntityID: 1, ProductID: p.ID,
+	if _, err := st.AppendMovement(ctx, nil, &StockMovement{EntityID: 1, ProductID: p.ID,
 		WarehouseID: w.ID, Qty: -7, Reason: ReasonShipment, Ref: "SH-2"}, false); err == nil {
 		t.Fatal("oversell accepted")
 	}
-	got, err := st.Level(ctx, p.ID, w.ID)
+	got, err := st.Level(ctx, nil, p.ID, w.ID)
 	if err != nil || got.Qty != 6 || got.TotalValue != 480 {
 		t.Fatalf("level: %+v %v", got, err)
 	}
 	// Lot-tracked receipt.
 	l := &Lot{EntityID: 1, ProductID: p.ID, Number: "LOT-7"}
-	if err := st.CreateLot(ctx, l); err != nil {
+	if err := st.CreateLot(ctx, nil, l); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AppendMovement(ctx, &StockMovement{EntityID: 1, ProductID: p.ID,
+	if _, err := st.AppendMovement(ctx, nil, &StockMovement{EntityID: 1, ProductID: p.ID,
 		WarehouseID: w.ID, LotID: &l.ID, Qty: 2, UnitCost: 80, Reason: ReasonReceipt}, false); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPGStoreProductAndStock(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
+	p := &Product{EntityID: 1, SKU: "PG-1", Name: "PG Widget", Type: ProductGoods,
+		NetPrice: 100, VATRateBps: 2000, Status: ProductActive, StockTracked: true}
+	if err := st.CreateProduct(ctx, pool, p); err != nil {
+		t.Fatalf("product: %v", err)
+	}
+	w := &Warehouse{EntityID: 1, Code: "PGW", Label: "PG", Status: 1}
+	if err := st.CreateWarehouse(ctx, pool, w); err != nil {
+		t.Fatalf("warehouse: %v", err)
+	}
+	if _, err := st.AppendMovement(ctx, pool, &StockMovement{EntityID: 1, ProductID: p.ID,
+		WarehouseID: w.ID, Qty: 10, UnitCost: 60, Reason: ReasonReceipt, Ref: "OPEN"}, false); err != nil {
+		t.Fatalf("receipt: %v", err)
+	}
+	lvl, err := st.Level(ctx, pool, p.ID, w.ID)
+	if err != nil || lvl.Qty != 10 {
+		t.Fatalf("level=%+v err=%v", lvl, err)
+	}
+	if _, err := st.AppendMovement(ctx, pool, &StockMovement{EntityID: 1, ProductID: p.ID,
+		WarehouseID: w.ID, Qty: -11, Reason: ReasonShipment, Ref: "OVER"}, false); err == nil {
+		t.Error("oversell accepted on PG")
 	}
 }

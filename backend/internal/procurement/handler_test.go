@@ -1,6 +1,7 @@
 package procurement
 
 import (
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -18,7 +19,11 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 func contextBackground() context.Context { return context.Background() }
 
 func passthrough(_ string, _ string, _ string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler { return next }
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(platform.ContextWithEntity(r.Context(), 1)))
+		})
+	}
 }
 
 func testRouter() (http.Handler, *catalog.MemoryStore) {
@@ -47,9 +52,9 @@ func TestProcureToPayChain(t *testing.T) {
 	// Seed supplier price + stock scaffolding.
 	p := &catalog.Product{EntityID: 1, SKU: "STL-1", Name: "Steel", NetPrice: 6000,
 		Status: catalog.ProductActive, StockTracked: true}
-	_ = cst.CreateProduct(ctx, p)
+	_ = cst.CreateProduct(ctx, nil, p)
 	wh := &catalog.Warehouse{EntityID: 1, Code: "MAIN", Label: "Main", Status: 1}
-	_ = cst.CreateWarehouse(ctx, wh)
+	_ = cst.CreateWarehouse(ctx, nil, wh)
 	if rec := post(t, h, "/api/v1/purchase/prices", map[string]any{
 		"product_id": p.ID, "org_id": 9, "unit_net": 6000, "currency": "USD",
 	}); rec.Code != http.StatusCreated {
@@ -98,7 +103,7 @@ func TestProcureToPayChain(t *testing.T) {
 	if recv.Code != http.StatusOK {
 		t.Fatalf("receive: code=%d body=%s", recv.Code, recv.Body.String())
 	}
-	lvl, _ := cst.Level(ctx, p.ID, wh.ID)
+	lvl, _ := cst.Level(ctx, nil, p.ID, wh.ID)
 	if lvl.Qty != 10 || lvl.TotalValue != 60000 {
 		t.Fatalf("stock: %+v", lvl)
 	}

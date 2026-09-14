@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // Document is stored-file metadata (Dolibarr llx_ecm_files equivalent).
@@ -133,9 +135,9 @@ func (s *DirStorage) Delete(_ context.Context, key string) error {
 
 // Store is the metadata persistence contract.
 type Store interface {
-	Create(ctx context.Context, d *Document) error
-	ByID(ctx context.Context, id int64) (Document, error)
-	List(ctx context.Context, entityID int64, scope string, objectID int64) ([]Document, error)
+	Create(ctx context.Context, db platform.DBTX, d *Document) error
+	ByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Document, error)
+	List(ctx context.Context, db platform.DBTX, entityID int64, scope string, objectID int64) ([]Document, error)
 }
 
 // MemoryStore is the in-process metadata fake.
@@ -155,6 +157,7 @@ func NewMemoryStore() *MemoryStore {
 type Service struct {
 	Store   Store
 	Storage Storage
+	DB      platform.DBTX
 }
 
 // Upload stores bytes + metadata (hash computed server-side).
@@ -174,14 +177,14 @@ func (s *Service) Upload(ctx context.Context, entityID int64, scope string, obje
 	if err := s.Storage.Put(ctx, d.StorageKey, bytes.NewReader(b), d.Size, mime); err != nil {
 		return Document{}, err
 	}
-	if err := s.Store.Create(ctx, &d); err != nil {
+	if err := s.Store.Create(ctx, s.DB, &d); err != nil {
 		_ = s.Storage.Delete(ctx, d.StorageKey)
 		return Document{}, err
 	}
 	return d, nil
 }
 
-func (m *MemoryStore) Create(_ context.Context, d *Document) error {
+func (m *MemoryStore) Create(_ context.Context, _ platform.DBTX, d *Document) error {
 	if err := d.Validate(); err != nil {
 		return err
 	}
@@ -194,17 +197,17 @@ func (m *MemoryStore) Create(_ context.Context, d *Document) error {
 	return nil
 }
 
-func (m *MemoryStore) ByID(_ context.Context, id int64) (Document, error) {
+func (m *MemoryStore) ByID(_ context.Context, _ platform.DBTX, entityID int64, id int64) (Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, ok := m.docs[id]
-	if !ok {
+	if !ok || d.EntityID != entityID {
 		return Document{}, errors.New("documentsvc: not found")
 	}
 	return d, nil
 }
 
-func (m *MemoryStore) List(_ context.Context, entityID int64, scope string, objectID int64) ([]Document, error) {
+func (m *MemoryStore) List(_ context.Context, _ platform.DBTX, entityID int64, scope string, objectID int64) ([]Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Document

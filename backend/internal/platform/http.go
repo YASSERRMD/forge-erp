@@ -10,16 +10,24 @@ import (
 
 // Router builds the base HTTP router with platform middleware and health endpoints.
 // Extra middlewares must be supplied here (chi panics if Use follows routes).
-func Router(build BuildInfo, middlewares ...func(http.Handler) http.Handler) http.Handler {
+// readyPing gates /readyz on the database (nil leaves the pre-existing
+// always-ok behavior for contexts without a pool, e.g. unit tests).
+func Router(build BuildInfo, readyPing func() error, middlewares ...func(http.Handler) http.Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// Trusted-proxy client IP (Phase 0 task 7): X-Forwarded-For is honored
+	// only from FERP_TRUSTED_PROXIES (default loopback + RFC 1918).
+	r.Use(RealIPFromTrusted(TrustedProxiesFromEnv()))
 	r.Use(middleware.Recoverer)
 	r.Use(SecurityHeaders)
 	r.Use(middlewares...)
 
 	r.Get("/healthz", HealthHandler(build, false))
-	r.Get("/readyz", HealthHandler(build, true))
+	var pings []func() error
+	if readyPing != nil {
+		pings = append(pings, readyPing)
+	}
+	r.Get("/readyz", HealthHandler(build, true, pings...))
 	return r
 }
 

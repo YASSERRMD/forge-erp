@@ -4,16 +4,17 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // Deps wires handlers to persistence.
 type Deps struct {
 	Store Store
+	DB    platform.DBTX
 }
 
 // Middleware builds Require-style RBAC gates.
@@ -55,23 +56,21 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
 // CreateAccount adds a chart-of-accounts row.
 func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var a Account
 	if err := decode(r, &a); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a.ID, a.EntityID = 0, entityOf(r)
-	if err := h.deps.Store.CreateAccount(r.Context(), &a); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	a.ID, a.EntityID = 0, entityID
+	if err := h.deps.Store.CreateAccount(r.Context(), h.deps.DB, &a); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, a)
@@ -79,14 +78,19 @@ func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 
 // CreateJournal adds a journal.
 func (h *Handler) CreateJournal(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var j Journal
 	if err := decode(r, &j); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	j.ID, j.EntityID = 0, entityOf(r)
-	if err := h.deps.Store.CreateJournal(r.Context(), &j); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	j.ID, j.EntityID = 0, entityID
+	if err := h.deps.Store.CreateJournal(r.Context(), h.deps.DB, &j); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, j)
@@ -102,6 +106,11 @@ type postEntryRequest struct {
 
 // PostEntry validates, chain-links, and posts an entry (422 when unbalanced/locked).
 func (h *Handler) PostEntry(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var req postEntryRequest
 	if err := decode(r, &req); err != nil || req.JournalID == 0 || req.Ref == "" {
 		writeErr(w, http.StatusBadRequest, "journal_id and ref required")
@@ -111,10 +120,10 @@ func (h *Handler) PostEntry(w http.ResponseWriter, r *http.Request) {
 		req.Date = time.Now().UTC()
 	}
 	u, _ := identity.AuthUser(r)
-	e := &Entry{EntityID: entityOf(r), JournalID: req.JournalID, Ref: req.Ref,
+	e := &Entry{EntityID: entityID, JournalID: req.JournalID, Ref: req.Ref,
 		Date: req.Date, Memo: req.Memo, Lines: req.Lines, CreatedBy: &u.ID}
-	if err := h.deps.Store.PostEntry(r.Context(), e); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	if err := h.deps.Store.PostEntry(r.Context(), h.deps.DB, e); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, e)
@@ -122,7 +131,12 @@ func (h *Handler) PostEntry(w http.ResponseWriter, r *http.Request) {
 
 // ListAccounts lists the chart of accounts within the caller's entity.
 func (h *Handler) ListAccounts(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.Accounts(r.Context(), entityOf(r))
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	list, err := h.deps.Store.Accounts(r.Context(), h.deps.DB, entityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -132,7 +146,12 @@ func (h *Handler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 
 // ListJournals lists journals.
 func (h *Handler) ListJournals(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListJournals(r.Context(), entityOf(r))
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	list, err := h.deps.Store.ListJournals(r.Context(), h.deps.DB, entityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -142,7 +161,12 @@ func (h *Handler) ListJournals(w http.ResponseWriter, r *http.Request) {
 
 // ListBankAccounts lists bank accounts.
 func (h *Handler) ListBankAccounts(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListBankAccounts(r.Context(), entityOf(r))
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	list, err := h.deps.Store.ListBankAccounts(r.Context(), h.deps.DB, entityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -152,7 +176,12 @@ func (h *Handler) ListBankAccounts(w http.ResponseWriter, r *http.Request) {
 
 // ListLoans lists loans.
 func (h *Handler) ListLoans(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListLoans(r.Context(), entityOf(r))
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	list, err := h.deps.Store.ListLoans(r.Context(), h.deps.DB, entityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -162,7 +191,12 @@ func (h *Handler) ListLoans(w http.ResponseWriter, r *http.Request) {
 
 // TrialBalance returns per-account sums; callers assert debits == credits.
 func (h *Handler) TrialBalance(w http.ResponseWriter, r *http.Request) {
-	tb, err := h.deps.Store.TrialBalance(r.Context(), entityOf(r))
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	tb, err := h.deps.Store.TrialBalance(r.Context(), h.deps.DB, entityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "trial failed")
 		return
@@ -184,7 +218,7 @@ func (h *Handler) VerifyChain(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "journal_id required")
 		return
 	}
-	ents, err := h.deps.Store.EntriesByJournal(r.Context(), jid)
+	ents, err := h.deps.Store.EntriesByJournal(r.Context(), h.deps.DB, jid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "load failed")
 		return
@@ -198,14 +232,19 @@ func (h *Handler) VerifyChain(w http.ResponseWriter, r *http.Request) {
 
 // CreateBankAccount opens a bank account.
 func (h *Handler) CreateBankAccount(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var a BankAccount
 	if err := decode(r, &a); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a.ID, a.EntityID = 0, entityOf(r)
-	if err := h.deps.Store.CreateBankAccount(r.Context(), &a); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	a.ID, a.EntityID = 0, entityID
+	if err := h.deps.Store.CreateBankAccount(r.Context(), h.deps.DB, &a); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, a)
@@ -213,17 +252,22 @@ func (h *Handler) CreateBankAccount(w http.ResponseWriter, r *http.Request) {
 
 // RecordTransaction records a bank movement.
 func (h *Handler) RecordTransaction(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var t BankTransaction
 	if err := decode(r, &t); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	t.ID, t.EntityID = 0, entityOf(r)
+	t.ID, t.EntityID = 0, entityID
 	if t.ValueDate.IsZero() {
 		t.ValueDate = time.Now().UTC()
 	}
-	if err := h.deps.Store.RecordTransaction(r.Context(), &t); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	if err := h.deps.Store.RecordTransaction(r.Context(), h.deps.DB, &t); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, t)
@@ -231,13 +275,18 @@ func (h *Handler) RecordTransaction(w http.ResponseWriter, r *http.Request) {
 
 // Reconcile marks a transaction reconciled.
 func (h *Handler) Reconcile(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	if err := h.deps.Store.Reconcile(r.Context(), id, time.Now().UTC()); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	if err := h.deps.Store.Reconcile(r.Context(), h.deps.DB, entityID, id, time.Now().UTC()); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -253,6 +302,11 @@ type loanRequest struct {
 
 // CreateLoan books a loan with a generated schedule.
 func (h *Handler) CreateLoan(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var req loanRequest
 	if err := decode(r, &req); err != nil || req.Principal <= 0 || req.Periods <= 0 {
 		writeErr(w, http.StatusBadRequest, "label, principal and periods required")
@@ -261,28 +315,11 @@ func (h *Handler) CreateLoan(w http.ResponseWriter, r *http.Request) {
 	if req.Start.IsZero() {
 		req.Start = time.Now().UTC()
 	}
-	l := &Loan{EntityID: entityOf(r), Label: req.Label, Principal: req.Principal,
+	l := &Loan{EntityID: entityID, Label: req.Label, Principal: req.Principal,
 		RateBps: req.RateBps, Start: req.Start, Periods: req.Periods}
-	if err := h.deps.Store.CreateLoan(r.Context(), l); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	if err := h.deps.Store.CreateLoan(r.Context(), h.deps.DB, l); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, l)
-}
-
-func storeErrorCode(err error) int {
-	switch {
-	case err == nil:
-		return http.StatusOK
-	case strings.Contains(err.Error(), "not found"):
-		return http.StatusNotFound
-	case strings.Contains(err.Error(), "unbalanced"):
-		return http.StatusUnprocessableEntity
-	case strings.Contains(err.Error(), "locked"):
-		return http.StatusUnprocessableEntity
-	case strings.Contains(err.Error(), "reconciled"):
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
 }

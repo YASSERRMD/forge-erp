@@ -3,36 +3,35 @@ package pos
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 )
 
 // Catalog abstracts the product/ledger reads and postings used at checkout.
 type Catalog interface {
-	ProductByID(ctx context.Context, id int64) (catalog.Product, error)
-	Level(ctx context.Context, productID, warehouseID int64) (catalog.StockLevel, error)
-	AppendMovement(ctx context.Context, m *catalog.StockMovement, allowNegative bool) (catalog.StockLevel, error)
+	ProductByID(ctx context.Context, db platform.DBTX, entityID, id int64) (catalog.Product, error)
+	Level(ctx context.Context, db platform.DBTX, productID, warehouseID int64) (catalog.StockLevel, error)
+	AppendMovement(ctx context.Context, db platform.DBTX, m *catalog.StockMovement, allowNegative bool) (catalog.StockLevel, error)
 }
 
 // Sales abstracts the invoice/payment postings used at checkout.
 type Sales interface {
-	CreateDoc(ctx context.Context, d *sales.Document, yearMonth string) error
-	DocByID(ctx context.Context, id int64) (sales.Document, error)
-	ListDocs(ctx context.Context, entityID int64, t documents.DocType, limit, offset int) ([]sales.Document, error)
-	SetStatus(ctx context.Context, id int64, to int16) (sales.Document, error)
-	RecordPayment(ctx context.Context, p *sales.Payment, invoiceIDs []int64, yearMonth string) ([]int64, error)
-	ApplyCredit(ctx context.Context, invoiceID, creditID, amount int64) error
-	InvoiceBalance(ctx context.Context, invoiceID int64) (int64, error)
+	CreateDoc(ctx context.Context, db platform.DBTX, d *sales.Document, yearMonth string) error
+	DocByID(ctx context.Context, db platform.DBTX, entityID, id int64) (sales.Document, error)
+	ListDocs(ctx context.Context, db platform.DBTX, entityID int64, t documents.DocType, limit, offset int) ([]sales.Document, error)
+	SetStatus(ctx context.Context, db platform.DBTX, entityID, id int64, to int16) (sales.Document, error)
+	RecordPayment(ctx context.Context, db platform.DBTX, p *sales.Payment, invoiceIDs []int64, yearMonth string) ([]int64, error)
+	ApplyCredit(ctx context.Context, db platform.DBTX, entityID, invoiceID, creditID, amount int64) error
+	InvoiceBalance(ctx context.Context, db platform.DBTX, entityID, invoiceID int64) (int64, error)
 }
 
 // Deps wires handlers to persistence, the catalog/sales seams, and the bus.
@@ -42,6 +41,8 @@ type Deps struct {
 	Sales     Sales
 	WalkinOrg int64 // FERP_POS_WALKIN_ORG: default customer for anonymous sales (0 = require org)
 	Bus       platform.Bus
+	DB        platform.DBTX
+	Pool      *pgxpool.Pool // transaction source for the checkout service (nil in tests)
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -49,7 +50,7 @@ type Middleware func(module, entity, action string) func(http.Handler) http.Hand
 
 // Routes mounts the pos surface (caller nests at /api/v1).
 func Routes(r chi.Router, d Deps, mw Middleware) {
-	h := &Handler{deps: d}
+	h := &Handler{deps: d, svc: NewService(d.Pool, d.Store, d.Catalog, d.Sales, d.WalkinOrg, d.Bus)}
 	r.With(mw("pos", "terminal", "write")).Post("/pos/terminals", h.CreateTerminal)
 	r.With(mw("pos", "terminal", "read")).Get("/pos/terminals", h.ListTerminals)
 	r.With(mw("pos", "session", "write")).Post("/pos/sessions", h.OpenSession)
@@ -63,7 +64,10 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 }
 
 // Handler implements the pos HTTP surface.
-type Handler struct{ deps Deps }
+type Handler struct {
+	deps Deps
+	svc  *Service
+}
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -80,30 +84,6 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
-func storeErrorCode(err error) int {
-	switch {
-	case errors.Is(err, identity.ErrNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, identity.ErrVersionConflict):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "duplicate"):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "not found"):
-		return http.StatusNotFound
-	case err != nil && strings.Contains(err.Error(), "conflict"):
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
-}
-
 func pathID(r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, name), 10, 64)
 	if err != nil || id <= 0 {
@@ -112,25 +92,30 @@ func pathID(r *http.Request, name string) (int64, bool) {
 	return id, true
 }
 
-func (h *Handler) publish(ctx context.Context, subject, entity string, id int64) {
+func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
 	if h.deps.Bus == nil {
 		return
 	}
-	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, ID: id})
+	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, EntityID: entityID, ID: id})
 }
 
 // CreateTerminal registers a till.
 func (h *Handler) CreateTerminal(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var t Terminal
 	if err := decode(r, &t); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	t.ID = 0
-	t.EntityID = entityOf(r)
+	t.EntityID = entityID
 	t.Status = TerminalActive
-	if err := h.deps.Store.CreateTerminal(r.Context(), &t); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	if err := h.deps.Store.CreateTerminal(r.Context(), h.deps.DB, &t); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, t)
@@ -138,7 +123,12 @@ func (h *Handler) CreateTerminal(w http.ResponseWriter, r *http.Request) {
 
 // ListTerminals lists tills within the caller's entity.
 func (h *Handler) ListTerminals(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListTerminals(r.Context(), entityOf(r))
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	list, err := h.deps.Store.ListTerminals(r.Context(), h.deps.DB, entityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -154,31 +144,41 @@ type openSessionIn struct {
 
 // OpenSession starts a cashier shift.
 func (h *Handler) OpenSession(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var in openSessionIn
 	if err := decode(r, &in); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	se := &Session{EntityID: entityOf(r), TerminalID: in.TerminalID,
+	se := &Session{EntityID: entityID, TerminalID: in.TerminalID,
 		Cashier: in.Cashier, OpeningFloat: in.OpeningFloat}
-	if err := h.deps.Store.OpenSession(r.Context(), se); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	if err := h.deps.Store.OpenSession(r.Context(), h.deps.DB, se); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), "forgeerp.pos.session.opened.v1", "session", se.ID)
+	h.publish(r.Context(), entityID, "forgeerp.pos.session.opened.v1", "session", se.ID)
 	writeJSON(w, http.StatusCreated, se)
 }
 
 // GetSession fetches one session.
 func (h *Handler) GetSession(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	se, err := h.deps.Store.SessionByID(r.Context(), id)
+	se, err := h.deps.Store.SessionByID(r.Context(), h.deps.DB, entityID, id)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, se)
@@ -190,6 +190,11 @@ type closeSessionIn struct {
 
 // CloseSession ends a cashier shift.
 func (h *Handler) CloseSession(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -200,9 +205,9 @@ func (h *Handler) CloseSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	se, err := h.deps.Store.CloseSession(r.Context(), id, in.RowVersion)
+	se, err := h.deps.Store.CloseSession(r.Context(), h.deps.DB, entityID, id, in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, se)
@@ -217,165 +222,30 @@ type checkoutIn struct {
 	Payments  []Tender `json:"payments"` // optional multi-tender legs
 }
 
-// Checkout rings a sale: validates stock, posts a validated invoice + full
-// payment, decrements tracked goods, and records the till sale.
+// Checkout rings a sale through the checkout service: validated invoice +
+// full payment, tracked-goods decrements, and the till sale commit atomically.
 func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var in checkoutIn
 	if err := decode(r, &in); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	se, err := h.deps.Store.SessionByID(ctx, in.SessionID)
+	rec, err := h.svc.Checkout(r.Context(), CheckoutCmd{
+		EntityID: entityID, SessionID: in.SessionID, OrgID: in.OrgID,
+		Lines: in.Lines, Method: in.Method, Tendered: in.Tendered, Payments: in.Payments})
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		// Checkout orchestration failures are business-rule rejections (the
+		// service layer predates the kernel and returns plain errors).
+		// Sentinel-wrapped store errors underneath still resolve to their
+		// specific codes first via ErrorCode ordering (404/409 before 422).
+		platform.WriteError(w, fmt.Errorf("%w: %w", err, platform.ErrValidation))
 		return
 	}
-	if se.Status != SessionOpen {
-		writeErr(w, http.StatusUnprocessableEntity, "pos: session closed")
-		return
-	}
-	term, err := h.deps.Store.TerminalByID(ctx, se.TerminalID)
-	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
-	}
-	if term.Status != TerminalActive {
-		writeErr(w, http.StatusUnprocessableEntity, "pos: terminal inactive")
-		return
-	}
-	entity := entityOf(r)
-	dlines := make([]documents.Line, 0, len(in.Lines))
-	type need struct {
-		productID int64
-		qty       int64
-	}
-	var needs []need
-	for _, l := range in.Lines {
-		if err := l.Validate(); err != nil {
-			writeErr(w, http.StatusUnprocessableEntity, err.Error())
-			return
-		}
-		p, err := h.deps.Catalog.ProductByID(ctx, l.ProductID)
-		if err != nil {
-			writeErr(w, storeErrorCode(err), err.Error())
-			return
-		}
-		if p.Status != catalog.ProductActive {
-			writeErr(w, http.StatusUnprocessableEntity, "pos: product not sellable")
-			return
-		}
-		dlines = append(dlines, documents.Line{ProductID: p.ID, Label: p.Name,
-			Qty: l.Qty, UnitNet: p.NetPrice, VATRateBps: int(p.VATRateBps)})
-		if p.Type == catalog.ProductGoods && p.StockTracked {
-			lvl, err := h.deps.Catalog.Level(ctx, p.ID, term.WarehouseID)
-			if err != nil {
-				writeErr(w, http.StatusInternalServerError, "stock check failed")
-				return
-			}
-			if lvl.Qty < l.Qty {
-				writeErr(w, http.StatusUnprocessableEntity, "pos: insufficient stock")
-				return
-			}
-			needs = append(needs, need{productID: p.ID, qty: l.Qty})
-		}
-	}
-	tot, err := documents.Sum(dlines)
-	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	method := in.Method
-	if method == "" {
-		method = PayCash
-	}
-	tendered := in.Tendered
-	legs := []Tender{{Method: method, Amount: tendered}}
-	if len(in.Payments) > 0 {
-		for _, tg := range in.Payments {
-			if err := tg.Validate(); err != nil {
-				writeErr(w, http.StatusUnprocessableEntity, err.Error())
-				return
-			}
-		}
-		tendered = 0
-		seen := map[string]bool{}
-		for _, tg := range in.Payments {
-			tendered += tg.Amount
-			seen[tg.Method] = true
-		}
-		legs = in.Payments
-		method = in.Payments[0].Method
-		if len(seen) > 1 {
-			method = "mixed"
-		}
-	}
-	orgID := in.OrgID
-	if orgID == 0 {
-		if h.deps.WalkinOrg == 0 {
-			writeErr(w, http.StatusUnprocessableEntity, "pos: customer org required (no anonymous sales in lite scope)")
-			return
-		}
-		orgID = h.deps.WalkinOrg
-	}
-	sale := Sale{EntityID: entity, SessionID: se.ID, OrgID: orgID,
-		Lines: in.Lines, Method: method, Tendered: tendered}
-	if err := sale.Validate(); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
-	}
-	if tendered < tot.Gross {
-		writeErr(w, http.StatusUnprocessableEntity, "pos: tendered below total")
-		return
-	}
-	ym := time.Now().UTC().Format("200601")
-	inv := &sales.Document{EntityID: entity, Type: documents.TypeInvoice, OrgID: orgID,
-		Currency: "USD", RateToBase: 1000000, Lines: dlines}
-	if err := h.deps.Sales.CreateDoc(ctx, inv, ym); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
-	}
-	validated, err := h.deps.Sales.SetStatus(ctx, inv.ID, sales.InvoiceValidated)
-	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
-	}
-	inv = &validated
-	// Split the gross across tender legs in order (change stays on the till).
-	remaining := tot.Gross
-	for _, leg := range legs {
-		alloc := leg.Amount
-		if alloc > remaining {
-			alloc = remaining
-		}
-		if alloc <= 0 {
-			continue
-		}
-		pay := &sales.Payment{EntityID: entity, OrgID: orgID, Amount: alloc,
-			Currency: "USD", Method: leg.Method, PaidAt: time.Now().UTC()}
-		if _, err := h.deps.Sales.RecordPayment(ctx, pay, []int64{inv.ID}, ym); err != nil {
-			writeErr(w, storeErrorCode(err), err.Error())
-			return
-		}
-		remaining -= alloc
-	}
-	for _, n := range needs {
-		qty := n.qty
-		if _, err := h.deps.Catalog.AppendMovement(ctx, &catalog.StockMovement{
-			EntityID: entity, ProductID: n.productID, WarehouseID: term.WarehouseID,
-			Qty: -qty, Reason: catalog.ReasonShipment, Ref: inv.Ref}, false); err != nil {
-			writeErr(w, storeErrorCode(err), err.Error())
-			return
-		}
-	}
-	rec := &Sale{EntityID: entity, SessionID: se.ID, Ref: inv.Ref, OrgID: orgID,
-		Lines: in.Lines, TotalGross: tot.Gross, Method: method, Tendered: tendered,
-		Change: tendered - tot.Gross, Status: SaleCompleted, InvoiceID: inv.ID}
-	if err := h.deps.Store.CreateSale(ctx, rec); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
-		return
-	}
-	h.publish(ctx, "forgeerp.pos.sale.completed.v1", "sale", rec.ID)
 	writeJSON(w, http.StatusCreated, rec)
 }
 
@@ -386,7 +256,7 @@ func (h *Handler) SalesOfSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.SalesOfSession(r.Context(), id)
+	list, err := h.deps.Store.SalesOfSession(r.Context(), h.deps.DB, id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -397,14 +267,19 @@ func (h *Handler) SalesOfSession(w http.ResponseWriter, r *http.Request) {
 // VoidSale marks a completed sale void (underlying invoice/payment stand;
 // reversals are explicit credit notes — see DIFFERENCES).
 func (h *Handler) VoidSale(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	sa, err := h.deps.Store.VoidSale(r.Context(), id)
+	sa, err := h.deps.Store.VoidSale(r.Context(), h.deps.DB, entityID, id)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, sa)
@@ -412,14 +287,19 @@ func (h *Handler) VoidSale(w http.ResponseWriter, r *http.Request) {
 
 // GetSale fetches one till sale with its lines.
 func (h *Handler) GetSale(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	sa, err := h.deps.Store.SaleByID(r.Context(), id)
+	sa, err := h.deps.Store.SaleByID(r.Context(), h.deps.DB, entityID, id)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, sa)
@@ -431,6 +311,11 @@ func (h *Handler) GetSale(w http.ResponseWriter, r *http.Request) {
 // Partial returns repeat until every line is covered; cash refunds for
 // settled invoices happen out-of-band and are not modeled here.
 func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	ctx := r.Context()
 	var in struct {
 		SaleID int64      `json:"sale_id"`
@@ -440,28 +325,28 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "sale_id required")
 		return
 	}
-	sa, err := h.deps.Store.SaleByID(ctx, in.SaleID)
+	sa, err := h.deps.Store.SaleByID(ctx, h.deps.DB, entityID, in.SaleID)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	if sa.Status != SaleCompleted {
 		writeErr(w, http.StatusUnprocessableEntity, "pos: only completed sales can be returned")
 		return
 	}
-	se, err := h.deps.Store.SessionByID(ctx, sa.SessionID)
+	se, err := h.deps.Store.SessionByID(ctx, h.deps.DB, entityID, sa.SessionID)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	term, err := h.deps.Store.TerminalByID(ctx, se.TerminalID)
+	term, err := h.deps.Store.TerminalByID(ctx, h.deps.DB, entityID, se.TerminalID)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	inv, err := h.deps.Sales.DocByID(ctx, sa.InvoiceID)
+	inv, err := h.deps.Sales.DocByID(ctx, h.deps.DB, sa.EntityID, sa.InvoiceID)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	// Remaining quantities = sold minus prior validated return credits.
@@ -471,16 +356,16 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 		remaining[l.ProductID] += l.Qty
 		priceOf[l.ProductID] = l
 	}
-	credits, err := h.deps.Sales.ListDocs(ctx, sa.EntityID, documents.TypeCreditNote, 500, 0)
+	credits, err := h.deps.Sales.ListDocs(ctx, h.deps.DB, sa.EntityID, documents.TypeCreditNote, 500, 0)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	for _, c := range credits {
 		if c.SourceID != inv.ID || c.Status == 9 {
 			continue
 		}
-		full, err := h.deps.Sales.DocByID(ctx, c.ID)
+		full, err := h.deps.Sales.DocByID(ctx, h.deps.DB, sa.EntityID, c.ID)
 		if err != nil {
 			continue
 		}
@@ -514,38 +399,38 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 	cn := &sales.Document{EntityID: sa.EntityID, Type: documents.TypeCreditNote,
 		OrgID: inv.OrgID, Currency: inv.Currency, RateToBase: inv.RateToBase,
 		SourceType: documents.TypeInvoice, SourceID: inv.ID, Lines: creditLines}
-	if err := h.deps.Sales.CreateDoc(ctx, cn, ym); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	if err := h.deps.Sales.CreateDoc(ctx, h.deps.DB, cn, ym); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
-	validated, err := h.deps.Sales.SetStatus(ctx, cn.ID, 1)
+	validated, err := h.deps.Sales.SetStatus(ctx, h.deps.DB, sa.EntityID, cn.ID, 1)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	cn = &validated
-	if bal, err := h.deps.Sales.InvoiceBalance(ctx, inv.ID); err == nil && bal > 0 {
+	if bal, err := h.deps.Sales.InvoiceBalance(ctx, h.deps.DB, sa.EntityID, inv.ID); err == nil && bal > 0 {
 		apply := cn.Totals.Gross
 		if apply > bal {
 			apply = bal
 		}
-		if err := h.deps.Sales.ApplyCredit(ctx, inv.ID, cn.ID, apply); err != nil {
-			writeErr(w, storeErrorCode(err), err.Error())
+		if err := h.deps.Sales.ApplyCredit(ctx, h.deps.DB, sa.EntityID, inv.ID, cn.ID, apply); err != nil {
+			platform.WriteError(w, err)
 			return
 		}
 	}
 	for _, l := range creditLines {
-		p, err := h.deps.Catalog.ProductByID(ctx, l.ProductID)
+		p, err := h.deps.Catalog.ProductByID(ctx, h.deps.DB, sa.EntityID, l.ProductID)
 		if err != nil {
 			continue // service/unknown lines simply have no stock effect
 		}
 		if p.Type != catalog.ProductGoods || !p.StockTracked {
 			continue
 		}
-		if _, err := h.deps.Catalog.AppendMovement(ctx, &catalog.StockMovement{
+		if _, err := h.deps.Catalog.AppendMovement(ctx, h.deps.DB, &catalog.StockMovement{
 			EntityID: sa.EntityID, ProductID: p.ID, WarehouseID: term.WarehouseID,
 			Qty: l.Qty, Reason: catalog.ReasonReceipt, Ref: cn.Ref}, false); err != nil {
-			writeErr(w, storeErrorCode(err), err.Error())
+			platform.WriteError(w, err)
 			return
 		}
 	}
@@ -564,12 +449,12 @@ func (h *Handler) ReturnSale(w http.ResponseWriter, r *http.Request) {
 	done := sa
 	if fully {
 		var err error
-		done, err = h.deps.Store.MarkReturned(ctx, sa.ID)
+		done, err = h.deps.Store.MarkReturned(ctx, h.deps.DB, entityID, sa.ID)
 		if err != nil {
-			writeErr(w, storeErrorCode(err), err.Error())
+			platform.WriteError(w, err)
 			return
 		}
 	}
-	h.publish(ctx, "forgeerp.pos.sale.returned.v1", "sale", done.ID)
+	h.publish(ctx, entityID, "forgeerp.pos.sale.returned.v1", "sale", done.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"sale": done, "credit_note": cn, "fully_returned": fully})
 }

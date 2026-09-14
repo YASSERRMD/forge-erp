@@ -10,34 +10,37 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
-// ErrNotFound is returned when a row does not exist.
-var ErrNotFound = errors.New("identity: not found")
+// ErrNotFound is returned when a row does not exist (alias of the platform
+// kernel sentinel so errors.Is works across packages).
+var ErrNotFound = platform.ErrNotFound
 
-// ErrVersionConflict is returned on optimistic-locking mismatch.
-var ErrVersionConflict = errors.New("identity: row version conflict")
+// ErrVersionConflict is returned on optimistic-locking mismatch (alias of
+// the platform kernel sentinel).
+var ErrVersionConflict = platform.ErrVersionConflict
 
 // Store is the persistence contract for the identity context.
 // PGStore implements it against PostgreSQL; MemoryStore is the test fake.
 type Store interface {
-	CreateUser(ctx context.Context, u *User) error
-	UserByID(ctx context.Context, id int64) (User, error)
-	UserByLogin(ctx context.Context, entityID int64, login string) (User, error)
-	UserByEmail(ctx context.Context, entityID int64, email string) (User, error)
-	ListUsers(ctx context.Context, entityID int64, limit, offset int) ([]User, error)
-	ListGroups(ctx context.Context, entityID int64) ([]Group, error)
-	UpdateUser(ctx context.Context, u *User) error
-	CreateGroup(ctx context.Context, g *Group) error
-	AddMember(ctx context.Context, groupID, userID int64) error
-	UserGroups(ctx context.Context, userID int64) ([]Group, error)
-	Grant(ctx context.Context, entityID int64, userID, groupID *int64, r Right) error
-	DirectRights(ctx context.Context, userID int64) ([]Right, error)
-	InheritedRights(ctx context.Context, userID int64) ([]Right, error)
-	ResolveRights(ctx context.Context, u User) (direct, inherited []Right, err error)
-	CreateSession(ctx context.Context, userID int64, tokenHash string, expires time.Time) error
-	RevokeSession(ctx context.Context, tokenHash string) error
-	SessionUser(ctx context.Context, tokenHash string, now time.Time) (User, error)
+	CreateUser(ctx context.Context, db platform.DBTX, u *User) error
+	UserByID(ctx context.Context, db platform.DBTX, entityID, id int64) (User, error)
+	UserByLogin(ctx context.Context, db platform.DBTX, entityID int64, login string) (User, error)
+	UserByEmail(ctx context.Context, db platform.DBTX, entityID int64, email string) (User, error)
+	ListUsers(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]User, error)
+	ListGroups(ctx context.Context, db platform.DBTX, entityID int64) ([]Group, error)
+	UpdateUser(ctx context.Context, db platform.DBTX, entityID int64, u *User) error
+	CreateGroup(ctx context.Context, db platform.DBTX, g *Group) error
+	AddMember(ctx context.Context, db platform.DBTX, groupID, userID int64) error
+	UserGroups(ctx context.Context, db platform.DBTX, userID int64) ([]Group, error)
+	Grant(ctx context.Context, db platform.DBTX, entityID int64, userID, groupID *int64, r Right) error
+	DirectRights(ctx context.Context, db platform.DBTX, userID int64) ([]Right, error)
+	InheritedRights(ctx context.Context, db platform.DBTX, userID int64) ([]Right, error)
+	ResolveRights(ctx context.Context, db platform.DBTX, u User) (direct, inherited []Right, err error)
+	CreateSession(ctx context.Context, db platform.DBTX, userID int64, tokenHash string, expires time.Time) error
+	RevokeSession(ctx context.Context, db platform.DBTX, tokenHash string) error
+	SessionUser(ctx context.Context, db platform.DBTX, tokenHash string, now time.Time) (User, error)
 }
 
 // PGStore is the PostgreSQL implementation.
@@ -46,8 +49,8 @@ type PGStore struct{ pool *pgxpool.Pool }
 // NewPGStore wraps a pool.
 func NewPGStore(pool *pgxpool.Pool) *PGStore { return &PGStore{pool: pool} }
 
-func (s *PGStore) CreateUser(ctx context.Context, u *User) error {
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_users
+func (s *PGStore) CreateUser(ctx context.Context, db platform.DBTX, u *User) error {
+	return db.QueryRow(ctx, `INSERT INTO ferp_users
 		(entity_id, login, email, first_name, last_name, status, password_hash, is_admin, created_by, updated_by)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		RETURNING id, created_at, updated_at, row_version`,
@@ -69,12 +72,12 @@ func scanUser(row pgx.Row) (User, error) {
 const userCols = `id, entity_id, login, email, first_name, last_name, status, password_hash,
 	is_admin, failed_attempts, locked_until, created_at, updated_at, created_by, updated_by, row_version`
 
-func (s *PGStore) UserByID(ctx context.Context, id int64) (User, error) {
-	return scanUser(s.pool.QueryRow(ctx, `SELECT `+userCols+` FROM ferp_users WHERE id=$1`, id))
+func (s *PGStore) UserByID(ctx context.Context, db platform.DBTX, entityID, id int64) (User, error) {
+	return scanUser(db.QueryRow(ctx, `SELECT `+userCols+` FROM ferp_users WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
-func (s *PGStore) ListUsers(ctx context.Context, entityID int64, limit, offset int) ([]User, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+userCols+` FROM ferp_users
+func (s *PGStore) ListUsers(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]User, error) {
+	rows, err := db.Query(ctx, `SELECT `+userCols+` FROM ferp_users
 		WHERE entity_id=$1 ORDER BY login LIMIT $2 OFFSET $3`, entityID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -92,8 +95,8 @@ func (s *PGStore) ListUsers(ctx context.Context, entityID int64, limit, offset i
 	return out, rows.Err()
 }
 
-func (s *PGStore) ListGroups(ctx context.Context, entityID int64) ([]Group, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, entity_id, code, label, created_at, updated_at
+func (s *PGStore) ListGroups(ctx context.Context, db platform.DBTX, entityID int64) ([]Group, error) {
+	rows, err := db.Query(ctx, `SELECT id, entity_id, code, label, created_at, updated_at
 		FROM ferp_groups WHERE entity_id=$1 ORDER BY code`, entityID)
 	if err != nil {
 		return nil, err
@@ -110,22 +113,22 @@ func (s *PGStore) ListGroups(ctx context.Context, entityID int64) ([]Group, erro
 	return out, rows.Err()
 }
 
-func (s *PGStore) UserByLogin(ctx context.Context, entityID int64, login string) (User, error) {
-	return scanUser(s.pool.QueryRow(ctx, `SELECT `+userCols+` FROM ferp_users WHERE entity_id=$1 AND login=$2`, entityID, login))
+func (s *PGStore) UserByLogin(ctx context.Context, db platform.DBTX, entityID int64, login string) (User, error) {
+	return scanUser(db.QueryRow(ctx, `SELECT `+userCols+` FROM ferp_users WHERE entity_id=$1 AND login=$2`, entityID, login))
 }
 
 // UserByEmail finds an SSO-provisioned account by email (JIT provisioning key).
-func (s *PGStore) UserByEmail(ctx context.Context, entityID int64, email string) (User, error) {
-	return scanUser(s.pool.QueryRow(ctx, `SELECT `+userCols+` FROM ferp_users WHERE entity_id=$1 AND email=$2`, entityID, email))
+func (s *PGStore) UserByEmail(ctx context.Context, db platform.DBTX, entityID int64, email string) (User, error) {
+	return scanUser(db.QueryRow(ctx, `SELECT `+userCols+` FROM ferp_users WHERE entity_id=$1 AND email=$2`, entityID, email))
 }
 
-func (s *PGStore) UpdateUser(ctx context.Context, u *User) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_users SET email=$1, first_name=$2, last_name=$3,
+func (s *PGStore) UpdateUser(ctx context.Context, db platform.DBTX, entityID int64, u *User) error {
+	tag, err := db.Exec(ctx, `UPDATE ferp_users SET email=$1, first_name=$2, last_name=$3,
 		status=$4, password_hash=$5, is_admin=$6, failed_attempts=$7, locked_until=$8,
 		updated_at=now(), updated_by=$9, row_version=row_version+1
-		WHERE id=$10 AND row_version=$11`,
+		WHERE id=$10 AND entity_id=$12 AND row_version=$11`,
 		u.Email, u.FirstName, u.LastName, u.Status, u.PasswordHash, u.IsAdmin,
-		u.FailedAttempts, u.LockedUntil, u.UpdatedBy, u.ID, u.RowVersion)
+		u.FailedAttempts, u.LockedUntil, u.UpdatedBy, u.ID, u.RowVersion, entityID)
 	if err != nil {
 		return err
 	}
@@ -136,20 +139,20 @@ func (s *PGStore) UpdateUser(ctx context.Context, u *User) error {
 	return nil
 }
 
-func (s *PGStore) CreateGroup(ctx context.Context, g *Group) error {
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_groups (entity_id, code, label)
+func (s *PGStore) CreateGroup(ctx context.Context, db platform.DBTX, g *Group) error {
+	return db.QueryRow(ctx, `INSERT INTO ferp_groups (entity_id, code, label)
 		VALUES ($1,$2,$3) RETURNING id, created_at, updated_at`,
 		g.EntityID, g.Code, g.Label).Scan(&g.ID, &g.CreatedAt, &g.UpdatedAt)
 }
 
-func (s *PGStore) AddMember(ctx context.Context, groupID, userID int64) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO ferp_group_members (group_id, user_id)
+func (s *PGStore) AddMember(ctx context.Context, db platform.DBTX, groupID, userID int64) error {
+	_, err := db.Exec(ctx, `INSERT INTO ferp_group_members (group_id, user_id)
 		VALUES ($1,$2) ON CONFLICT DO NOTHING`, groupID, userID)
 	return err
 }
 
-func (s *PGStore) UserGroups(ctx context.Context, userID int64) ([]Group, error) {
-	rows, err := s.pool.Query(ctx, `SELECT g.id, g.entity_id, g.code, g.label, g.created_at, g.updated_at
+func (s *PGStore) UserGroups(ctx context.Context, db platform.DBTX, userID int64) ([]Group, error) {
+	rows, err := db.Query(ctx, `SELECT g.id, g.entity_id, g.code, g.label, g.created_at, g.updated_at
 		FROM ferp_groups g JOIN ferp_group_members m ON m.group_id=g.id WHERE m.user_id=$1`, userID)
 	if err != nil {
 		return nil, err
@@ -166,11 +169,11 @@ func (s *PGStore) UserGroups(ctx context.Context, userID int64) ([]Group, error)
 	return out, rows.Err()
 }
 
-func (s *PGStore) Grant(ctx context.Context, entityID int64, userID, groupID *int64, r Right) error {
+func (s *PGStore) Grant(ctx context.Context, db platform.DBTX, entityID int64, userID, groupID *int64, r Right) error {
 	if err := r.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
-	_, err := s.pool.Exec(ctx, `INSERT INTO ferp_rights (entity_id, user_id, group_id, module, entity, action)
+	_, err := db.Exec(ctx, `INSERT INTO ferp_rights (entity_id, user_id, group_id, module, entity, action)
 		VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
 		entityID, userID, groupID, r.Module, r.Entity, r.Action)
 	return err
@@ -189,16 +192,16 @@ func scanRights(rows pgx.Rows) ([]Right, error) {
 	return out, rows.Err()
 }
 
-func (s *PGStore) DirectRights(ctx context.Context, userID int64) ([]Right, error) {
-	rows, err := s.pool.Query(ctx, `SELECT module, entity, action FROM ferp_rights WHERE user_id=$1`, userID)
+func (s *PGStore) DirectRights(ctx context.Context, db platform.DBTX, userID int64) ([]Right, error) {
+	rows, err := db.Query(ctx, `SELECT module, entity, action FROM ferp_rights WHERE user_id=$1`, userID)
 	if err != nil {
 		return nil, err
 	}
 	return scanRights(rows)
 }
 
-func (s *PGStore) InheritedRights(ctx context.Context, userID int64) ([]Right, error) {
-	rows, err := s.pool.Query(ctx, `SELECT r.module, r.entity, r.action FROM ferp_rights r
+func (s *PGStore) InheritedRights(ctx context.Context, db platform.DBTX, userID int64) ([]Right, error) {
+	rows, err := db.Query(ctx, `SELECT r.module, r.entity, r.action FROM ferp_rights r
 		JOIN ferp_group_members m ON m.group_id=r.group_id WHERE m.user_id=$1`, userID)
 	if err != nil {
 		return nil, err
@@ -207,31 +210,31 @@ func (s *PGStore) InheritedRights(ctx context.Context, userID int64) ([]Right, e
 }
 
 // ResolveRights loads both grant sets for Can().
-func (s *PGStore) ResolveRights(ctx context.Context, u User) ([]Right, []Right, error) {
-	direct, err := s.DirectRights(ctx, u.ID)
+func (s *PGStore) ResolveRights(ctx context.Context, db platform.DBTX, u User) ([]Right, []Right, error) {
+	direct, err := s.DirectRights(ctx, db, u.ID)
 	if err != nil {
 		return nil, nil, err
 	}
-	inherited, err := s.InheritedRights(ctx, u.ID)
+	inherited, err := s.InheritedRights(ctx, db, u.ID)
 	if err != nil {
 		return nil, nil, err
 	}
 	return direct, inherited, nil
 }
 
-func (s *PGStore) CreateSession(ctx context.Context, userID int64, tokenHash string, expires time.Time) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO ferp_sessions (user_id, token_hash, expires_at) VALUES ($1,$2,$3)`,
+func (s *PGStore) CreateSession(ctx context.Context, db platform.DBTX, userID int64, tokenHash string, expires time.Time) error {
+	_, err := db.Exec(ctx, `INSERT INTO ferp_sessions (user_id, token_hash, expires_at) VALUES ($1,$2,$3)`,
 		userID, tokenHash, expires)
 	return err
 }
 
-func (s *PGStore) RevokeSession(ctx context.Context, tokenHash string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE ferp_sessions SET revoked_at=now() WHERE token_hash=$1`, tokenHash)
+func (s *PGStore) RevokeSession(ctx context.Context, db platform.DBTX, tokenHash string) error {
+	_, err := db.Exec(ctx, `UPDATE ferp_sessions SET revoked_at=now() WHERE token_hash=$1`, tokenHash)
 	return err
 }
 
-func (s *PGStore) SessionUser(ctx context.Context, tokenHash string, now time.Time) (User, error) {
-	return scanUser(s.pool.QueryRow(ctx, `SELECT `+userCols+` FROM ferp_users u
+func (s *PGStore) SessionUser(ctx context.Context, db platform.DBTX, tokenHash string, now time.Time) (User, error) {
+	return scanUser(db.QueryRow(ctx, `SELECT `+userCols+` FROM ferp_users u
 		JOIN ferp_sessions s ON s.user_id=u.id
 		WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>$2`, tokenHash, now))
 }
@@ -261,7 +264,7 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
-func (m *MemoryStore) CreateUser(_ context.Context, u *User) error {
+func (m *MemoryStore) CreateUser(_ context.Context, _ platform.DBTX, u *User) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	u.ID = m.next()
@@ -275,17 +278,17 @@ func (m *MemoryStore) CreateUser(_ context.Context, u *User) error {
 
 func key(entityID int64, login string) string { return fmt.Sprintf("%d\x00%s", entityID, login) }
 
-func (m *MemoryStore) UserByID(_ context.Context, id int64) (User, error) {
+func (m *MemoryStore) UserByID(_ context.Context, _ platform.DBTX, entityID, id int64) (User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	u, ok := m.users[id]
-	if !ok {
+	if !ok || u.EntityID != entityID {
 		return User{}, ErrNotFound
 	}
 	return u, nil
 }
 
-func (m *MemoryStore) ListUsers(_ context.Context, entityID int64, limit, offset int) ([]User, error) {
+func (m *MemoryStore) ListUsers(_ context.Context, _ platform.DBTX, entityID int64, limit, offset int) ([]User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []User
@@ -305,7 +308,7 @@ func (m *MemoryStore) ListUsers(_ context.Context, entityID int64, limit, offset
 	return out, nil
 }
 
-func (m *MemoryStore) ListGroups(_ context.Context, entityID int64) ([]Group, error) {
+func (m *MemoryStore) ListGroups(_ context.Context, _ platform.DBTX, entityID int64) ([]Group, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Group
@@ -317,7 +320,7 @@ func (m *MemoryStore) ListGroups(_ context.Context, entityID int64) ([]Group, er
 	return out, nil
 }
 
-func (m *MemoryStore) UserByLogin(_ context.Context, entityID int64, login string) (User, error) {
+func (m *MemoryStore) UserByLogin(_ context.Context, _ platform.DBTX, entityID int64, login string) (User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	id, ok := m.byLogin[key(entityID, login)]
@@ -328,7 +331,7 @@ func (m *MemoryStore) UserByLogin(_ context.Context, entityID int64, login strin
 }
 
 // UserByEmail scans for an SSO-provisioned account by email.
-func (m *MemoryStore) UserByEmail(_ context.Context, entityID int64, email string) (User, error) {
+func (m *MemoryStore) UserByEmail(_ context.Context, _ platform.DBTX, entityID int64, email string) (User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, u := range m.users {
@@ -339,11 +342,11 @@ func (m *MemoryStore) UserByEmail(_ context.Context, entityID int64, email strin
 	return User{}, ErrNotFound
 }
 
-func (m *MemoryStore) UpdateUser(_ context.Context, u *User) error {
+func (m *MemoryStore) UpdateUser(_ context.Context, _ platform.DBTX, entityID int64, u *User) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cur, ok := m.users[u.ID]
-	if !ok {
+	if !ok || cur.EntityID != entityID {
 		return ErrNotFound
 	}
 	if cur.RowVersion != u.RowVersion {
@@ -355,7 +358,7 @@ func (m *MemoryStore) UpdateUser(_ context.Context, u *User) error {
 	return nil
 }
 
-func (m *MemoryStore) CreateGroup(_ context.Context, g *Group) error {
+func (m *MemoryStore) CreateGroup(_ context.Context, _ platform.DBTX, g *Group) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	g.ID = m.next()
@@ -365,7 +368,7 @@ func (m *MemoryStore) CreateGroup(_ context.Context, g *Group) error {
 	return nil
 }
 
-func (m *MemoryStore) AddMember(_ context.Context, groupID, userID int64) error {
+func (m *MemoryStore) AddMember(_ context.Context, _ platform.DBTX, groupID, userID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.members[groupID] == nil {
@@ -375,7 +378,7 @@ func (m *MemoryStore) AddMember(_ context.Context, groupID, userID int64) error 
 	return nil
 }
 
-func (m *MemoryStore) UserGroups(_ context.Context, userID int64) ([]Group, error) {
+func (m *MemoryStore) UserGroups(_ context.Context, _ platform.DBTX, userID int64) ([]Group, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Group
@@ -387,9 +390,9 @@ func (m *MemoryStore) UserGroups(_ context.Context, userID int64) ([]Group, erro
 	return out, nil
 }
 
-func (m *MemoryStore) Grant(_ context.Context, _ int64, userID, groupID *int64, r Right) error {
+func (m *MemoryStore) Grant(_ context.Context, _ platform.DBTX, _ int64, userID, groupID *int64, r Right) error {
 	if err := r.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -401,13 +404,13 @@ func (m *MemoryStore) Grant(_ context.Context, _ int64, userID, groupID *int64, 
 	return nil
 }
 
-func (m *MemoryStore) DirectRights(_ context.Context, userID int64) ([]Right, error) {
+func (m *MemoryStore) DirectRights(_ context.Context, _ platform.DBTX, userID int64) ([]Right, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]Right(nil), m.direct[userID]...), nil
 }
 
-func (m *MemoryStore) InheritedRights(_ context.Context, userID int64) ([]Right, error) {
+func (m *MemoryStore) InheritedRights(_ context.Context, _ platform.DBTX, userID int64) ([]Right, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Right
@@ -419,33 +422,33 @@ func (m *MemoryStore) InheritedRights(_ context.Context, userID int64) ([]Right,
 	return out, nil
 }
 
-func (m *MemoryStore) ResolveRights(ctx context.Context, u User) ([]Right, []Right, error) {
-	d, err := m.DirectRights(ctx, u.ID)
+func (m *MemoryStore) ResolveRights(ctx context.Context, db platform.DBTX, u User) ([]Right, []Right, error) {
+	d, err := m.DirectRights(ctx, db, u.ID)
 	if err != nil {
 		return nil, nil, err
 	}
-	inh, err := m.InheritedRights(ctx, u.ID)
+	inh, err := m.InheritedRights(ctx, db, u.ID)
 	if err != nil {
 		return nil, nil, err
 	}
 	return d, inh, nil
 }
 
-func (m *MemoryStore) CreateSession(_ context.Context, userID int64, tokenHash string, _ time.Time) error {
+func (m *MemoryStore) CreateSession(_ context.Context, _ platform.DBTX, userID int64, tokenHash string, _ time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sessions[tokenHash] = userID
 	return nil
 }
 
-func (m *MemoryStore) RevokeSession(_ context.Context, tokenHash string) error {
+func (m *MemoryStore) RevokeSession(_ context.Context, _ platform.DBTX, tokenHash string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.sessions, tokenHash)
 	return nil
 }
 
-func (m *MemoryStore) SessionUser(_ context.Context, tokenHash string, _ time.Time) (User, error) {
+func (m *MemoryStore) SessionUser(_ context.Context, _ platform.DBTX, tokenHash string, _ time.Time) (User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	id, ok := m.sessions[tokenHash]

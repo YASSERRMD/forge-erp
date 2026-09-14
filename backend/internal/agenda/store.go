@@ -4,23 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 )
 
 // Store is the persistence contract for the agenda context.
 type Store interface {
-	CreateEvent(ctx context.Context, e *Event) error
-	EventByID(ctx context.Context, id int64) (Event, error)
-	ListEvents(ctx context.Context, entityID int64, from, to time.Time, limit, offset int) ([]Event, error)
-	SetEventStatus(ctx context.Context, id int64, to EventStatus, rowVersion int64) (Event, error)
-	DueReminders(ctx context.Context, entityID int64, now time.Time, limit int) ([]Event, error)
-	DueRemindersAll(ctx context.Context, now time.Time, limit int) ([]Event, error)
-	MarkReminded(ctx context.Context, id int64) error
+	CreateEvent(ctx context.Context, db platform.DBTX, e *Event) error
+	EventByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Event, error)
+	ListEvents(ctx context.Context, db platform.DBTX, entityID int64, from, to time.Time, limit, offset int) ([]Event, error)
+	SetEventStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to EventStatus, rowVersion int64) (Event, error)
+	DueReminders(ctx context.Context, db platform.DBTX, entityID int64, now time.Time, limit int) ([]Event, error)
+	DueRemindersAll(ctx context.Context, db platform.DBTX, now time.Time, limit int) ([]Event, error)
+	MarkReminded(ctx context.Context, db platform.DBTX, entityID int64, id int64) error
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -47,15 +49,15 @@ func scanEvent(row pgx.Row) (Event, error) {
 	return e, nil
 }
 
-func (s *PGStore) CreateEvent(ctx context.Context, e *Event) error {
+func (s *PGStore) CreateEvent(ctx context.Context, db platform.DBTX, e *Event) error {
 	if err := e.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	att, _ := json.Marshal(e.Attendees)
 	if att == nil {
 		att = []byte("[]")
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO ferp_events
+	return db.QueryRow(ctx, `INSERT INTO ferp_events
 		(entity_id, title, description, location, start_at, end_at, all_day, owner_login,
 		 attendees, org_id, project_id, reminder_min, status)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, row_version`,
@@ -64,12 +66,12 @@ func (s *PGStore) CreateEvent(ctx context.Context, e *Event) error {
 	).Scan(&e.ID, &e.RowVersion)
 }
 
-func (s *PGStore) EventByID(ctx context.Context, id int64) (Event, error) {
-	return scanEvent(s.pool.QueryRow(ctx, `SELECT `+eventCols+` FROM ferp_events WHERE id=$1`, id))
+func (s *PGStore) EventByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Event, error) {
+	return scanEvent(db.QueryRow(ctx, `SELECT `+eventCols+` FROM ferp_events WHERE id=$1 AND entity_id=$2`, id, entityID))
 }
 
-func (s *PGStore) ListEvents(ctx context.Context, entityID int64, from, to time.Time, limit, offset int) ([]Event, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+eventCols+` FROM ferp_events
+func (s *PGStore) ListEvents(ctx context.Context, db platform.DBTX, entityID int64, from, to time.Time, limit, offset int) ([]Event, error) {
+	rows, err := db.Query(ctx, `SELECT `+eventCols+` FROM ferp_events
 		WHERE entity_id=$1 AND start_at < $3 AND end_at > $2 ORDER BY start_at LIMIT $4 OFFSET $5`,
 		entityID, from, to, limit, offset)
 	if err != nil {
@@ -87,8 +89,8 @@ func (s *PGStore) ListEvents(ctx context.Context, entityID int64, from, to time.
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetEventStatus(ctx context.Context, id int64, to EventStatus, rowVersion int64) (Event, error) {
-	e, err := s.EventByID(ctx, id)
+func (s *PGStore) SetEventStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to EventStatus, rowVersion int64) (Event, error) {
+	e, err := s.EventByID(ctx, db, entityID, id)
 	if err != nil {
 		return Event{}, err
 	}
@@ -96,10 +98,10 @@ func (s *PGStore) SetEventStatus(ctx context.Context, id int64, to EventStatus, 
 		return Event{}, identity.ErrVersionConflict
 	}
 	if !e.CanTransition(to) {
-		return Event{}, errors.New("agenda: illegal transition")
+		return Event{}, fmt.Errorf("agenda: illegal transition: %w", platform.ErrValidation)
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_events SET status=$1, updated_at=now(), row_version=row_version+1
-		WHERE id=$2 AND row_version=$3`, to, id, rowVersion)
+	tag, err := db.Exec(ctx, `UPDATE ferp_events SET status=$1, updated_at=now(), row_version=row_version+1
+		WHERE id=$2 AND entity_id=$4 AND row_version=$3`, to, id, rowVersion, entityID)
 	if err != nil {
 		return Event{}, err
 	}
@@ -112,8 +114,8 @@ func (s *PGStore) SetEventStatus(ctx context.Context, id int64, to EventStatus, 
 }
 
 // DueReminders returns scheduled events whose reminder window has opened.
-func (s *PGStore) DueReminders(ctx context.Context, entityID int64, now time.Time, limit int) ([]Event, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+eventCols+` FROM ferp_events
+func (s *PGStore) DueReminders(ctx context.Context, db platform.DBTX, entityID int64, now time.Time, limit int) ([]Event, error) {
+	rows, err := db.Query(ctx, `SELECT `+eventCols+` FROM ferp_events
 		WHERE entity_id=$1 AND status=0 AND reminder_min > 0 AND reminded_at IS NULL
 		AND start_at - (reminder_min || ' minutes')::interval <= $2
 		ORDER BY start_at LIMIT $3`, entityID, now, limit)
@@ -133,8 +135,8 @@ func (s *PGStore) DueReminders(ctx context.Context, entityID int64, now time.Tim
 }
 
 // DueRemindersAll returns due reminders across entities (daemon path).
-func (s *PGStore) DueRemindersAll(ctx context.Context, now time.Time, limit int) ([]Event, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+eventCols+` FROM ferp_events
+func (s *PGStore) DueRemindersAll(ctx context.Context, db platform.DBTX, now time.Time, limit int) ([]Event, error) {
+	rows, err := db.Query(ctx, `SELECT `+eventCols+` FROM ferp_events
 		WHERE status=0 AND reminder_min > 0 AND reminded_at IS NULL
 		AND start_at - (reminder_min || ' minutes')::interval <= $1
 		ORDER BY start_at LIMIT $2`, now, limit)
@@ -153,9 +155,9 @@ func (s *PGStore) DueRemindersAll(ctx context.Context, now time.Time, limit int)
 	return out, rows.Err()
 }
 
-func (s *PGStore) MarkReminded(ctx context.Context, id int64) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE ferp_events SET reminded_at=now(), updated_at=now()
-		WHERE id=$1 AND reminded_at IS NULL`, id)
+func (s *PGStore) MarkReminded(ctx context.Context, db platform.DBTX, entityID int64, id int64) error {
+	tag, err := db.Exec(ctx, `UPDATE ferp_events SET reminded_at=now(), updated_at=now()
+		WHERE id=$1 AND entity_id=$2 AND reminded_at IS NULL`, id, entityID)
 	if err != nil {
 		return err
 	}
@@ -179,9 +181,9 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
-func (m *MemoryStore) CreateEvent(_ context.Context, e *Event) error {
+func (m *MemoryStore) CreateEvent(_ context.Context, _ platform.DBTX, e *Event) error {
 	if err := e.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -191,17 +193,17 @@ func (m *MemoryStore) CreateEvent(_ context.Context, e *Event) error {
 	return nil
 }
 
-func (m *MemoryStore) EventByID(_ context.Context, id int64) (Event, error) {
+func (m *MemoryStore) EventByID(_ context.Context, _ platform.DBTX, entityID int64, id int64) (Event, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.events[id]
-	if !ok {
+	if !ok || e.EntityID != entityID {
 		return Event{}, identity.ErrNotFound
 	}
 	return e, nil
 }
 
-func (m *MemoryStore) ListEvents(_ context.Context, entityID int64, from, to time.Time, limit, offset int) ([]Event, error) {
+func (m *MemoryStore) ListEvents(_ context.Context, _ platform.DBTX, entityID int64, from, to time.Time, limit, offset int) ([]Event, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Event
@@ -220,18 +222,18 @@ func (m *MemoryStore) ListEvents(_ context.Context, entityID int64, from, to tim
 	return out, nil
 }
 
-func (m *MemoryStore) SetEventStatus(_ context.Context, id int64, to EventStatus, rowVersion int64) (Event, error) {
+func (m *MemoryStore) SetEventStatus(_ context.Context, _ platform.DBTX, entityID int64, id int64, to EventStatus, rowVersion int64) (Event, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.events[id]
-	if !ok {
+	if !ok || e.EntityID != entityID {
 		return Event{}, identity.ErrNotFound
 	}
 	if e.RowVersion != rowVersion {
 		return Event{}, identity.ErrVersionConflict
 	}
 	if !e.CanTransition(to) {
-		return Event{}, errors.New("agenda: illegal transition")
+		return Event{}, fmt.Errorf("agenda: illegal transition: %w", platform.ErrValidation)
 	}
 	e.Status = to
 	e.RowVersion++
@@ -239,7 +241,7 @@ func (m *MemoryStore) SetEventStatus(_ context.Context, id int64, to EventStatus
 	return e, nil
 }
 
-func (m *MemoryStore) DueReminders(_ context.Context, entityID int64, now time.Time, _ int) ([]Event, error) {
+func (m *MemoryStore) DueReminders(_ context.Context, _ platform.DBTX, entityID int64, now time.Time, _ int) ([]Event, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Event
@@ -251,7 +253,7 @@ func (m *MemoryStore) DueReminders(_ context.Context, entityID int64, now time.T
 	return out, nil
 }
 
-func (m *MemoryStore) DueRemindersAll(_ context.Context, now time.Time, _ int) ([]Event, error) {
+func (m *MemoryStore) DueRemindersAll(_ context.Context, _ platform.DBTX, now time.Time, _ int) ([]Event, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Event
@@ -263,11 +265,11 @@ func (m *MemoryStore) DueRemindersAll(_ context.Context, now time.Time, _ int) (
 	return out, nil
 }
 
-func (m *MemoryStore) MarkReminded(_ context.Context, id int64) error {
+func (m *MemoryStore) MarkReminded(_ context.Context, _ platform.DBTX, entityID int64, id int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.events[id]
-	if !ok {
+	if !ok || e.EntityID != entityID {
 		return identity.ErrNotFound
 	}
 	if e.RemindedAt != nil {

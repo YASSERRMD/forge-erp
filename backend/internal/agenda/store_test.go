@@ -1,6 +1,7 @@
 package agenda
 
 import (
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,11 +11,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 	"github.com/go-chi/chi/v5"
 )
 
 func passthrough(_, _, _ string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler { return next }
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(platform.ContextWithEntity(r.Context(), 1)))
+		})
+	}
 }
 
 func TestReminderDueLogic(t *testing.T) {
@@ -45,21 +51,21 @@ func TestReminderDispatchOnce(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	e := &Event{EntityID: 1, Title: "Demo", OwnerLogin: "ada",
 		StartAt: now.Add(10 * time.Minute), EndAt: now.Add(time.Hour), ReminderMin: 30}
-	if err := m.CreateEvent(ctx, e); err != nil {
+	if err := m.CreateEvent(ctx, nil, e); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	due, err := m.DueReminders(ctx, 1, now, 50)
+	due, err := m.DueReminders(ctx, nil, 1, now, 50)
 	if err != nil || len(due) != 1 {
 		t.Fatalf("due=%d err=%v", len(due), err)
 	}
-	if err := m.MarkReminded(ctx, e.ID); err != nil {
+	if err := m.MarkReminded(ctx, nil, 1, e.ID); err != nil {
 		t.Fatalf("mark: %v", err)
 	}
-	due, _ = m.DueReminders(ctx, 1, now, 50)
+	due, _ = m.DueReminders(ctx, nil, 1, now, 50)
 	if len(due) != 0 {
 		t.Fatalf("re-notified: %d", len(due))
 	}
-	if err := m.MarkReminded(ctx, e.ID); err == nil {
+	if err := m.MarkReminded(ctx, nil, 1, e.ID); err == nil {
 		t.Error("double mark accepted")
 	}
 }
@@ -111,15 +117,58 @@ func TestWorkerRunOnce(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	e := &Event{EntityID: 1, Title: "Standup", OwnerLogin: "ada",
 		StartAt: now.Add(5 * time.Minute), EndAt: now.Add(30 * time.Minute), ReminderMin: 15}
-	if err := m.CreateEvent(ctx, e); err != nil {
+	if err := m.CreateEvent(ctx, nil, e); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	w := &Worker{Store: m, Now: func() time.Time { return now }}
+	w := &Worker{Store: m, DB: nil, Now: func() time.Time { return now }}
 	n, err := w.RunOnce(ctx)
 	if err != nil || n != 1 {
 		t.Fatalf("run=%d err=%v", n, err)
 	}
 	if n, _ := w.RunOnce(ctx); n != 0 {
 		t.Fatalf("second run=%d want 0", n)
+	}
+}
+
+func TestCrossTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemoryStore()
+	now := time.Now().UTC().Truncate(time.Second)
+	e := &Event{EntityID: 1, Title: "Tenant A", OwnerLogin: "ada",
+		StartAt: now.Add(time.Hour), EndAt: now.Add(2 * time.Hour)}
+	if err := m.CreateEvent(ctx, nil, e); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := m.EventByID(ctx, nil, 2, e.ID); err == nil {
+		t.Error("cross-tenant EventByID accepted")
+	}
+	if _, err := m.SetEventStatus(ctx, nil, 2, e.ID, EventDone, e.RowVersion); err == nil {
+		t.Error("cross-tenant SetEventStatus accepted")
+	}
+	if err := m.MarkReminded(ctx, nil, 2, e.ID); err == nil {
+		t.Error("cross-tenant MarkReminded accepted")
+	}
+}
+
+func TestPGEventFlow(t *testing.T) {
+	ctx := context.Background()
+	pool := pgtest.Pool(t)
+	st := NewPGStore(pool)
+	now := time.Now().UTC().Truncate(time.Second)
+	e := &Event{EntityID: 1, Title: "PG Meet", OwnerLogin: "ada",
+		StartAt: now.Add(time.Hour), EndAt: now.Add(2 * time.Hour), ReminderMin: 30}
+	if err := st.CreateEvent(ctx, pool, e); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	list, err := st.ListEvents(ctx, pool, 1, now, now.Add(3*time.Hour), 50, 0)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list=%d err=%v", len(list), err)
+	}
+	due, err := st.DueRemindersAll(ctx, pool, now.Add(50*time.Minute), 50)
+	if err != nil || len(due) != 1 {
+		t.Fatalf("due=%d err=%v", len(due), err)
+	}
+	if err := st.MarkReminded(ctx, pool, 1, e.ID); err != nil {
+		t.Fatalf("mark: %v", err)
 	}
 }

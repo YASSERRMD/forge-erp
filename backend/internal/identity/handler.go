@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // Deps wires handlers to persistence, tokens, and the clock.
@@ -18,6 +19,7 @@ type Deps struct {
 	Issuer *Issuer
 	OIDC   Verifier // nil disables OIDC login (dev JWT only)
 	Now    func() time.Time
+	DB     platform.DBTX
 }
 
 func (d Deps) now() time.Time {
@@ -67,13 +69,6 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
 func pageParams(r *http.Request) (limit int, offset int) {
 	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
@@ -113,21 +108,23 @@ func (h *Handler) Require(module, entity, action string) func(http.Handler) http
 				writeErr(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
-			u, err := h.deps.Store.UserByID(r.Context(), claims.Subject)
+			u, err := h.deps.Store.UserByID(r.Context(), h.deps.DB, claims.EntityID, claims.Subject)
 			if err != nil {
 				writeErr(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
-			direct, inherited, err := h.deps.Store.ResolveRights(r.Context(), u)
+			direct, inherited, err := h.deps.Store.ResolveRights(r.Context(), h.deps.DB, u)
 			if err != nil {
 				writeErr(w, http.StatusInternalServerError, "rights resolution failed")
 				return
 			}
-			if !Can(u, direct, inherited, module, entity, action) {
-				writeErr(w, http.StatusForbidden, "forbidden")
-				return
-			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, u)))
+		if !Can(u, direct, inherited, module, entity, action) {
+			writeErr(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		ctx := context.WithValue(r.Context(), ctxKey{}, u)
+		ctx = platform.ContextWithEntity(ctx, u.EntityID)
+		next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
@@ -157,7 +154,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		req.EntityID = 1
 	}
 	now := h.deps.now()
-	u, err := h.deps.Store.UserByLogin(r.Context(), req.EntityID, req.Login)
+	u, err := h.deps.Store.UserByLogin(r.Context(), h.deps.DB, req.EntityID, req.Login)
 	if err != nil {
 		writeErr(w, http.StatusUnauthorized, "invalid credentials")
 		return
@@ -168,7 +165,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	if u.PasswordHash == "" || !VerifyPassword(u.PasswordHash, req.Password) {
 		updated, _ := RegisterFailure(u, now)
-		_ = h.deps.Store.UpdateUser(r.Context(), &updated)
+		_ = h.deps.Store.UpdateUser(r.Context(), h.deps.DB, updated.EntityID, &updated)
 		writeErr(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
@@ -177,7 +174,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "account unavailable")
 		return
 	}
-	_ = h.deps.Store.UpdateUser(r.Context(), &updated)
+	_ = h.deps.Store.UpdateUser(r.Context(), h.deps.DB, updated.EntityID, &updated)
 	access, err := h.deps.Issuer.IssueAccess(updated)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "token issue failed")
@@ -188,7 +185,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "token issue failed")
 		return
 	}
-	if err := h.deps.Store.CreateSession(r.Context(), updated.ID, hash, now.Add(RefreshTokenTTL)); err != nil {
+	if err := h.deps.Store.CreateSession(r.Context(), h.deps.DB, updated.ID, hash, now.Add(RefreshTokenTTL)); err != nil {
 		writeErr(w, http.StatusInternalServerError, "session create failed")
 		return
 	}
@@ -207,12 +204,12 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	sum := sha256hex(req.RefreshToken)
 	now := h.deps.now()
-	u, err := h.deps.Store.SessionUser(r.Context(), sum, now)
+	u, err := h.deps.Store.SessionUser(r.Context(), h.deps.DB, sum, now)
 	if err != nil {
 		writeErr(w, http.StatusUnauthorized, "invalid refresh token")
 		return
 	}
-	_ = h.deps.Store.RevokeSession(r.Context(), sum)
+	_ = h.deps.Store.RevokeSession(r.Context(), h.deps.DB, sum)
 	access, err := h.deps.Issuer.IssueAccess(u)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "token issue failed")
@@ -223,7 +220,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "token issue failed")
 		return
 	}
-	if err := h.deps.Store.CreateSession(r.Context(), u.ID, hash, now.Add(RefreshTokenTTL)); err != nil {
+	if err := h.deps.Store.CreateSession(r.Context(), h.deps.DB, u.ID, hash, now.Add(RefreshTokenTTL)); err != nil {
 		writeErr(w, http.StatusInternalServerError, "session create failed")
 		return
 	}
@@ -256,7 +253,7 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := h.deps.now()
-	u, err := h.deps.Store.UserByEmail(r.Context(), req.EntityID, email)
+	u, err := h.deps.Store.UserByEmail(r.Context(), h.deps.DB, req.EntityID, email)
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) || email == "" {
 			writeErr(w, http.StatusUnauthorized, "SSO account unknown")
@@ -264,7 +261,7 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		u = User{EntityID: req.EntityID, Login: email, Email: email,
 			FirstName: "", LastName: "", Status: UserActive}
-		if err := h.deps.Store.CreateUser(r.Context(), &u); err != nil {
+		if err := h.deps.Store.CreateUser(r.Context(), h.deps.DB, &u); err != nil {
 			writeErr(w, http.StatusInternalServerError, "SSO provisioning failed")
 			return
 		}
@@ -279,7 +276,7 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "account unavailable")
 		return
 	}
-	_ = h.deps.Store.UpdateUser(r.Context(), &updated)
+	_ = h.deps.Store.UpdateUser(r.Context(), h.deps.DB, updated.EntityID, &updated)
 	access, err := h.deps.Issuer.IssueAccess(updated)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "token issue failed")
@@ -290,7 +287,7 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "token issue failed")
 		return
 	}
-	if err := h.deps.Store.CreateSession(r.Context(), updated.ID, hash, now.Add(RefreshTokenTTL)); err != nil {
+	if err := h.deps.Store.CreateSession(r.Context(), h.deps.DB, updated.ID, hash, now.Add(RefreshTokenTTL)); err != nil {
 		writeErr(w, http.StatusInternalServerError, "session create failed")
 		return
 	}
@@ -306,7 +303,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "refresh_token required")
 		return
 	}
-	_ = h.deps.Store.RevokeSession(r.Context(), sha256hex(req.RefreshToken))
+	_ = h.deps.Store.RevokeSession(r.Context(), h.deps.DB, sha256hex(req.RefreshToken))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -328,8 +325,13 @@ type createUserRequest struct {
 
 // ListUsers pages users within the caller's entity (hashes stripped).
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	limit, offset := pageParams(r)
-	list, err := h.deps.Store.ListUsers(r.Context(), entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListUsers(r.Context(), h.deps.DB, entityID, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -339,7 +341,12 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 
 // ListGroups lists groups within the caller's entity.
 func (h *Handler) ListGroups(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListGroups(r.Context(), entityOf(r))
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	list, err := h.deps.Store.ListGroups(r.Context(), h.deps.DB, entityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -358,6 +365,11 @@ type updateUserRequest struct {
 
 // UpdateUser patches profile fields with optimistic locking (requires identity.user.write).
 func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -368,7 +380,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	u, err := h.deps.Store.UserByID(r.Context(), id)
+	u, err := h.deps.Store.UserByID(r.Context(), h.deps.DB, entityID, id)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "user not found")
 		return
@@ -392,7 +404,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	if req.IsAdmin != nil {
 		u.IsAdmin = *req.IsAdmin
 	}
-	if err := h.deps.Store.UpdateUser(r.Context(), &u); err != nil {
+	if err := h.deps.Store.UpdateUser(r.Context(), h.deps.DB, entityID, &u); err != nil {
 		if errors.Is(err, ErrVersionConflict) {
 			writeErr(w, http.StatusConflict, "stale row version")
 			return
@@ -423,7 +435,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	u := &User{EntityID: actor.EntityID, Login: req.Login, Email: req.Email,
 		FirstName: req.FirstName, LastName: req.LastName, Status: UserActive,
 		PasswordHash: hash, IsAdmin: req.IsAdmin, CreatedBy: &actor.ID, UpdatedBy: &actor.ID}
-	if err := h.deps.Store.CreateUser(r.Context(), u); err != nil {
+	if err := h.deps.Store.CreateUser(r.Context(), h.deps.DB, u); err != nil {
 		writeErr(w, http.StatusConflict, "user exists")
 		return
 	}
@@ -433,12 +445,17 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 // GetUser fetches one user (requires identity.user.read).
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	u, err := h.deps.Store.UserByID(r.Context(), id)
+	u, err := h.deps.Store.UserByID(r.Context(), h.deps.DB, entityID, id)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "user not found")
 		return
@@ -461,7 +478,7 @@ func (h *Handler) CreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	actor, _ := AuthUser(r)
 	g := &Group{EntityID: actor.EntityID, Code: req.Code, Label: req.Label}
-	if err := h.deps.Store.CreateGroup(r.Context(), g); err != nil {
+	if err := h.deps.Store.CreateGroup(r.Context(), h.deps.DB, g); err != nil {
 		writeErr(w, http.StatusConflict, "group exists")
 		return
 	}
@@ -482,7 +499,7 @@ func (h *Handler) AddMember(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "user_id required")
 		return
 	}
-	if err := h.deps.Store.AddMember(r.Context(), gid, req.UserID); err != nil {
+	if err := h.deps.Store.AddMember(r.Context(), h.deps.DB, gid, req.UserID); err != nil {
 		writeErr(w, http.StatusInternalServerError, "add member failed")
 		return
 	}
@@ -509,7 +526,7 @@ func (h *Handler) Grant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor, _ := AuthUser(r)
-	if err := h.deps.Store.Grant(r.Context(), actor.EntityID, req.UserID, req.GroupID,
+	if err := h.deps.Store.Grant(r.Context(), h.deps.DB, actor.EntityID, req.UserID, req.GroupID,
 		Right{Module: req.Module, Entity: req.Entity, Action: req.Action}); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return

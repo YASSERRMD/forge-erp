@@ -53,6 +53,40 @@ func (l *RateLimiter) Allow(ip string) bool {
 	return true
 }
 
+// evictIdle drops buckets idle longer than ttl, bounding the per-IP map
+// (Phase 0 task 7). Returns the number evicted.
+func (l *RateLimiter) evictIdle(now time.Time, ttl time.Duration) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for ip, b := range l.buckets {
+		if now.Sub(b.last) > ttl {
+			delete(l.buckets, ip)
+			n++
+		}
+	}
+	return n
+}
+
+// StartCleanup evicts idle buckets on a ticker until stop is called
+// (Phase 0 task 7: the bucket map would otherwise grow with every IP seen).
+func (l *RateLimiter) StartCleanup(interval, ttl time.Duration) (stop func()) {
+	ticker := time.NewTicker(interval)
+	done := make(chan struct{})
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case now := <-ticker.C:
+				l.evictIdle(now.UTC(), ttl)
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
 // Limit wraps a handler with 429 rejection + Retry-After hint.
 func (l *RateLimiter) Limit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
