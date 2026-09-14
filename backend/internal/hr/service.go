@@ -49,7 +49,7 @@ func (s *Service) Pay(ctx context.Context, cmd PayCmd) (ExpenseReport, error) {
 		return out, nil
 	}
 	var out ExpenseReport
-	err := platform.Tx(ctx, s.Pool, func(tx pgx.Tx) error {
+	err := platform.TxEntity(ctx, s.Pool, cmd.EntityID, func(tx pgx.Tx) error {
 		var err error
 		out, err = s.payOn(ctx, tx, cmd)
 		return err

@@ -54,7 +54,7 @@ func (s *Service) Checkout(ctx context.Context, cmd CheckoutCmd) (Sale, error) {
 		return out, nil
 	}
 	var out Sale
-	err := platform.Tx(ctx, s.Pool, func(tx pgx.Tx) error {
+	err := platform.TxEntity(ctx, s.Pool, cmd.EntityID, func(tx pgx.Tx) error {
 		var err error
 		out, err = s.checkoutOn(ctx, tx, cmd)
 		return err

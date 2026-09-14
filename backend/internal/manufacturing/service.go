@@ -45,7 +45,7 @@ func (s *Service) Produce(ctx context.Context, cmd ProduceCmd) (ManufacturingOrd
 	}
 	var mo ManufacturingOrder
 	var plan ProducePlan
-	err := platform.Tx(ctx, s.Pool, func(tx pgx.Tx) error {
+	err := platform.TxEntity(ctx, s.Pool, cmd.EntityID, func(tx pgx.Tx) error {
 		var err error
 		mo, plan, err = s.produceOn(ctx, tx, cmd)
 		return err
