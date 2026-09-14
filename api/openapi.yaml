@@ -77,12 +77,22 @@ paths:
       responses:
         '201': { description: Created }
         '403': { description: Missing right }
+    get:
+      operationId: listUsers
+      summary: Page users, hashes stripped (requires identity.user.read)
+      responses:
+        '200': { description: List }
   /api/v1/groups:
     post:
       operationId: createGroup
       summary: Create a rights group (requires identity.group.write)
       responses:
         '201': { description: Created }
+    get:
+      operationId: listGroups
+      summary: List rights groups (requires identity.group.read)
+      responses:
+        '200': { description: List }
   /api/v1/rights/grant:
     post:
       operationId: grantRight
@@ -110,6 +120,11 @@ paths:
       responses:
         '200': { description: Organization }
         '404': { description: Not found }
+    put:
+      operationId: putStubOrganizationsId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
   /api/v1/categories:
     post:
       operationId: createCategory
@@ -241,6 +256,11 @@ paths:
       summary: Add a chart-of-accounts row (requires finance.account.write)
       responses:
         '201': { description: Created }
+    get:
+      operationId: listAccounts
+      summary: List the chart of accounts (requires finance.account.read)
+      responses:
+        '200': { description: List }
   /api/v1/finance/entries:
     post:
       operationId: postEntry
@@ -406,6 +426,11 @@ paths:
       responses:
         '201': { description: Created }
         '422': { description: Self-reference, duplicate or frozen BOM }
+    get:
+      operationId: getStubManufacturingBomsIdLines
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
   /api/v1/manufacturing/mos:
     get:
       operationId: listMOs
@@ -599,13 +624,6 @@ paths:
       summary: Mint a bearer link (requires documents.file.write)
       responses:
         '201': { description: Token }
-  /api/v1/public/share/{token}:
-    get:
-      operationId: publicShare
-      summary: Bearer-link download, no auth (token is the credential)
-      responses:
-        '200': { description: Bytes }
-        '404': { description: Unknown or expired }
   /api/v1/sepa/batches:
     get:
       operationId: listSepaBatches
@@ -678,6 +696,12 @@ paths:
       responses:
         '200': { description: User }
         '404': { description: Not found }
+    put:
+      operationId: updateUser
+      summary: Patch profile fields with optimistic locking (requires identity.user.write)
+      responses:
+        '200': { description: Updated }
+        '409': { description: Stale row version }
   /api/v1/groups/{id}/members:
     post:
       operationId: addGroupMember
@@ -690,6 +714,11 @@ paths:
       summary: List an organization's contacts (requires partners.contact.read)
       responses:
         '200': { description: List }
+    post:
+      operationId: postStubOrganizationsIdContacts
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
   /api/v1/products/{id}:
     get:
       operationId: getProduct
@@ -710,12 +739,6 @@ paths:
       responses:
         '200': { description: Updated }
         '422': { description: Not a draft or invalid lines }
-  /api/v1/sales/documents/{id}/convert:
-    post:
-      operationId: convertSalesDocument
-      summary: Clone a document into the next family (requires sales.document.write)
-      responses:
-        '201': { description: Converted }
   /api/v1/sales/credit-notes:
     post:
       operationId: createCreditNote
@@ -759,12 +782,6 @@ paths:
       summary: Open a bank account (requires finance.bank.write)
       responses:
         '201': { description: Created }
-  /api/v1/finance/accounts:
-    get:
-      operationId: listAccounts
-      summary: List the chart of accounts (requires finance.account.read)
-      responses:
-        '200': { description: List }
   /api/v1/finance/journals:
     get:
       operationId: listJournals
@@ -866,12 +883,6 @@ paths:
       responses:
         '200': { description: MO }
         '404': { description: Not found }
-  /api/v1/manufacturing/mos/{id}/status:
-    post:
-      operationId: setMOStatus
-      summary: MO transition (requires manufacturing.mo.validate)
-      responses:
-        '200': { description: Updated }
   /api/v1/hr/expenses/{id}/status:
     post:
       operationId: setExpenseStatus
@@ -919,25 +930,6 @@ paths:
         '200': { description: Session }
         '401': { description: Invalid SSO token }
         '503': { description: OIDC not configured }
-  /api/v1/users:
-    get:
-      operationId: listUsers
-      summary: Page users, hashes stripped (requires identity.user.read)
-      responses:
-        '200': { description: List }
-  /api/v1/users/{id}:
-    put:
-      operationId: updateUser
-      summary: Patch profile fields with optimistic locking (requires identity.user.write)
-      responses:
-        '200': { description: Updated }
-        '409': { description: Stale row version }
-  /api/v1/groups:
-    get:
-      operationId: listGroups
-      summary: List rights groups (requires identity.group.read)
-      responses:
-        '200': { description: List }
   /api/v1/booking/resources:
     get:
       operationId: listResources
@@ -1273,3 +1265,9 @@ paths:
       summary: Drain due reminders exactly once (requires agenda.reminder.write)
       responses:
         '200': { description: Dispatched count }
+  /public/share/{token}:
+    get:
+      operationId: getStubPublicShareToken
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }

@@ -1,4 +1,6 @@
 // Command api is the ForgeERP modular-monolith server entrypoint.
+//
+//go:generate go run genspec_openapi.go
 package main
 
 import (
@@ -13,21 +15,20 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/agenda"
 	"github.com/YASSERRMD/forge-erp/backend/internal/assets"
-	"github.com/YASSERRMD/forge-erp/backend/internal/dataio"
 	"github.com/YASSERRMD/forge-erp/backend/internal/booking"
+	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
+	"github.com/YASSERRMD/forge-erp/backend/internal/dataio"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documentsvc"
 	"github.com/YASSERRMD/forge-erp/backend/internal/events"
 	"github.com/YASSERRMD/forge-erp/backend/internal/finance"
 	"github.com/YASSERRMD/forge-erp/backend/internal/fx"
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
-	"github.com/YASSERRMD/forge-erp/backend/internal/kb"
 	"github.com/YASSERRMD/forge-erp/backend/internal/hr"
+	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/inbound"
+	"github.com/YASSERRMD/forge-erp/backend/internal/kb"
 	"github.com/YASSERRMD/forge-erp/backend/internal/manufacturing"
 	"github.com/YASSERRMD/forge-erp/backend/internal/members"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
@@ -42,6 +43,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/services"
 	"github.com/YASSERRMD/forge-erp/backend/internal/survey"
 	"github.com/YASSERRMD/forge-erp/backend/migrations"
+	"github.com/go-chi/chi/v5"
 )
 
 var (
@@ -236,7 +238,6 @@ func run() error {
 	} else {
 		log.Print("forgeerp: FERP_OIDC_ISSUER unset; SSO login disabled (dev JWT only)")
 	}
-	idH := identity.NewHandler(identDeps)
 	// Abuse caps: 20 rps burst 40 per IP across the API (login endpoints additionally
 	// guarded by per-account lockout in the identity context).
 	apiLimiter := platform.NewRateLimiter(20, 40)
@@ -244,82 +245,72 @@ func run() error {
 	// (Phase 0 task 7).
 	stopLimiter := apiLimiter.StartCleanup(time.Minute, 10*time.Minute)
 	defer stopLimiter()
-	mux.With(apiLimiter.Limit).Route("/api/v1", func(r chi.Router) {
-		identity.Routes(r, identDeps)
-		partners.Routes(r, partners.Deps{Store: pstore, Bus: bus, DB: pool},
-			idH.Require)
-		catalog.Routes(r, catalog.Deps{Store: cstore, Bus: bus, DB: pool},
-			idH.Require)
-		sales.Routes(r, sales.Deps{Store: sstore, Catalog: cstore, Bus: bus, DB: pool},
-			idH.Require)
-		procurement.Routes(r, procurement.Deps{Store: procstore, Catalog: cstore, Bus: bus, DB: pool},
-			idH.Require)
-		finance.Routes(r, finance.Deps{Store: fstore, DB: pool}, idH.Require)
-		services.Routes(r, services.Deps{Store: svcstore, Bus: bus, DB: pool},
-			idH.Require)
-		manufacturing.Routes(r, manufacturing.Deps{Store: mfstore, Ledger: cstore, Bus: bus, DB: pool, Pool: pool},
-			idH.Require)
-		hr.Routes(r, hr.Deps{Store: hrstore, Finance: fstore, Bus: bus, DB: pool, Pool: pool}, idH.Require)
-		posstore := pos.NewPGStore(pool)
-		var walkinOrg int64
-		if v := os.Getenv("FERP_POS_WALKIN_ORG"); v != "" {
-			_, _ = fmt.Sscanf(v, "%d", &walkinOrg)
-		}
-		pos.Routes(r, pos.Deps{Store: posstore, Catalog: cstore, Sales: sstore, WalkinOrg: walkinOrg, Bus: bus, DB: pool, Pool: pool},
-			idH.Require)
-		reporting.Routes(r, reporting.Deps{Ledger: fstore, Billing: sstore, Stock: cstore, Orgs: pstore, DB: pool},
-			idH.Require)
-		paystore := payments.NewPGStore(pool)
-		payreg := payments.NewRegistry(
-			payments.NewOnlineProvider(payments.ProviderStripe),
-			payments.NewOnlineProvider(payments.ProviderPayPal))
-		payments.Routes(r, payments.Deps{Store: paystore, Providers: payreg,
-			WebhookSecret: payments.WebhookSecretFromEnv(), Bus: bus, DB: pool},
-			idH.Require)
-		booking.Routes(r, booking.Deps{Store: booking.NewPGStore(pool), Bus: bus, DB: pool},
-			idH.Require)
-		survey.Routes(r, survey.Deps{Store: survey.NewPGStore(pool), Bus: bus, DB: pool},
-			idH.Require)
-		members.Routes(r, members.Deps{Store: members.NewPGStore(pool), Bus: bus, DB: pool},
-			idH.Require)
-		assets.Routes(r, assets.Deps{Store: assets.NewPGStore(pool), Bus: bus, DB: pool},
-			idH.Require)
-		kb.Routes(r, kb.Deps{Store: kb.NewPGStore(pool), Bus: bus, DB: pool},
-			idH.Require)
-		events.Routes(r, events.Deps{Store: events.NewPGStore(pool), Bus: bus, DB: pool},
-			idH.Require)
-		dataio.Routes(r, dataio.Deps{Orgs: pstore, Products: cstore, Bus: bus, DB: pool},
-			idH.Require)
-		fx.Routes(r, fx.Deps{Store: fx.NewPGStore(pool), Bus: bus, DB: pool}, idH.Require)
-		fx.Routes(r, fx.Deps{Store: fx.NewPGStore(pool), Bus: bus, DB: pool}, idH.Require)
-		sepa.Routes(r, sepa.Deps{Store: sepa.NewPGStore(pool), Bus: bus, DB: pool},
-			idH.Require)
-		inbound.Routes(r, inbound.Deps{Store: inbound.NewPGStore(pool), Tickets: svcstore, Bus: bus, DB: pool},
-			idH.Require)
-		agenda.Routes(r, agenda.Deps{Store: agenda.NewPGStore(pool), Bus: bus, DB: pool},
-			idH.Require)
-		agstore := agenda.NewPGStore(pool)
-		reminderSecs := 300
-		if v := os.Getenv("FERP_REMINDER_INTERVAL_S"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil {
-				reminderSecs = n
+	mountAPIRoutes(mux, apiWiring{
+		ident:    identDeps,
+		limit:    apiLimiter.Limit,
+		partners: partners.Deps{Store: pstore, Bus: bus, DB: pool},
+		catalog:  catalog.Deps{Store: cstore, Bus: bus, DB: pool},
+		sales:    sales.Deps{Store: sstore, Catalog: cstore, Bus: bus, DB: pool},
+		procurement: procurement.Deps{Store: procstore, Catalog: cstore,
+			Bus: bus, DB: pool},
+		finance:  finance.Deps{Store: fstore, DB: pool},
+		services: services.Deps{Store: svcstore, Bus: bus, DB: pool},
+		manufacturing: manufacturing.Deps{Store: mfstore, Ledger: cstore,
+			Bus: bus, DB: pool, Pool: pool},
+		hr: hr.Deps{Store: hrstore, Finance: fstore, Bus: bus, DB: pool, Pool: pool},
+		pos: func() pos.Deps {
+			posstore := pos.NewPGStore(pool)
+			var walkinOrg int64
+			if v := os.Getenv("FERP_POS_WALKIN_ORG"); v != "" {
+				_, _ = fmt.Sscanf(v, "%d", &walkinOrg)
 			}
-		}
-		if reminderSecs > 0 {
-			worker := &agenda.Worker{Store: agstore, DB: pool,
-				Interval: time.Duration(reminderSecs) * time.Second,
-				Logger:   log.Default()}
-			go worker.Run(ctx)
-			log.Printf("forgeerp: reminder daemon every %ds", reminderSecs)
-		} else {
-			log.Print("forgeerp: reminder daemon disabled (FERP_REMINDER_INTERVAL_S=0)")
-		}
-		documentsvc.Routes(r, docSvc, idH.Require)
-		search.Routes(r, searcher, idH.Require)
+			return pos.Deps{Store: posstore, Catalog: cstore, Sales: sstore,
+				WalkinOrg: walkinOrg, Bus: bus, DB: pool, Pool: pool}
+		}(),
+		reporting: reporting.Deps{Ledger: fstore, Billing: sstore, Stock: cstore,
+			Orgs: pstore, DB: pool},
+		payments: func() payments.Deps {
+			paystore := payments.NewPGStore(pool)
+			payreg := payments.NewRegistry(
+				payments.NewOnlineProvider(payments.ProviderStripe),
+				payments.NewOnlineProvider(payments.ProviderPayPal))
+			return payments.Deps{Store: paystore, Providers: payreg,
+				WebhookSecret: payments.WebhookSecretFromEnv(), Bus: bus, DB: pool}
+		}(),
+		booking: booking.Deps{Store: booking.NewPGStore(pool), Bus: bus, DB: pool},
+		survey:  survey.Deps{Store: survey.NewPGStore(pool), Bus: bus, DB: pool},
+		members: members.Deps{Store: members.NewPGStore(pool), Bus: bus, DB: pool},
+		assets:  assets.Deps{Store: assets.NewPGStore(pool), Bus: bus, DB: pool},
+		kb:      kb.Deps{Store: kb.NewPGStore(pool), Bus: bus, DB: pool},
+		events:  events.Deps{Store: events.NewPGStore(pool), Bus: bus, DB: pool},
+		dataio:  dataio.Deps{Orgs: pstore, Products: cstore, Bus: bus, DB: pool},
+		fx:      fx.Deps{Store: fx.NewPGStore(pool), Bus: bus, DB: pool},
+		sepa:    sepa.Deps{Store: sepa.NewPGStore(pool), Bus: bus, DB: pool},
+		inbound: inbound.Deps{Store: inbound.NewPGStore(pool), Tickets: svcstore,
+			Bus: bus, DB: pool},
+		agenda:   agenda.Deps{Store: agenda.NewPGStore(pool), Bus: bus, DB: pool},
+		docSvc:   docSvc,
+		searcher: searcher,
 	})
-	// Public bearer-link downloads (portal-lite). Rate-limited like the API,
-	// but outside RBAC: the unguessable token is the credential.
-	mux.With(apiLimiter.Limit).Get("/public/share/{token}", documentsvc.PublicShare(docSvc))
+	// Reminder daemon (agenda.Worker). Previously started inside the route-mount
+	// closure, which runs synchronously during Route(); starting it here keeps
+	// the identical startup point with route construction factored out.
+	agstore := agenda.NewPGStore(pool)
+	reminderSecs := 300
+	if v := os.Getenv("FERP_REMINDER_INTERVAL_S"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			reminderSecs = n
+		}
+	}
+	if reminderSecs > 0 {
+		worker := &agenda.Worker{Store: agstore, DB: pool, Pool: pool,
+			Interval: time.Duration(reminderSecs) * time.Second,
+			Logger:   log.Default()}
+		go worker.Run(ctx)
+		log.Printf("forgeerp: reminder daemon every %ds", reminderSecs)
+	} else {
+		log.Print("forgeerp: reminder daemon disabled (FERP_REMINDER_INTERVAL_S=0)")
+	}
 	handler := mux
 	srv := &http.Server{
 		Addr:         ":" + cfg.HTTPPort,
@@ -359,6 +350,92 @@ func run() error {
 		return err
 	}
 	return nil
+}
+
+// apiWiring carries every module's route dependencies so the full HTTP surface
+// is mounted from one place. run() fills it with PG-backed stores; the
+// OpenAPI diff test and the spec generator fill it with stubs via
+// stubWiring(). Route registration only captures handlers (stores are touched
+// per-request), so stub stores are safe for walking the router.
+type apiWiring struct {
+	ident         identity.Deps
+	limit         func(http.Handler) http.Handler
+	partners      partners.Deps
+	catalog       catalog.Deps
+	sales         sales.Deps
+	procurement   procurement.Deps
+	finance       finance.Deps
+	services      services.Deps
+	manufacturing manufacturing.Deps
+	hr            hr.Deps
+	pos           pos.Deps
+	reporting     reporting.Deps
+	payments      payments.Deps
+	booking       booking.Deps
+	survey        survey.Deps
+	members       members.Deps
+	assets        assets.Deps
+	kb            kb.Deps
+	events        events.Deps
+	dataio        dataio.Deps
+	fx            fx.Deps
+	sepa          sepa.Deps
+	inbound       inbound.Deps
+	agenda        agenda.Deps
+	docSvc        *documentsvc.Service
+	searcher      search.Searcher
+}
+
+// mountAPIRoutes mounts every module surface nested at /api/v1 plus the public
+// bearer-link download outside RBAC. This is the single source of truth for
+// the served route set (see TestOpenAPIRouterMatchesSpec).
+func mountAPIRoutes(mux chi.Router, w apiWiring) {
+	idH := identity.NewHandler(w.ident)
+	mux.With(w.limit).Route("/api/v1", func(r chi.Router) {
+		identity.Routes(r, w.ident)
+		partners.Routes(r, w.partners, idH.Require)
+		catalog.Routes(r, w.catalog, idH.Require)
+		sales.Routes(r, w.sales, idH.Require)
+		procurement.Routes(r, w.procurement, idH.Require)
+		finance.Routes(r, w.finance, idH.Require)
+		services.Routes(r, w.services, idH.Require)
+		manufacturing.Routes(r, w.manufacturing, idH.Require)
+		hr.Routes(r, w.hr, idH.Require)
+		pos.Routes(r, w.pos, idH.Require)
+		reporting.Routes(r, w.reporting, idH.Require)
+		payments.Routes(r, w.payments, idH.Require)
+		booking.Routes(r, w.booking, idH.Require)
+		survey.Routes(r, w.survey, idH.Require)
+		members.Routes(r, w.members, idH.Require)
+		assets.Routes(r, w.assets, idH.Require)
+		kb.Routes(r, w.kb, idH.Require)
+		events.Routes(r, w.events, idH.Require)
+		dataio.Routes(r, w.dataio, idH.Require)
+		fx.Routes(r, w.fx, idH.Require)
+		sepa.Routes(r, w.sepa, idH.Require)
+		inbound.Routes(r, w.inbound, idH.Require)
+		agenda.Routes(r, w.agenda, idH.Require)
+		documentsvc.Routes(r, w.docSvc, idH.Require)
+		search.Routes(r, w.searcher, idH.Require)
+	})
+	// Public bearer-link downloads (portal-lite). Rate-limited like the API,
+	// but outside RBAC: the unguessable token is the credential.
+	mux.With(w.limit).Get("/public/share/{token}", documentsvc.PublicShare(w.docSvc))
+}
+
+// stubWiring builds an apiWiring with no database for router-shape tests and
+// the OpenAPI generator. Nil stores are never touched during registration.
+func stubWiring() apiWiring {
+	limiter := platform.NewRateLimiter(20, 40)
+	return apiWiring{
+		limit: limiter.Limit,
+		payments: payments.Deps{
+			Providers: payments.NewRegistry(),
+			Bus:       platform.NewMemoryBus(),
+		},
+		docSvc:   &documentsvc.Service{},
+		searcher: search.NewMemorySearcher(),
+	}
 }
 
 // seedAdmin ensures the bootstrap administrator exists (Dolibarr install-step
