@@ -1,0 +1,28 @@
+# Lenient initial golangci-lint config (Phase 0 task 11).
+# Enabled set: errcheck, govet, ineffassign, staticcheck, unused.
+# Exclusions below are the Phase 0 noise baseline ( revisit in follow-ups):
+# handlers rely on the HTTP server to close request bodies, and metrics/test
+# scaffolding ignores fmt writes.
+version: "2"
+run:
+  timeout: 5m
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  exclusions:
+    rules:
+      - linters: [errcheck]
+        text: 'Error return value of `.*\.(Close|Fprintf|Sscanf)` is not checked'
+      - path: _test\.go
+        linters: [errcheck, ineffassign, staticcheck, unused]
+      - linters: [staticcheck]
+        text: 'QF10(08|12)'
+      - linters: [unused]
+        path: internal/(dataio/dataio|reporting/report)\.go
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 20
