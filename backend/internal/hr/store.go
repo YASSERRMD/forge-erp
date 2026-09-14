@@ -3,6 +3,7 @@ package hr
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -46,7 +47,7 @@ func scanLeave(row pgx.Row) (LeaveRequest, error) {
 
 func (s *PGStore) CreateLeave(ctx context.Context, db platform.DBTX, l *LeaveRequest) error {
 	if err := l.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	l.Days = LeaveDays(l.StartDate, l.EndDate)
 	return db.QueryRow(ctx, `INSERT INTO ferp_leave_requests
@@ -90,7 +91,7 @@ func (s *PGStore) SetLeaveStatus(ctx context.Context, db platform.DBTX, entityID
 		return LeaveRequest{}, identity.ErrVersionConflict
 	}
 	if !l.CanTransition(to) {
-		return LeaveRequest{}, errors.New("hr: illegal leave transition")
+		return LeaveRequest{}, fmt.Errorf("hr: illegal leave transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_leave_requests SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND row_version=$3 AND entity_id=$4`, to, id, rowVersion, entityID)
@@ -119,7 +120,7 @@ func scanExpense(row pgx.Row) (ExpenseReport, error) {
 
 func (s *PGStore) CreateExpense(ctx context.Context, db platform.DBTX, r *ExpenseReport) error {
 	if err := r.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_expense_reports
 		(entity_id, ref, user_login, status) VALUES ($1,$2,$3,$4) RETURNING id, total, row_version`,
@@ -129,7 +130,7 @@ func (s *PGStore) CreateExpense(ctx context.Context, db platform.DBTX, r *Expens
 
 func (s *PGStore) AddExpenseLine(ctx context.Context, db platform.DBTX, l *ExpenseLine) error {
 	if err := l.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	var st ExpenseStatus
 	err := db.QueryRow(ctx, `SELECT status FROM ferp_expense_reports WHERE id=$1 AND entity_id=$2`, l.ReportID, l.EntityID).Scan(&st)
@@ -140,7 +141,7 @@ func (s *PGStore) AddExpenseLine(ctx context.Context, db platform.DBTX, l *Expen
 		return err
 	}
 	if st != ExpenseDraft {
-		return errors.New("hr: lines editable on draft reports only")
+		return fmt.Errorf("hr: lines editable on draft reports only: %w", platform.ErrValidation)
 	}
 	if err := db.QueryRow(ctx, `INSERT INTO ferp_expense_lines
 		(entity_id, report_id, date, label, amount, vat_bps)
@@ -175,7 +176,7 @@ func (s *PGStore) SetExpenseStatus(ctx context.Context, db platform.DBTX, entity
 		return ExpenseReport{}, identity.ErrVersionConflict
 	}
 	if !r.CanTransition(to) {
-		return ExpenseReport{}, errors.New("hr: illegal expense transition")
+		return ExpenseReport{}, fmt.Errorf("hr: illegal expense transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_expense_reports SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND row_version=$3 AND entity_id=$4`, to, id, rowVersion, entityID)
@@ -223,7 +224,7 @@ func scanSalary(row pgx.Row) (Salary, error) {
 
 func (s *PGStore) CreateSalary(ctx context.Context, db platform.DBTX, sal *Salary) error {
 	if err := sal.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_salaries
 		(entity_id, user_login, period, gross, charges, net, status)
@@ -241,7 +242,7 @@ func (s *PGStore) SetSalaryStatus(ctx context.Context, db platform.DBTX, entityI
 		return Salary{}, identity.ErrVersionConflict
 	}
 	if !sal.CanTransition(to) {
-		return Salary{}, errors.New("hr: illegal salary transition")
+		return Salary{}, fmt.Errorf("hr: illegal salary transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_salaries SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND row_version=$3 AND entity_id=$4`, to, id, rowVersion, entityID)
@@ -296,7 +297,7 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
 func (m *MemoryStore) CreateLeave(_ context.Context, _ platform.DBTX, l *LeaveRequest) error {
 	if err := l.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	l.Days = LeaveDays(l.StartDate, l.EndDate)
 	m.mu.Lock()
@@ -337,7 +338,7 @@ func (m *MemoryStore) SetLeaveStatus(_ context.Context, _ platform.DBTX, entityI
 		return LeaveRequest{}, identity.ErrVersionConflict
 	}
 	if !l.CanTransition(to) {
-		return LeaveRequest{}, errors.New("hr: illegal leave transition")
+		return LeaveRequest{}, fmt.Errorf("hr: illegal leave transition: %w", platform.ErrValidation)
 	}
 	l.Status = to
 	l.RowVersion++
@@ -347,13 +348,13 @@ func (m *MemoryStore) SetLeaveStatus(_ context.Context, _ platform.DBTX, entityI
 
 func (m *MemoryStore) CreateExpense(_ context.Context, _ platform.DBTX, r *ExpenseReport) error {
 	if err := r.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.expenses {
 		if e.EntityID == r.EntityID && e.Ref == r.Ref {
-			return errors.New("hr: duplicate expense ref")
+			return fmt.Errorf("hr: duplicate expense ref: %w", platform.ErrConflict)
 		}
 	}
 	r.ID = m.next()
@@ -364,7 +365,7 @@ func (m *MemoryStore) CreateExpense(_ context.Context, _ platform.DBTX, r *Expen
 
 func (m *MemoryStore) AddExpenseLine(_ context.Context, _ platform.DBTX, l *ExpenseLine) error {
 	if err := l.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -373,7 +374,7 @@ func (m *MemoryStore) AddExpenseLine(_ context.Context, _ platform.DBTX, l *Expe
 		return identity.ErrNotFound
 	}
 	if r.Status != ExpenseDraft {
-		return errors.New("hr: lines editable on draft reports only")
+		return fmt.Errorf("hr: lines editable on draft reports only: %w", platform.ErrValidation)
 	}
 	l.ID = m.next()
 	m.lines[l.ID] = *l
@@ -409,7 +410,7 @@ func (m *MemoryStore) SetExpenseStatus(_ context.Context, _ platform.DBTX, entit
 		return ExpenseReport{}, identity.ErrVersionConflict
 	}
 	if !r.CanTransition(to) {
-		return ExpenseReport{}, errors.New("hr: illegal expense transition")
+		return ExpenseReport{}, fmt.Errorf("hr: illegal expense transition: %w", platform.ErrValidation)
 	}
 	r.Status = to
 	r.RowVersion++
@@ -438,13 +439,13 @@ func (m *MemoryStore) ExpensesOf(_ context.Context, _ platform.DBTX, entityID in
 
 func (m *MemoryStore) CreateSalary(_ context.Context, _ platform.DBTX, s *Salary) error {
 	if err := s.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.salaries {
 		if e.EntityID == s.EntityID && e.UserLogin == s.UserLogin && e.Period == s.Period {
-			return errors.New("hr: duplicate salary period")
+			return fmt.Errorf("hr: duplicate salary period: %w", platform.ErrConflict)
 		}
 	}
 	s.ID = m.next()
@@ -464,7 +465,7 @@ func (m *MemoryStore) SetSalaryStatus(_ context.Context, _ platform.DBTX, entity
 		return Salary{}, identity.ErrVersionConflict
 	}
 	if !s.CanTransition(to) {
-		return Salary{}, errors.New("hr: illegal salary transition")
+		return Salary{}, fmt.Errorf("hr: illegal salary transition: %w", platform.ErrValidation)
 	}
 	s.Status = to
 	s.RowVersion++

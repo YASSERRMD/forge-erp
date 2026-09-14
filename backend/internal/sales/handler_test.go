@@ -1,6 +1,7 @@
 package sales
 
 import (
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -19,7 +20,11 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 func cstContext() context.Context { return context.Background() }
 
 func passthrough(_ string, _ string, _ string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler { return next }
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(platform.ContextWithEntity(r.Context(), 1)))
+		})
+	}
 }
 
 func testRouter() (http.Handler, *MemoryStore, *catalog.MemoryStore) {

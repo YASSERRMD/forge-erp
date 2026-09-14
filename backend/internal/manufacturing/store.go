@@ -3,6 +3,7 @@ package manufacturing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -53,7 +54,7 @@ func scanBOM(row pgx.Row) (BOM, error) {
 
 func (s *PGStore) CreateBOM(ctx context.Context, db platform.DBTX, b *BOM) error {
 	if err := b.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_boms
 		(entity_id, ref, product_id, label, revision, status)
@@ -93,7 +94,7 @@ func (s *PGStore) SetBOMStatus(ctx context.Context, db platform.DBTX, entityID i
 		return BOM{}, identity.ErrVersionConflict
 	}
 	if !b.CanTransition(to) {
-		return BOM{}, errors.New("manufacturing: illegal BOM transition")
+		return BOM{}, fmt.Errorf("manufacturing: illegal BOM transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_boms SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND row_version=$3 AND entity_id=$4`, to, id, rowVersion, entityID)
@@ -114,10 +115,10 @@ func (s *PGStore) AddLine(ctx context.Context, db platform.DBTX, l *BOMLine) err
 		return err
 	}
 	if err := l.Validate(b.ProductID); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	if b.Status == BOMObsolete {
-		return errors.New("manufacturing: BOM obsolete, lines frozen")
+		return fmt.Errorf("manufacturing: BOM obsolete, lines frozen: %w", platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_bom_lines
 		(entity_id, bom_id, component_id, qty, position)
@@ -158,14 +159,14 @@ func scanMO(row pgx.Row) (ManufacturingOrder, error) {
 
 func (s *PGStore) CreateMO(ctx context.Context, db platform.DBTX, m *ManufacturingOrder) error {
 	if err := m.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	b, err := s.BOMByID(ctx, db, m.EntityID, m.BOMID)
 	if err != nil {
 		return err
 	}
 	if b.ProductID != m.ProductID {
-		return errors.New("manufacturing: MO product must match BOM product")
+		return fmt.Errorf("manufacturing: MO product must match BOM product: %w", platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_mos
 		(entity_id, ref, bom_id, product_id, warehouse_id, qty, status)
@@ -205,7 +206,7 @@ func (s *PGStore) SetMOStatus(ctx context.Context, db platform.DBTX, entityID in
 		return ManufacturingOrder{}, identity.ErrVersionConflict
 	}
 	if !m.CanTransition(to) {
-		return ManufacturingOrder{}, errors.New("manufacturing: illegal MO transition")
+		return ManufacturingOrder{}, fmt.Errorf("manufacturing: illegal MO transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_mos SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND row_version=$3 AND entity_id=$4`, to, id, rowVersion, entityID)
@@ -226,7 +227,7 @@ func (s *PGStore) SetMOStatus(ctx context.Context, db platform.DBTX, entityID in
 func PostProduce(ctx context.Context, db platform.DBTX, mo ManufacturingOrder, lines []BOMLine, ledger Ledger) (ProducePlan, error) {
 	plan, err := PlanProduce(mo, lines)
 	if err != nil {
-		return ProducePlan{}, err
+		return ProducePlan{}, fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	for _, c := range plan.Consumes {
 		lvl, err := ledger.Level(ctx, db, c.ComponentID, mo.WarehouseID)
@@ -234,7 +235,7 @@ func PostProduce(ctx context.Context, db platform.DBTX, mo ManufacturingOrder, l
 			return ProducePlan{}, err
 		}
 		if lvl.Qty < -c.Qty {
-			return ProducePlan{}, errors.New("manufacturing: insufficient component stock")
+			return ProducePlan{}, fmt.Errorf("manufacturing: insufficient component stock: %w", platform.ErrValidation)
 		}
 	}
 	for _, c := range plan.Consumes {
@@ -275,13 +276,13 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
 func (m *MemoryStore) CreateBOM(_ context.Context, _ platform.DBTX, b *BOM) error {
 	if err := b.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.boms {
 		if e.EntityID == b.EntityID && e.Ref == b.Ref {
-			return errors.New("manufacturing: duplicate BOM ref")
+			return fmt.Errorf("manufacturing: duplicate BOM ref: %w", platform.ErrConflict)
 		}
 	}
 	b.ID = m.next()
@@ -330,7 +331,7 @@ func (m *MemoryStore) SetBOMStatus(_ context.Context, _ platform.DBTX, entityID 
 		return BOM{}, identity.ErrVersionConflict
 	}
 	if !b.CanTransition(to) {
-		return BOM{}, errors.New("manufacturing: illegal BOM transition")
+		return BOM{}, fmt.Errorf("manufacturing: illegal BOM transition: %w", platform.ErrValidation)
 	}
 	b.Status = to
 	b.RowVersion++
@@ -343,17 +344,17 @@ func (m *MemoryStore) AddLine(_ context.Context, _ platform.DBTX, l *BOMLine) er
 	defer m.mu.Unlock()
 	b, ok := m.boms[l.BOMID]
 	if !ok || b.EntityID != l.EntityID {
-		return errors.New("manufacturing: BOM not found")
+		return fmt.Errorf("manufacturing: BOM not found: %w", platform.ErrNotFound)
 	}
 	if err := l.Validate(b.ProductID); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	if b.Status == BOMObsolete {
-		return errors.New("manufacturing: BOM obsolete, lines frozen")
+		return fmt.Errorf("manufacturing: BOM obsolete, lines frozen: %w", platform.ErrValidation)
 	}
 	for _, e := range m.lines {
 		if e.BOMID == l.BOMID && e.ComponentID == l.ComponentID {
-			return errors.New("manufacturing: duplicate component")
+			return fmt.Errorf("manufacturing: duplicate component: %w", platform.ErrConflict)
 		}
 	}
 	l.ID = m.next()
@@ -375,20 +376,20 @@ func (m *MemoryStore) LinesOf(_ context.Context, _ platform.DBTX, bomID int64) (
 
 func (m *MemoryStore) CreateMO(_ context.Context, _ platform.DBTX, mo *ManufacturingOrder) error {
 	if err := mo.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.boms[mo.BOMID]
 	if !ok || b.EntityID != mo.EntityID {
-		return errors.New("manufacturing: BOM not found")
+		return fmt.Errorf("manufacturing: BOM not found: %w", platform.ErrNotFound)
 	}
 	if b.ProductID != mo.ProductID {
-		return errors.New("manufacturing: MO product must match BOM product")
+		return fmt.Errorf("manufacturing: MO product must match BOM product: %w", platform.ErrValidation)
 	}
 	for _, e := range m.mos {
 		if e.EntityID == mo.EntityID && e.Ref == mo.Ref {
-			return errors.New("manufacturing: duplicate MO ref")
+			return fmt.Errorf("manufacturing: duplicate MO ref: %w", platform.ErrConflict)
 		}
 	}
 	mo.ID = m.next()
@@ -437,7 +438,7 @@ func (m *MemoryStore) SetMOStatus(_ context.Context, _ platform.DBTX, entityID i
 		return ManufacturingOrder{}, identity.ErrVersionConflict
 	}
 	if !mo.CanTransition(to) {
-		return ManufacturingOrder{}, errors.New("manufacturing: illegal MO transition")
+		return ManufacturingOrder{}, fmt.Errorf("manufacturing: illegal MO transition: %w", platform.ErrValidation)
 	}
 	mo.Status = to
 	mo.RowVersion++

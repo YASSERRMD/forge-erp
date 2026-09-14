@@ -3,14 +3,11 @@ package sepa
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
@@ -51,26 +48,6 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
-func storeErrorCode(err error) int {
-	switch {
-	case errors.Is(err, identity.ErrNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, identity.ErrVersionConflict):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "duplicate"):
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
-}
-
 func pathID(r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, name), 10, 64)
 	if err != nil || id <= 0 {
@@ -93,16 +70,21 @@ type statusIn struct {
 
 // CreateBatch opens a draft collection batch (IBANs validated).
 func (h *Handler) CreateBatch(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var b Batch
 	if err := decode(r, &b); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	b.ID = 0
-	b.EntityID = entityOf(r)
+	b.EntityID = entityID
 	b.Status = BatchDraft
 	if err := h.deps.Store.CreateBatch(r.Context(), h.deps.DB, &b); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, b)
@@ -110,7 +92,12 @@ func (h *Handler) CreateBatch(w http.ResponseWriter, r *http.Request) {
 
 // ListBatches lists batches.
 func (h *Handler) ListBatches(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListBatches(r.Context(), h.deps.DB, entityOf(r))
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	list, err := h.deps.Store.ListBatches(r.Context(), h.deps.DB, entityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -120,6 +107,11 @@ func (h *Handler) ListBatches(w http.ResponseWriter, r *http.Request) {
 
 // SetBatchStatus moves a batch along its lifecycle.
 func (h *Handler) SetBatchStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -130,30 +122,35 @@ func (h *Handler) SetBatchStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	b, err := h.deps.Store.SetBatchStatus(r.Context(), h.deps.DB, entityOf(r), id, BatchStatus(in.Status), in.RowVersion)
+	b, err := h.deps.Store.SetBatchStatus(r.Context(), h.deps.DB, entityID, id, BatchStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.sepa.batch.status.v1", "batch", b.ID)
+	h.publish(r.Context(), entityID, "forgeerp.sepa.batch.status.v1", "batch", b.ID)
 	writeJSON(w, http.StatusOK, b)
 }
 
 // ExportXML serves the pain.008 document for validated batches.
 func (h *Handler) ExportXML(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	b, err := h.deps.Store.BatchByID(r.Context(), h.deps.DB, entityOf(r), id)
+	b, err := h.deps.Store.BatchByID(r.Context(), h.deps.DB, entityID, id)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	raw, err := ExportXML(b, time.Now().UTC())
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/xml")

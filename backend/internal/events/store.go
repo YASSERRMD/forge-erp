@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -49,7 +50,7 @@ func scanEvent(row pgx.Row) (OrgEvent, error) {
 
 func (s *PGStore) CreateEvent(ctx context.Context, db platform.DBTX, e *OrgEvent) error {
 	if err := e.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_org_events
 		(entity_id, title, description, location, starts_at, ends_at, capacity, price, status)
@@ -89,7 +90,7 @@ func (s *PGStore) SetEventStatus(ctx context.Context, db platform.DBTX, entityID
 		return OrgEvent{}, identity.ErrVersionConflict
 	}
 	if !e.CanTransition(to) {
-		return OrgEvent{}, errors.New("events: illegal transition")
+		return OrgEvent{}, fmt.Errorf("events: illegal transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_org_events SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
@@ -117,14 +118,14 @@ func scanReg(row pgx.Row) (Registration, error) {
 
 func (s *PGStore) Register(ctx context.Context, db platform.DBTX, r *Registration) error {
 	if err := r.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	e, err := s.EventByID(ctx, db, r.EntityID, r.EventID)
 	if err != nil {
 		return err
 	}
 	if e.Status != OrgEventPublished {
-		return errors.New("events: registration open on published events only")
+		return fmt.Errorf("events: registration open on published events only: %w", platform.ErrValidation)
 	}
 	regs, err := s.RegistrationsOf(ctx, db, r.EventID)
 	if err != nil {
@@ -168,7 +169,7 @@ func (s *PGStore) SetRegistrationStatus(ctx context.Context, db platform.DBTX, e
 		return Registration{}, err
 	}
 	if !cur.CanTransition(to) {
-		return Registration{}, errors.New("events: illegal transition")
+		return Registration{}, fmt.Errorf("events: illegal transition: %w", platform.ErrValidation)
 	}
 	_, err = db.Exec(ctx, `UPDATE ferp_registrations SET status=$1 WHERE id=$2 AND entity_id=$3`, to, id, entityID)
 	if err != nil {
@@ -192,7 +193,7 @@ func scanPosition(row pgx.Row) (Position, error) {
 
 func (s *PGStore) CreatePosition(ctx context.Context, db platform.DBTX, p *Position) error {
 	if err := p.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_positions
 		(entity_id, code, title, description, status)
@@ -230,7 +231,7 @@ func (s *PGStore) SetPositionStatus(ctx context.Context, db platform.DBTX, entit
 		return Position{}, identity.ErrVersionConflict
 	}
 	if !p.CanTransition(to) {
-		return Position{}, errors.New("events: illegal transition")
+		return Position{}, fmt.Errorf("events: illegal transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_positions SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
@@ -259,7 +260,7 @@ func scanApp(row pgx.Row) (Application, error) {
 
 func (s *PGStore) Apply(ctx context.Context, db platform.DBTX, a *Application) error {
 	if err := a.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	p, err := scanPosition(db.QueryRow(ctx, `SELECT `+posCols+` FROM ferp_positions WHERE id=$1 AND entity_id=$2`, a.PositionID, a.EntityID))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -269,7 +270,7 @@ func (s *PGStore) Apply(ctx context.Context, db platform.DBTX, a *Application) e
 		return err
 	}
 	if p.Status != PositionOpen {
-		return errors.New("events: applications open on open positions only")
+		return fmt.Errorf("events: applications open on open positions only: %w", platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_applications
 		(entity_id, position_id, name, email, status)
@@ -304,7 +305,7 @@ func (s *PGStore) SetApplicationStatus(ctx context.Context, db platform.DBTX, en
 		return Application{}, identity.ErrVersionConflict
 	}
 	if !a.CanTransition(to) {
-		return Application{}, errors.New("events: illegal transition")
+		return Application{}, fmt.Errorf("events: illegal transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_applications SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
@@ -341,7 +342,7 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
 func (m *MemoryStore) CreateEvent(_ context.Context, _ platform.DBTX, e *OrgEvent) error {
 	if err := e.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -384,7 +385,7 @@ func (m *MemoryStore) SetEventStatus(_ context.Context, _ platform.DBTX, entityI
 		return OrgEvent{}, identity.ErrVersionConflict
 	}
 	if !e.CanTransition(to) {
-		return OrgEvent{}, errors.New("events: illegal transition")
+		return OrgEvent{}, fmt.Errorf("events: illegal transition: %w", platform.ErrValidation)
 	}
 	e.Status = to
 	e.RowVersion++
@@ -394,16 +395,16 @@ func (m *MemoryStore) SetEventStatus(_ context.Context, _ platform.DBTX, entityI
 
 func (m *MemoryStore) Register(_ context.Context, _ platform.DBTX, r *Registration) error {
 	if err := r.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.events[r.EventID]
 	if !ok || e.EntityID != r.EntityID {
-		return errors.New("events: event not found")
+		return fmt.Errorf("events: event not found: %w", platform.ErrNotFound)
 	}
 	if e.Status != OrgEventPublished {
-		return errors.New("events: registration open on published events only")
+		return fmt.Errorf("events: registration open on published events only: %w", platform.ErrValidation)
 	}
 	var regs []Registration
 	for _, x := range m.regs {
@@ -439,7 +440,7 @@ func (m *MemoryStore) SetRegistrationStatus(_ context.Context, _ platform.DBTX, 
 		return Registration{}, identity.ErrNotFound
 	}
 	if !r.CanTransition(to) {
-		return Registration{}, errors.New("events: illegal transition")
+		return Registration{}, fmt.Errorf("events: illegal transition: %w", platform.ErrValidation)
 	}
 	r.Status = to
 	m.regs[id] = r
@@ -448,13 +449,13 @@ func (m *MemoryStore) SetRegistrationStatus(_ context.Context, _ platform.DBTX, 
 
 func (m *MemoryStore) CreatePosition(_ context.Context, _ platform.DBTX, p *Position) error {
 	if err := p.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.poss {
 		if e.EntityID == p.EntityID && e.Code == p.Code {
-			return errors.New("events: duplicate position code")
+			return fmt.Errorf("events: duplicate position code: %w", platform.ErrConflict)
 		}
 	}
 	p.ID = m.next()
@@ -486,7 +487,7 @@ func (m *MemoryStore) SetPositionStatus(_ context.Context, _ platform.DBTX, enti
 		return Position{}, identity.ErrVersionConflict
 	}
 	if !p.CanTransition(to) {
-		return Position{}, errors.New("events: illegal transition")
+		return Position{}, fmt.Errorf("events: illegal transition: %w", platform.ErrValidation)
 	}
 	p.Status = to
 	p.RowVersion++
@@ -496,7 +497,7 @@ func (m *MemoryStore) SetPositionStatus(_ context.Context, _ platform.DBTX, enti
 
 func (m *MemoryStore) Apply(_ context.Context, _ platform.DBTX, a *Application) error {
 	if err := a.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -505,7 +506,7 @@ func (m *MemoryStore) Apply(_ context.Context, _ platform.DBTX, a *Application) 
 		return identity.ErrNotFound
 	}
 	if p.Status != PositionOpen {
-		return errors.New("events: applications open on open positions only")
+		return fmt.Errorf("events: applications open on open positions only: %w", platform.ErrValidation)
 	}
 	a.ID = m.next()
 	a.RowVersion = 1
@@ -536,7 +537,7 @@ func (m *MemoryStore) SetApplicationStatus(_ context.Context, _ platform.DBTX, e
 		return Application{}, identity.ErrVersionConflict
 	}
 	if !a.CanTransition(to) {
-		return Application{}, errors.New("events: illegal transition")
+		return Application{}, fmt.Errorf("events: illegal transition: %w", platform.ErrValidation)
 	}
 	a.Status = to
 	a.RowVersion++

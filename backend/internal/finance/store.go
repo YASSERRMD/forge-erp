@@ -3,6 +3,7 @@ package finance
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -11,8 +12,9 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
-// ErrNotFound is returned when a row does not exist.
-var ErrNotFound = errors.New("finance: not found")
+// ErrNotFound is returned when a row does not exist (alias of the platform
+// kernel sentinel so errors.Is works across packages).
+var ErrNotFound = platform.ErrNotFound
 
 // Store is the persistence contract for finance.
 type Store interface {
@@ -44,7 +46,7 @@ func NewPGStore(pool *pgxpool.Pool) *PGStore { return &PGStore{pool: pool} }
 
 func (s *PGStore) CreateAccount(ctx context.Context, db platform.DBTX, a *Account) error {
 	if err := a.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_accounts (entity_id, code, label, type)
 		VALUES ($1,$2,$3,$4) RETURNING id`,
@@ -137,7 +139,7 @@ func (s *PGStore) CreateFiscalYear(ctx context.Context, db platform.DBTX, f *Fis
 
 func (s *PGStore) PostEntry(ctx context.Context, db platform.DBTX, e *Entry) error {
 	if err := e.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	// Joins the caller's transaction when one is in flight (service
 	// orchestration); otherwise posts in its own transaction.
@@ -160,7 +162,7 @@ func (s *PGStore) PostEntry(ctx context.Context, db platform.DBTX, e *Entry) err
 		return finish(err)
 	}
 	if locked {
-		return finish(errors.New("finance: fiscal year locked for entry date"))
+		return finish(fmt.Errorf("finance: fiscal year locked for entry date: %w", platform.ErrValidation))
 	}
 	// Chain head.
 	var prev string
@@ -268,7 +270,7 @@ func (s *PGStore) CreateBankAccount(ctx context.Context, db platform.DBTX, a *Ba
 
 func (s *PGStore) RecordTransaction(ctx context.Context, db platform.DBTX, t *BankTransaction) error {
 	if err := t.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_bank_transactions
 		(entity_id, account_id, amount, label, value_date) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
@@ -282,7 +284,7 @@ func (s *PGStore) Reconcile(ctx context.Context, db platform.DBTX, entityID, txI
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return errors.New("finance: transaction already reconciled or missing")
+		return fmt.Errorf("finance: transaction already reconciled or missing: %w", platform.ErrConflict)
 	}
 	return nil
 }
@@ -295,7 +297,7 @@ func (s *PGStore) AccountBalance(ctx context.Context, db platform.DBTX, accountI
 
 func (s *PGStore) CreateLoan(ctx context.Context, db platform.DBTX, l *Loan) error {
 	if l.Principal <= 0 || l.Periods <= 0 {
-		return errors.New("finance: bad loan terms")
+		return fmt.Errorf("finance: bad loan terms: %w", platform.ErrValidation)
 	}
 	l.Schedule = BuildSchedule(l.Principal, l.RateBps, l.Start, l.Periods)
 	return db.QueryRow(ctx, `INSERT INTO ferp_loans
@@ -326,7 +328,7 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
 func (m *MemoryStore) CreateAccount(_ context.Context, _ platform.DBTX, a *Account) error {
 	if err := a.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -402,13 +404,13 @@ func (m *MemoryStore) CreateFiscalYear(_ context.Context, _ platform.DBTX, f *Fi
 
 func (m *MemoryStore) PostEntry(_ context.Context, _ platform.DBTX, e *Entry) error {
 	if err := e.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, y := range m.years {
 		if y.EntityID == e.EntityID && y.Contains(e.Date) && y.Locked {
-			return errors.New("finance: fiscal year locked for entry date")
+			return fmt.Errorf("finance: fiscal year locked for entry date: %w", platform.ErrValidation)
 		}
 	}
 	prev := GenesisHash
@@ -466,7 +468,7 @@ func (m *MemoryStore) CreateBankAccount(_ context.Context, _ platform.DBTX, a *B
 
 func (m *MemoryStore) RecordTransaction(_ context.Context, _ platform.DBTX, t *BankTransaction) error {
 	if err := t.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -483,7 +485,7 @@ func (m *MemoryStore) Reconcile(_ context.Context, _ platform.DBTX, entityID, tx
 		return ErrNotFound
 	}
 	if t.Reconciled {
-		return errors.New("finance: transaction already reconciled or missing")
+		return fmt.Errorf("finance: transaction already reconciled or missing: %w", platform.ErrConflict)
 	}
 	t.Reconciled = true
 	t.ReconciledAt = &at
@@ -505,7 +507,7 @@ func (m *MemoryStore) AccountBalance(_ context.Context, _ platform.DBTX, account
 
 func (m *MemoryStore) CreateLoan(_ context.Context, _ platform.DBTX, l *Loan) error {
 	if l.Principal <= 0 || l.Periods <= 0 {
-		return errors.New("finance: bad loan terms")
+		return fmt.Errorf("finance: bad loan terms: %w", platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()

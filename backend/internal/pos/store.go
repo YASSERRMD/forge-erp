@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -49,7 +50,7 @@ func scanTerminal(row pgx.Row) (Terminal, error) {
 
 func (s *PGStore) CreateTerminal(ctx context.Context, db platform.DBTX, t *Terminal) error {
 	if err := t.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_pos_terminals
 		(entity_id, code, label, warehouse_id, status)
@@ -93,14 +94,14 @@ func scanSession(row pgx.Row) (Session, error) {
 
 func (s *PGStore) OpenSession(ctx context.Context, db platform.DBTX, se *Session) error {
 	if err := se.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	t, err := s.TerminalByID(ctx, db, se.EntityID, se.TerminalID)
 	if err != nil {
 		return err
 	}
 	if t.Status != TerminalActive {
-		return errors.New("pos: terminal inactive")
+		return fmt.Errorf("pos: terminal inactive: %w", platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_pos_sessions
 		(entity_id, terminal_id, cashier, opening_float, status)
@@ -122,7 +123,7 @@ func (s *PGStore) CloseSession(ctx context.Context, db platform.DBTX, entityID, 
 		return Session{}, identity.ErrVersionConflict
 	}
 	if se.Status != SessionOpen {
-		return Session{}, errors.New("pos: session already closed")
+		return Session{}, fmt.Errorf("pos: session already closed: %w", platform.ErrValidation)
 	}
 	now := time.Now().UTC()
 	tag, err := db.Exec(ctx, `UPDATE ferp_pos_sessions SET status=1, closed_at=$1, row_version=row_version+1
@@ -194,7 +195,7 @@ func (s *PGStore) VoidSale(ctx context.Context, db platform.DBTX, entityID, id i
 		return Sale{}, err
 	}
 	if sa.Status != SaleCompleted {
-		return Sale{}, errors.New("pos: only completed sales can be voided")
+		return Sale{}, fmt.Errorf("pos: only completed sales can be voided: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_pos_sales SET status=-1 WHERE id=$1 AND entity_id=$2 AND status=1`, id, entityID)
 	if err != nil {
@@ -213,7 +214,7 @@ func (s *PGStore) MarkReturned(ctx context.Context, db platform.DBTX, entityID, 
 		return Sale{}, err
 	}
 	if sa.Status != SaleCompleted {
-		return Sale{}, errors.New("pos: only completed sales can be returned")
+		return Sale{}, fmt.Errorf("pos: only completed sales can be returned: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_pos_sales SET status=2 WHERE id=$1 AND entity_id=$2 AND status=1`, id, entityID)
 	if err != nil {
@@ -246,13 +247,13 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
 func (m *MemoryStore) CreateTerminal(_ context.Context, _ platform.DBTX, t *Terminal) error {
 	if err := t.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.terminals {
 		if e.EntityID == t.EntityID && e.Code == t.Code {
-			return errors.New("pos: duplicate terminal code")
+			return fmt.Errorf("pos: duplicate terminal code: %w", platform.ErrConflict)
 		}
 	}
 	t.ID = m.next()
@@ -285,19 +286,19 @@ func (m *MemoryStore) ListTerminals(_ context.Context, _ platform.DBTX, entityID
 
 func (m *MemoryStore) OpenSession(_ context.Context, _ platform.DBTX, se *Session) error {
 	if err := se.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, ok := m.terminals[se.TerminalID]
 	if !ok {
-		return errors.New("pos: terminal not found")
+		return fmt.Errorf("pos: terminal not found: %w", platform.ErrNotFound)
 	}
 	if t.EntityID != se.EntityID {
 		return identity.ErrNotFound
 	}
 	if t.Status != TerminalActive {
-		return errors.New("pos: terminal inactive")
+		return fmt.Errorf("pos: terminal inactive: %w", platform.ErrValidation)
 	}
 	se.ID = m.next()
 	se.Status = SessionOpen
@@ -328,7 +329,7 @@ func (m *MemoryStore) CloseSession(_ context.Context, _ platform.DBTX, entityID,
 		return Session{}, identity.ErrVersionConflict
 	}
 	if se.Status != SessionOpen {
-		return Session{}, errors.New("pos: session already closed")
+		return Session{}, fmt.Errorf("pos: session already closed: %w", platform.ErrValidation)
 	}
 	now := time.Now().UTC()
 	se.Status = SessionClosed
@@ -343,7 +344,7 @@ func (m *MemoryStore) CreateSale(_ context.Context, _ platform.DBTX, sa *Sale) e
 	defer m.mu.Unlock()
 	for _, e := range m.sales {
 		if e.EntityID == sa.EntityID && e.Ref == sa.Ref {
-			return errors.New("pos: duplicate sale ref")
+			return fmt.Errorf("pos: duplicate sale ref: %w", platform.ErrConflict)
 		}
 	}
 	sa.ID = m.next()
@@ -382,7 +383,7 @@ func (m *MemoryStore) VoidSale(_ context.Context, _ platform.DBTX, entityID, id 
 		return Sale{}, identity.ErrNotFound
 	}
 	if sa.Status != SaleCompleted {
-		return Sale{}, errors.New("pos: only completed sales can be voided")
+		return Sale{}, fmt.Errorf("pos: only completed sales can be voided: %w", platform.ErrValidation)
 	}
 	sa.Status = SaleVoided
 	m.sales[id] = sa
@@ -397,7 +398,7 @@ func (m *MemoryStore) MarkReturned(_ context.Context, _ platform.DBTX, entityID,
 		return Sale{}, identity.ErrNotFound
 	}
 	if sa.Status != SaleCompleted {
-		return Sale{}, errors.New("pos: only completed sales can be returned")
+		return Sale{}, fmt.Errorf("pos: only completed sales can be returned: %w", platform.ErrValidation)
 	}
 	sa.Status = SaleReturned
 	m.sales[id] = sa

@@ -3,6 +3,7 @@ package payments
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -41,7 +42,7 @@ func scanAttempt(row pgx.Row) (PaymentAttempt, error) {
 
 func (s *PGStore) CreateAttempt(ctx context.Context, db platform.DBTX, a *PaymentAttempt) error {
 	if err := a.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_payment_attempts
 		(entity_id, ref, org_id, invoice_id, amount, currency, provider, status, webhook_key)
@@ -90,7 +91,7 @@ func (s *PGStore) SetAttemptStatus(ctx context.Context, db platform.DBTX, entity
 		return PaymentAttempt{}, identity.ErrVersionConflict
 	}
 	if !a.CanTransition(to) {
-		return PaymentAttempt{}, errors.New("payments: illegal attempt transition")
+		return PaymentAttempt{}, fmt.Errorf("payments: illegal attempt transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_payment_attempts SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND row_version=$3 AND entity_id=$4`, to, id, rowVersion, entityID)
@@ -121,16 +122,16 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
 func (m *MemoryStore) CreateAttempt(_ context.Context, _ platform.DBTX, a *PaymentAttempt) error {
 	if err := a.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.attempts {
 		if e.EntityID == a.EntityID && e.Ref == a.Ref {
-			return errors.New("payments: duplicate attempt ref")
+			return fmt.Errorf("payments: duplicate attempt ref: %w", platform.ErrConflict)
 		}
 		if a.WebhookKey != "" && e.EntityID == a.EntityID && e.WebhookKey == a.WebhookKey {
-			return errors.New("payments: duplicate webhook key")
+			return fmt.Errorf("payments: duplicate webhook key: %w", platform.ErrConflict)
 		}
 	}
 	a.ID = m.next()
@@ -190,7 +191,7 @@ func (m *MemoryStore) SetAttemptStatus(_ context.Context, _ platform.DBTX, entit
 		return PaymentAttempt{}, identity.ErrVersionConflict
 	}
 	if !a.CanTransition(to) {
-		return PaymentAttempt{}, errors.New("payments: illegal attempt transition")
+		return PaymentAttempt{}, fmt.Errorf("payments: illegal attempt transition: %w", platform.ErrValidation)
 	}
 	a.Status = to
 	a.RowVersion++

@@ -3,13 +3,10 @@ package agenda
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/go-chi/chi/v5"
 )
@@ -59,30 +56,6 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
-func storeErrorCode(err error) int {
-	switch {
-	case errors.Is(err, identity.ErrNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, identity.ErrVersionConflict):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "duplicate"):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "not found"):
-		return http.StatusNotFound
-	case err != nil && strings.Contains(err.Error(), "conflict"):
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
-}
-
 func pathID(r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, name), 10, 64)
 	if err != nil || id <= 0 {
@@ -105,24 +78,34 @@ type statusIn struct {
 
 // CreateEvent schedules a calendar event.
 func (h *Handler) CreateEvent(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var e Event
 	if err := decode(r, &e); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	e.ID = 0
-	e.EntityID = entityOf(r)
+	e.EntityID = entityID
 	e.Status = EventScheduled
 	if err := h.deps.Store.CreateEvent(r.Context(), h.deps.DB, &e); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.agenda.event.created.v1", "event", e.ID)
+	h.publish(r.Context(), entityID, "forgeerp.agenda.event.created.v1", "event", e.ID)
 	writeJSON(w, http.StatusCreated, e)
 }
 
 // ListEvents lists events intersecting [from, to).
 func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	q := r.URL.Query()
 	from, err1 := time.Parse(time.RFC3339, q.Get("from"))
 	to, err2 := time.Parse(time.RFC3339, q.Get("to"))
@@ -134,7 +117,7 @@ func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	list, err := h.deps.Store.ListEvents(r.Context(), h.deps.DB, entityOf(r), from, to, limit, 0)
+	list, err := h.deps.Store.ListEvents(r.Context(), h.deps.DB, entityID, from, to, limit, 0)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -144,6 +127,11 @@ func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
 
 // SetEventStatus completes or cancels an event.
 func (h *Handler) SetEventStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -154,9 +142,9 @@ func (h *Handler) SetEventStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	e, err := h.deps.Store.SetEventStatus(r.Context(), h.deps.DB, entityOf(r), id, EventStatus(in.Status), in.RowVersion)
+	e, err := h.deps.Store.SetEventStatus(r.Context(), h.deps.DB, entityID, id, EventStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, e)
@@ -165,18 +153,23 @@ func (h *Handler) SetEventStatus(w http.ResponseWriter, r *http.Request) {
 // DispatchReminders returns due reminders and stamps them sent (scheduler/cron
 // hits this; each reminder fires exactly once via MarkReminded).
 func (h *Handler) DispatchReminders(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	now := h.now()
-	due, err := h.deps.Store.DueReminders(r.Context(), h.deps.DB, entityOf(r), now, 100)
+	due, err := h.deps.Store.DueReminders(r.Context(), h.deps.DB, entityID, now, 100)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "dispatch failed")
 		return
 	}
 	sent := 0
 	for _, e := range due {
-		if err := h.deps.Store.MarkReminded(r.Context(), h.deps.DB, entityOf(r), e.ID); err != nil {
+		if err := h.deps.Store.MarkReminded(r.Context(), h.deps.DB, entityID, e.ID); err != nil {
 			continue
 		}
-		h.publish(r.Context(), entityOf(r), "forgeerp.agenda.reminder.due.v1", "event", e.ID)
+		h.publish(r.Context(), entityID, "forgeerp.agenda.reminder.due.v1", "event", e.ID)
 		sent++
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"dispatched": sent, "events": due})

@@ -16,7 +16,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
@@ -62,26 +61,6 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
-func storeErrorCode(err error) int {
-	switch {
-	case errors.Is(err, identity.ErrNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, identity.ErrVersionConflict):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "duplicate"):
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
-}
-
 var orgHeader = []string{"name", "customer_code", "supplier_code", "email", "phone", "is_customer", "is_supplier"}
 
 func parseBool(s string) (bool, error) {
@@ -97,13 +76,18 @@ func parseBool(s string) (bool, error) {
 
 // ExportOrgs streams all organizations as CSV.
 func (h *Handler) ExportOrgs(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", `attachment; filename="organizations.csv"`)
 	cw := csv.NewWriter(w)
 	defer cw.Flush()
 	_ = cw.Write(orgHeader)
 	for offset := 0; ; offset += 500 {
-		batch, err := h.deps.Orgs.ListOrgs(r.Context(), h.deps.DB, entityOf(r), 500, offset)
+		batch, err := h.deps.Orgs.ListOrgs(r.Context(), h.deps.DB, entityID, 500, offset)
 		if err != nil {
 			return // headers already sent; truncated export beats a broken one
 		}
@@ -121,13 +105,18 @@ var productHeader = []string{"sku", "name", "type", "unit", "net_price", "vat_ra
 
 // ExportProducts streams all products as CSV (net_price in major units).
 func (h *Handler) ExportProducts(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", `attachment; filename="products.csv"`)
 	cw := csv.NewWriter(w)
 	defer cw.Flush()
 	_ = cw.Write(productHeader)
 	for offset := 0; ; offset += 500 {
-		batch, err := h.deps.Products.ListProducts(r.Context(), h.deps.DB, entityOf(r), 500, offset)
+		batch, err := h.deps.Products.ListProducts(r.Context(), h.deps.DB, entityID, 500, offset)
 		if err != nil {
 			return
 		}
@@ -178,6 +167,11 @@ func capErr(errs []string, row int, err error) []string {
 
 // ImportOrgs creates organizations row by row, skipping invalid rows.
 func (h *Handler) ImportOrgs(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	rows, err := readCSV(r, orgHeader)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -185,7 +179,7 @@ func (h *Handler) ImportOrgs(w http.ResponseWriter, r *http.Request) {
 	}
 	res := ImportResult{}
 	for i, c := range rows {
-		o := &partners.Organization{EntityID: entityOf(r), Name: strings.TrimSpace(c[0]),
+		o := &partners.Organization{EntityID: entityID, Name: strings.TrimSpace(c[0]),
 			CustomerCode: strings.TrimSpace(c[1]), SupplierCode: strings.TrimSpace(c[2]),
 			Email: strings.TrimSpace(c[3]), Phone: strings.TrimSpace(c[4])}
 		var err error
@@ -217,6 +211,11 @@ func (h *Handler) ImportOrgs(w http.ResponseWriter, r *http.Request) {
 
 // ImportProducts creates products row by row (net_price decimal major units).
 func (h *Handler) ImportProducts(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	rows, err := readCSV(r, productHeader)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -248,7 +247,7 @@ func (h *Handler) ImportProducts(w http.ResponseWriter, r *http.Request) {
 			fail(err)
 			continue
 		}
-		p := &catalog.Product{EntityID: entityOf(r), SKU: strings.TrimSpace(c[0]),
+		p := &catalog.Product{EntityID: entityID, SKU: strings.TrimSpace(c[0]),
 			Name: strings.TrimSpace(c[1]), Type: catalog.ProductType(pt), Unit: strings.TrimSpace(c[3]),
 			NetPrice: int64(price*100 + 0.5), VATRateBps: vat, Status: catalog.ProductActive,
 			StockTracked: tracked}

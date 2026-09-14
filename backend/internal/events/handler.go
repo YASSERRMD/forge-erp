@@ -3,13 +3,10 @@ package events
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
@@ -58,30 +55,6 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
-func storeErrorCode(err error) int {
-	switch {
-	case errors.Is(err, identity.ErrNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, identity.ErrVersionConflict):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "duplicate"):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "not found"):
-		return http.StatusNotFound
-	case err != nil && strings.Contains(err.Error(), "conflict"):
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
-}
-
 func pathID(r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, name), 10, 64)
 	if err != nil || id <= 0 {
@@ -104,25 +77,35 @@ type statusIn struct {
 
 // CreateEvent opens a draft event.
 func (h *Handler) CreateEvent(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var e OrgEvent
 	if err := decode(r, &e); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	e.ID = 0
-	e.EntityID = entityOf(r)
+	e.EntityID = entityID
 	e.Status = OrgEventDraft
 	if err := h.deps.Store.CreateEvent(r.Context(), h.deps.DB, &e); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.events.created.v1", "event", e.ID)
+	h.publish(r.Context(), entityID, "forgeerp.events.created.v1", "event", e.ID)
 	writeJSON(w, http.StatusCreated, e)
 }
 
 // ListEvents lists events.
 func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListEvents(r.Context(), h.deps.DB, entityOf(r))
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	list, err := h.deps.Store.ListEvents(r.Context(), h.deps.DB, entityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -132,6 +115,11 @@ func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
 
 // SetEventStatus moves an event along its lifecycle.
 func (h *Handler) SetEventStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -142,9 +130,9 @@ func (h *Handler) SetEventStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	e, err := h.deps.Store.SetEventStatus(r.Context(), h.deps.DB, entityOf(r), id, OrgEventStatus(in.Status), in.RowVersion)
+	e, err := h.deps.Store.SetEventStatus(r.Context(), h.deps.DB, entityID, id, OrgEventStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, e)
@@ -152,6 +140,11 @@ func (h *Handler) SetEventStatus(w http.ResponseWriter, r *http.Request) {
 
 // Register books a seat after capacity checks.
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	eid, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -163,14 +156,14 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reg.ID = 0
-	reg.EntityID = entityOf(r)
+	reg.EntityID = entityID
 	reg.EventID = eid
 	reg.Status = RegRegistered
 	if err := h.deps.Store.Register(r.Context(), h.deps.DB, &reg); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.events.registered.v1", "registration", reg.ID)
+	h.publish(r.Context(), entityID, "forgeerp.events.registered.v1", "registration", reg.ID)
 	writeJSON(w, http.StatusCreated, reg)
 }
 
@@ -191,6 +184,11 @@ func (h *Handler) ListRegistrations(w http.ResponseWriter, r *http.Request) {
 
 // SetRegistrationStatus moves a registration along its flow.
 func (h *Handler) SetRegistrationStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -201,9 +199,9 @@ func (h *Handler) SetRegistrationStatus(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	reg, err := h.deps.Store.SetRegistrationStatus(r.Context(), h.deps.DB, entityOf(r), id, RegistrationStatus(in.Status))
+	reg, err := h.deps.Store.SetRegistrationStatus(r.Context(), h.deps.DB, entityID, id, RegistrationStatus(in.Status))
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, reg)
@@ -211,16 +209,21 @@ func (h *Handler) SetRegistrationStatus(w http.ResponseWriter, r *http.Request) 
 
 // CreatePosition opens a draft job posting.
 func (h *Handler) CreatePosition(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var p Position
 	if err := decode(r, &p); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	p.ID = 0
-	p.EntityID = entityOf(r)
+	p.EntityID = entityID
 	p.Status = PositionDraft
 	if err := h.deps.Store.CreatePosition(r.Context(), h.deps.DB, &p); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
@@ -228,7 +231,12 @@ func (h *Handler) CreatePosition(w http.ResponseWriter, r *http.Request) {
 
 // ListPositions lists job postings.
 func (h *Handler) ListPositions(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListPositions(r.Context(), h.deps.DB, entityOf(r))
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	list, err := h.deps.Store.ListPositions(r.Context(), h.deps.DB, entityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -238,6 +246,11 @@ func (h *Handler) ListPositions(w http.ResponseWriter, r *http.Request) {
 
 // SetPositionStatus opens or closes a posting.
 func (h *Handler) SetPositionStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -248,9 +261,9 @@ func (h *Handler) SetPositionStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	p, err := h.deps.Store.SetPositionStatus(r.Context(), h.deps.DB, entityOf(r), id, PositionStatus(in.Status), in.RowVersion)
+	p, err := h.deps.Store.SetPositionStatus(r.Context(), h.deps.DB, entityID, id, PositionStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
@@ -258,6 +271,11 @@ func (h *Handler) SetPositionStatus(w http.ResponseWriter, r *http.Request) {
 
 // Apply submits a candidate to an open position.
 func (h *Handler) Apply(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	pid, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -269,14 +287,14 @@ func (h *Handler) Apply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.ID = 0
-	a.EntityID = entityOf(r)
+	a.EntityID = entityID
 	a.PositionID = pid
 	a.Status = AppReceived
 	if err := h.deps.Store.Apply(r.Context(), h.deps.DB, &a); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.events.application.received.v1", "application", a.ID)
+	h.publish(r.Context(), entityID, "forgeerp.events.application.received.v1", "application", a.ID)
 	writeJSON(w, http.StatusCreated, a)
 }
 
@@ -297,6 +315,11 @@ func (h *Handler) ListApplications(w http.ResponseWriter, r *http.Request) {
 
 // SetApplicationStatus moves a candidate along the pipeline.
 func (h *Handler) SetApplicationStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -307,9 +330,9 @@ func (h *Handler) SetApplicationStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a, err := h.deps.Store.SetApplicationStatus(r.Context(), h.deps.DB, entityOf(r), id, ApplicationStatus(in.Status), in.RowVersion)
+	a, err := h.deps.Store.SetApplicationStatus(r.Context(), h.deps.DB, entityID, id, ApplicationStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, a)

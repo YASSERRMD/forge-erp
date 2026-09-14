@@ -215,7 +215,7 @@ func TestCrossTenantIsolation(t *testing.T) {
 	}
 
 	// Handler GET under another entity (row seeded under entity 2,
-	// default request entity is 1) must 404.
+	// test request carries entity 1 via the passthrough tenant) must 404.
 	m2 := NewMemoryStore()
 	p2 := &Project{EntityID: 2, Ref: "X-2", Label: "foreign"}
 	if err := m2.CreateProject(ctx, nil, p2); err != nil {

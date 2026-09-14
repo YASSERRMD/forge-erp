@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
@@ -58,7 +59,7 @@ func scanProject(row pgx.Row) (Project, error) {
 
 func (s *PGStore) CreateProject(ctx context.Context, db platform.DBTX, p *Project) error {
 	if err := p.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_projects
 		(entity_id, ref, label, description, org_id, status, created_by, updated_by)
@@ -98,7 +99,7 @@ func (s *PGStore) SetProjectStatus(ctx context.Context, db platform.DBTX, entity
 		return Project{}, identity.ErrVersionConflict
 	}
 	if !p.CanTransition(to) {
-		return Project{}, errors.New("services: illegal project transition")
+		return Project{}, fmt.Errorf("services: illegal project transition: %w", platform.ErrValidation)
 	}
 	p.Status = to
 	tag, err := db.Exec(ctx, `UPDATE ferp_projects SET status=$1, updated_at=now(), row_version=row_version+1
@@ -132,14 +133,14 @@ func projectOpenForWork(status ProjectStatus) bool {
 
 func (s *PGStore) CreateTask(ctx context.Context, db platform.DBTX, t *Task) error {
 	if err := t.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	p, err := s.ProjectByID(ctx, db, t.EntityID, t.ProjectID)
 	if err != nil {
 		return err
 	}
 	if !projectOpenForWork(p.Status) {
-		return errors.New("services: project closed for new tasks")
+		return fmt.Errorf("services: project closed for new tasks: %w", platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_project_tasks
 		(entity_id, project_id, label, description, status, assignee)
@@ -178,7 +179,7 @@ func (s *PGStore) SetTaskStatus(ctx context.Context, db platform.DBTX, entityID 
 		return Task{}, identity.ErrVersionConflict
 	}
 	if !t.CanTransition(to) {
-		return Task{}, errors.New("services: illegal task transition")
+		return Task{}, fmt.Errorf("services: illegal task transition: %w", platform.ErrValidation)
 	}
 	t.Status = to
 	tag, err := db.Exec(ctx, `UPDATE ferp_project_tasks SET status=$1, updated_at=now(), row_version=row_version+1
@@ -195,21 +196,21 @@ func (s *PGStore) SetTaskStatus(ctx context.Context, db platform.DBTX, entityID 
 
 func (s *PGStore) AddTime(ctx context.Context, db platform.DBTX, e *TimeEntry) error {
 	if err := e.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	t, err := s.taskByID(ctx, db, e.EntityID, e.TaskID)
 	if err != nil {
 		return err
 	}
 	if t.Status == TaskDone || t.Status == TaskCanceled {
-		return errors.New("services: task closed for time entries")
+		return fmt.Errorf("services: task closed for time entries: %w", platform.ErrValidation)
 	}
 	p, err := s.ProjectByID(ctx, db, e.EntityID, e.ProjectID)
 	if err != nil {
 		return err
 	}
 	if !projectOpenForWork(p.Status) {
-		return errors.New("services: project closed for time entries")
+		return fmt.Errorf("services: project closed for time entries: %w", platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_time_entries
 		(entity_id, project_id, task_id, author, hours, entry_date, note)
@@ -250,7 +251,7 @@ func scanContract(row pgx.Row) (ServiceContract, error) {
 
 func (s *PGStore) CreateContract(ctx context.Context, db platform.DBTX, c *ServiceContract) error {
 	if err := c.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_service_contracts
 		(entity_id, ref, org_id, label, status, start_date, end_date)
@@ -274,7 +275,7 @@ func (s *PGStore) SetContractStatus(ctx context.Context, db platform.DBTX, entit
 		return ServiceContract{}, identity.ErrVersionConflict
 	}
 	if !c.CanTransition(to) {
-		return ServiceContract{}, errors.New("services: illegal contract transition")
+		return ServiceContract{}, fmt.Errorf("services: illegal contract transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_service_contracts SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
@@ -356,7 +357,7 @@ func scanIntervention(row pgx.Row) (Intervention, error) {
 
 func (s *PGStore) CreateIntervention(ctx context.Context, db platform.DBTX, in *Intervention) error {
 	if err := in.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_interventions
 		(entity_id, ref, org_id, project_id, contract_id, label, description, status)
@@ -374,7 +375,7 @@ func (s *PGStore) SetInterventionStatus(ctx context.Context, db platform.DBTX, e
 		return Intervention{}, identity.ErrVersionConflict
 	}
 	if !in.CanTransition(to) {
-		return Intervention{}, errors.New("services: illegal intervention transition")
+		return Intervention{}, fmt.Errorf("services: illegal intervention transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_interventions SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
@@ -403,7 +404,7 @@ func scanTicket(row pgx.Row) (Ticket, error) {
 
 func (s *PGStore) CreateTicket(ctx context.Context, db platform.DBTX, t *Ticket) error {
 	if err := t.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_tickets
 		(entity_id, ref, org_id, project_id, subject, priority, status)
@@ -443,7 +444,7 @@ func (s *PGStore) SetTicketStatus(ctx context.Context, db platform.DBTX, entityI
 		return Ticket{}, identity.ErrVersionConflict
 	}
 	if !t.CanTransition(to) {
-		return Ticket{}, errors.New("services: illegal ticket transition")
+		return Ticket{}, fmt.Errorf("services: illegal ticket transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_tickets SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
@@ -460,14 +461,14 @@ func (s *PGStore) SetTicketStatus(ctx context.Context, db platform.DBTX, entityI
 
 func (s *PGStore) AddMessage(ctx context.Context, db platform.DBTX, m *TicketMessage) error {
 	if err := m.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	t, err := s.TicketByID(ctx, db, m.EntityID, m.TicketID)
 	if err != nil {
 		return err
 	}
 	if t.Status == TicketClosed {
-		return errors.New("services: ticket closed for new messages")
+		return fmt.Errorf("services: ticket closed for new messages: %w", platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_ticket_messages
 		(entity_id, ticket_id, author, body, internal)
@@ -520,13 +521,13 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
 func (m *MemoryStore) CreateProject(_ context.Context, _ platform.DBTX, p *Project) error {
 	if err := p.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.projects {
 		if e.EntityID == p.EntityID && e.Ref == p.Ref {
-			return errors.New("services: duplicate project ref")
+			return fmt.Errorf("services: duplicate project ref: %w", platform.ErrConflict)
 		}
 	}
 	p.ID = m.next()
@@ -575,7 +576,7 @@ func (m *MemoryStore) SetProjectStatus(_ context.Context, _ platform.DBTX, entit
 		return Project{}, identity.ErrVersionConflict
 	}
 	if !p.CanTransition(to) {
-		return Project{}, errors.New("services: illegal project transition")
+		return Project{}, fmt.Errorf("services: illegal project transition: %w", platform.ErrValidation)
 	}
 	p.Status = to
 	p.RowVersion++
@@ -585,16 +586,16 @@ func (m *MemoryStore) SetProjectStatus(_ context.Context, _ platform.DBTX, entit
 
 func (m *MemoryStore) CreateTask(_ context.Context, _ platform.DBTX, t *Task) error {
 	if err := t.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.projects[t.ProjectID]
 	if !ok {
-		return errors.New("services: project not found")
+		return fmt.Errorf("services: project not found: %w", platform.ErrNotFound)
 	}
 	if !projectOpenForWork(p.Status) {
-		return errors.New("services: project closed for new tasks")
+		return fmt.Errorf("services: project closed for new tasks: %w", platform.ErrValidation)
 	}
 	t.ID = m.next()
 	t.RowVersion = 1
@@ -625,7 +626,7 @@ func (m *MemoryStore) SetTaskStatus(_ context.Context, _ platform.DBTX, entityID
 		return Task{}, identity.ErrVersionConflict
 	}
 	if !t.CanTransition(to) {
-		return Task{}, errors.New("services: illegal task transition")
+		return Task{}, fmt.Errorf("services: illegal task transition: %w", platform.ErrValidation)
 	}
 	t.Status = to
 	t.RowVersion++
@@ -635,23 +636,23 @@ func (m *MemoryStore) SetTaskStatus(_ context.Context, _ platform.DBTX, entityID
 
 func (m *MemoryStore) AddTime(_ context.Context, _ platform.DBTX, e *TimeEntry) error {
 	if err := e.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, ok := m.tasks[e.TaskID]
 	if !ok {
-		return errors.New("services: task not found")
+		return fmt.Errorf("services: task not found: %w", platform.ErrNotFound)
 	}
 	if t.Status == TaskDone || t.Status == TaskCanceled {
-		return errors.New("services: task closed for time entries")
+		return fmt.Errorf("services: task closed for time entries: %w", platform.ErrValidation)
 	}
 	p, ok := m.projects[e.ProjectID]
 	if !ok {
-		return errors.New("services: project not found")
+		return fmt.Errorf("services: project not found: %w", platform.ErrNotFound)
 	}
 	if !projectOpenForWork(p.Status) {
-		return errors.New("services: project closed for time entries")
+		return fmt.Errorf("services: project closed for time entries: %w", platform.ErrValidation)
 	}
 	e.ID = m.next()
 	m.times[e.ID] = *e
@@ -684,13 +685,13 @@ func (m *MemoryStore) ProjectHours(_ context.Context, _ platform.DBTX, projectID
 
 func (m *MemoryStore) CreateContract(_ context.Context, _ platform.DBTX, c *ServiceContract) error {
 	if err := c.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.contracts {
 		if e.EntityID == c.EntityID && e.Ref == c.Ref {
-			return errors.New("services: duplicate contract ref")
+			return fmt.Errorf("services: duplicate contract ref: %w", platform.ErrConflict)
 		}
 	}
 	c.ID = m.next()
@@ -710,7 +711,7 @@ func (m *MemoryStore) SetContractStatus(_ context.Context, _ platform.DBTX, enti
 		return ServiceContract{}, identity.ErrVersionConflict
 	}
 	if !c.CanTransition(to) {
-		return ServiceContract{}, errors.New("services: illegal contract transition")
+		return ServiceContract{}, fmt.Errorf("services: illegal contract transition: %w", platform.ErrValidation)
 	}
 	c.Status = to
 	c.RowVersion++
@@ -770,13 +771,13 @@ func (m *MemoryStore) ListInterventions(_ context.Context, _ platform.DBTX, enti
 
 func (m *MemoryStore) CreateIntervention(_ context.Context, _ platform.DBTX, in *Intervention) error {
 	if err := in.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.intervs {
 		if e.EntityID == in.EntityID && e.Ref == in.Ref {
-			return errors.New("services: duplicate intervention ref")
+			return fmt.Errorf("services: duplicate intervention ref: %w", platform.ErrConflict)
 		}
 	}
 	in.ID = m.next()
@@ -796,7 +797,7 @@ func (m *MemoryStore) SetInterventionStatus(_ context.Context, _ platform.DBTX, 
 		return Intervention{}, identity.ErrVersionConflict
 	}
 	if !in.CanTransition(to) {
-		return Intervention{}, errors.New("services: illegal intervention transition")
+		return Intervention{}, fmt.Errorf("services: illegal intervention transition: %w", platform.ErrValidation)
 	}
 	in.Status = to
 	in.RowVersion++
@@ -806,13 +807,13 @@ func (m *MemoryStore) SetInterventionStatus(_ context.Context, _ platform.DBTX, 
 
 func (m *MemoryStore) CreateTicket(_ context.Context, _ platform.DBTX, t *Ticket) error {
 	if err := t.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.tickets {
 		if e.EntityID == t.EntityID && e.Ref == t.Ref {
-			return errors.New("services: duplicate ticket ref")
+			return fmt.Errorf("services: duplicate ticket ref: %w", platform.ErrConflict)
 		}
 	}
 	t.ID = m.next()
@@ -861,7 +862,7 @@ func (m *MemoryStore) SetTicketStatus(_ context.Context, _ platform.DBTX, entity
 		return Ticket{}, identity.ErrVersionConflict
 	}
 	if !t.CanTransition(to) {
-		return Ticket{}, errors.New("services: illegal ticket transition")
+		return Ticket{}, fmt.Errorf("services: illegal ticket transition: %w", platform.ErrValidation)
 	}
 	t.Status = to
 	t.RowVersion++
@@ -871,16 +872,16 @@ func (m *MemoryStore) SetTicketStatus(_ context.Context, _ platform.DBTX, entity
 
 func (m *MemoryStore) AddMessage(_ context.Context, _ platform.DBTX, msg *TicketMessage) error {
 	if err := msg.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, ok := m.tickets[msg.TicketID]
 	if !ok {
-		return errors.New("services: ticket not found")
+		return fmt.Errorf("services: ticket not found: %w", platform.ErrNotFound)
 	}
 	if t.Status == TicketClosed {
-		return errors.New("services: ticket closed for new messages")
+		return fmt.Errorf("services: ticket closed for new messages: %w", platform.ErrValidation)
 	}
 	msg.ID = m.next()
 	m.messages[msg.ID] = *msg

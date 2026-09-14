@@ -13,11 +13,13 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
-// ErrNotFound is returned when a row does not exist.
-var ErrNotFound = errors.New("identity: not found")
+// ErrNotFound is returned when a row does not exist (alias of the platform
+// kernel sentinel so errors.Is works across packages).
+var ErrNotFound = platform.ErrNotFound
 
-// ErrVersionConflict is returned on optimistic-locking mismatch.
-var ErrVersionConflict = errors.New("identity: row version conflict")
+// ErrVersionConflict is returned on optimistic-locking mismatch (alias of
+// the platform kernel sentinel).
+var ErrVersionConflict = platform.ErrVersionConflict
 
 // Store is the persistence contract for the identity context.
 // PGStore implements it against PostgreSQL; MemoryStore is the test fake.
@@ -169,7 +171,7 @@ func (s *PGStore) UserGroups(ctx context.Context, db platform.DBTX, userID int64
 
 func (s *PGStore) Grant(ctx context.Context, db platform.DBTX, entityID int64, userID, groupID *int64, r Right) error {
 	if err := r.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	_, err := db.Exec(ctx, `INSERT INTO ferp_rights (entity_id, user_id, group_id, module, entity, action)
 		VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
@@ -390,7 +392,7 @@ func (m *MemoryStore) UserGroups(_ context.Context, _ platform.DBTX, userID int6
 
 func (m *MemoryStore) Grant(_ context.Context, _ platform.DBTX, _ int64, userID, groupID *int64, r Right) error {
 	if err := r.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -3,6 +3,7 @@ package booking
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -43,7 +44,7 @@ func scanResource(row pgx.Row) (Resource, error) {
 
 func (s *PGStore) CreateResource(ctx context.Context, db platform.DBTX, r *Resource) error {
 	if err := r.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_resources
 		(entity_id, code, label, capacity, status)
@@ -107,21 +108,21 @@ func (s *PGStore) overlapping(ctx context.Context, db platform.DBTX, entityID in
 
 func (s *PGStore) CreateBooking(ctx context.Context, db platform.DBTX, b *Booking) error {
 	if err := b.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	res, err := s.ResourceByID(ctx, db, b.EntityID, b.ResourceID)
 	if err != nil {
 		return err
 	}
 	if res.Status != ResourceActive {
-		return errors.New("booking: resource inactive")
+		return fmt.Errorf("booking: resource inactive: %w", platform.ErrValidation)
 	}
 	live, err := s.overlapping(ctx, db, b.EntityID, b.ResourceID, b.StartAt, b.EndAt)
 	if err != nil {
 		return err
 	}
 	if err := FitsCapacity(res.Capacity, live, *b); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_bookings
 		(entity_id, resource_id, org_id, user_login, start_at, end_at, seats, status)
@@ -161,7 +162,7 @@ func (s *PGStore) SetBookingStatus(ctx context.Context, db platform.DBTX, entity
 		return Booking{}, identity.ErrVersionConflict
 	}
 	if !b.CanTransition(to) {
-		return Booking{}, errors.New("booking: illegal transition")
+		return Booking{}, fmt.Errorf("booking: illegal transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_bookings SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$4 AND row_version=$3`, to, id, rowVersion, entityID)
@@ -193,13 +194,13 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
 func (m *MemoryStore) CreateResource(_ context.Context, _ platform.DBTX, r *Resource) error {
 	if err := r.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.resources {
 		if e.EntityID == r.EntityID && e.Code == r.Code {
-			return errors.New("booking: duplicate resource code")
+			return fmt.Errorf("booking: duplicate resource code: %w", platform.ErrConflict)
 		}
 	}
 	r.ID = m.next()
@@ -232,16 +233,16 @@ func (m *MemoryStore) ListResources(_ context.Context, _ platform.DBTX, entityID
 
 func (m *MemoryStore) CreateBooking(_ context.Context, _ platform.DBTX, b *Booking) error {
 	if err := b.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	res, ok := m.resources[b.ResourceID]
 	if !ok || res.EntityID != b.EntityID {
-		return errors.New("booking: resource not found")
+		return fmt.Errorf("booking: resource not found: %w", platform.ErrNotFound)
 	}
 	if res.Status != ResourceActive {
-		return errors.New("booking: resource inactive")
+		return fmt.Errorf("booking: resource inactive: %w", platform.ErrValidation)
 	}
 	var live []Booking
 	for _, o := range m.bookings {
@@ -250,7 +251,7 @@ func (m *MemoryStore) CreateBooking(_ context.Context, _ platform.DBTX, b *Booki
 		}
 	}
 	if err := FitsCapacity(res.Capacity, live, *b); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	b.ID = m.next()
 	b.RowVersion = 1
@@ -291,7 +292,7 @@ func (m *MemoryStore) SetBookingStatus(_ context.Context, _ platform.DBTX, entit
 		return Booking{}, identity.ErrVersionConflict
 	}
 	if !b.CanTransition(to) {
-		return Booking{}, errors.New("booking: illegal transition")
+		return Booking{}, fmt.Errorf("booking: illegal transition: %w", platform.ErrValidation)
 	}
 	b.Status = to
 	b.RowVersion++

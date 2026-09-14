@@ -3,6 +3,7 @@ package documentsvc
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/jackc/pgx/v5"
@@ -17,7 +18,7 @@ func NewPGStore(pool *pgxpool.Pool) *PGStore { return &PGStore{pool: pool} }
 
 func (s *PGStore) Create(ctx context.Context, db platform.DBTX, d *Document) error {
 	if err := d.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_files
 		(entity_id, scope, object_id, name, mime, size, sha256, storage_key, created_by)
@@ -33,7 +34,7 @@ func (s *PGStore) ByID(ctx context.Context, db platform.DBTX, entityID int64, id
 		Scan(&d.ID, &d.EntityID, &d.Scope, &d.ObjectID, &d.Name, &d.MIME, &d.Size,
 			&d.SHA256, &d.StorageKey, &d.CreatedAt, &d.CreatedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Document{}, errors.New("documentsvc: not found")
+		return Document{}, fmt.Errorf("documentsvc: not found: %w", platform.ErrNotFound)
 	}
 	return d, err
 }

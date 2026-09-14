@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -42,13 +43,13 @@ type Article struct {
 // Validate checks article invariants.
 func (a Article) Validate() error {
 	if a.EntityID <= 0 {
-		return errors.New("kb: entity_id required")
+		return fmt.Errorf("kb: entity_id required: %w", platform.ErrValidation)
 	}
 	if strings.TrimSpace(a.Slug) == "" {
-		return errors.New("kb: slug required")
+		return fmt.Errorf("kb: slug required: %w", platform.ErrValidation)
 	}
 	if strings.TrimSpace(a.Title) == "" {
-		return errors.New("kb: title required")
+		return fmt.Errorf("kb: title required: %w", platform.ErrValidation)
 	}
 	return nil
 }
@@ -96,7 +97,7 @@ func scanArticle(row pgx.Row) (Article, error) {
 
 func (s *PGStore) CreateArticle(ctx context.Context, db platform.DBTX, a *Article) error {
 	if err := a.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	tags, _ := json.Marshal(a.Tags)
 	if tags == nil {
@@ -123,10 +124,10 @@ func (s *PGStore) UpdateArticle(ctx context.Context, db platform.DBTX, entityID 
 		return Article{}, identity.ErrVersionConflict
 	}
 	if a.Status != ArticleDraft {
-		return Article{}, errors.New("kb: only drafts are editable")
+		return Article{}, fmt.Errorf("kb: only drafts are editable: %w", platform.ErrValidation)
 	}
 	if strings.TrimSpace(title) == "" {
-		return Article{}, errors.New("kb: title required")
+		return Article{}, fmt.Errorf("kb: title required: %w", platform.ErrValidation)
 	}
 	raw, _ := json.Marshal(tags)
 	if raw == nil {
@@ -180,7 +181,7 @@ func (s *PGStore) SetArticleStatus(ctx context.Context, db platform.DBTX, entity
 		return Article{}, identity.ErrVersionConflict
 	}
 	if !a.CanTransition(to) {
-		return Article{}, errors.New("kb: illegal transition")
+		return Article{}, fmt.Errorf("kb: illegal transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_articles SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
@@ -231,13 +232,13 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
 func (m *MemoryStore) CreateArticle(_ context.Context, _ platform.DBTX, a *Article) error {
 	if err := a.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.articles {
 		if e.EntityID == a.EntityID && e.Slug == a.Slug {
-			return errors.New("kb: duplicate slug")
+			return fmt.Errorf("kb: duplicate slug: %w", platform.ErrConflict)
 		}
 	}
 	a.ID = m.next()
@@ -267,10 +268,10 @@ func (m *MemoryStore) UpdateArticle(_ context.Context, _ platform.DBTX, entityID
 		return Article{}, identity.ErrVersionConflict
 	}
 	if a.Status != ArticleDraft {
-		return Article{}, errors.New("kb: only drafts are editable")
+		return Article{}, fmt.Errorf("kb: only drafts are editable: %w", platform.ErrValidation)
 	}
 	if strings.TrimSpace(title) == "" {
-		return Article{}, errors.New("kb: title required")
+		return Article{}, fmt.Errorf("kb: title required: %w", platform.ErrValidation)
 	}
 	a.Title = title
 	a.Body = body
@@ -310,7 +311,7 @@ func (m *MemoryStore) SetArticleStatus(_ context.Context, _ platform.DBTX, entit
 		return Article{}, identity.ErrVersionConflict
 	}
 	if !a.CanTransition(to) {
-		return Article{}, errors.New("kb: illegal transition")
+		return Article{}, fmt.Errorf("kb: illegal transition: %w", platform.ErrValidation)
 	}
 	a.Status = to
 	a.RowVersion++

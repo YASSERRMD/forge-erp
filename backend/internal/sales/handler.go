@@ -4,13 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
@@ -58,23 +56,21 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
 func yearMonth() string { return time.Now().UTC().Format("200601") }
 
 // CreateDoc creates a draft document (refs assigned server-side; totals computed).
 func (h *Handler) CreateDoc(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var d Document
 	if err := decode(r, &d); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	d.ID, d.Ref, d.Status, d.EntityID = 0, "", 0, entityOf(r)
+	d.ID, d.Ref, d.Status, d.EntityID = 0, "", 0, entityID
 	if d.Currency == "" {
 		d.Currency = "USD"
 	}
@@ -82,7 +78,7 @@ func (h *Handler) CreateDoc(w http.ResponseWriter, r *http.Request) {
 		d.RateToBase = 1000000
 	}
 	if err := h.deps.Store.CreateDoc(r.Context(), h.deps.DB, &d, yearMonth()); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, d)
@@ -90,13 +86,18 @@ func (h *Handler) CreateDoc(w http.ResponseWriter, r *http.Request) {
 
 // ListDocs pages documents of one family.
 func (h *Handler) ListDocs(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	t := documents.DocType(r.URL.Query().Get("type"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	list, err := h.deps.Store.ListDocs(r.Context(), h.deps.DB, entityOf(r), t, limit, offset)
+	list, err := h.deps.Store.ListDocs(r.Context(), h.deps.DB, entityID, t, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -115,6 +116,11 @@ func (h *Handler) GetDoc(w http.ResponseWriter, r *http.Request) {
 
 // UpdateDoc replaces a DRAFT document's lines (validated docs immutable — 422).
 func (h *Handler) UpdateDoc(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	d, ok := h.load(w, r)
 	if !ok {
 		return
@@ -130,22 +136,27 @@ func (h *Handler) UpdateDoc(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	upd, err := h.deps.Store.UpdateDocLines(r.Context(), h.deps.DB, entityOf(r), d.ID, body.Lines)
+	upd, err := h.deps.Store.UpdateDocLines(r.Context(), h.deps.DB, entityID, d.ID, body.Lines)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, upd)
 }
 
 func (h *Handler) load(w http.ResponseWriter, r *http.Request) (Document, bool) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return Document{}, false
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return Document{}, false
 	}
-	d, err := h.deps.Store.DocByID(r.Context(), h.deps.DB, entityOf(r), id)
-	if err != nil || d.EntityID != entityOf(r) {
+	d, err := h.deps.Store.DocByID(r.Context(), h.deps.DB, entityID, id)
+	if err != nil || d.EntityID != entityID {
 		writeErr(w, http.StatusNotFound, "document not found")
 		return Document{}, false
 	}
@@ -154,6 +165,11 @@ func (h *Handler) load(w http.ResponseWriter, r *http.Request) (Document, bool) 
 
 // SetStatus applies a kernel-checked transition.
 func (h *Handler) SetStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -166,9 +182,9 @@ func (h *Handler) SetStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	d, err := h.deps.Store.SetStatus(r.Context(), h.deps.DB, entityOf(r), id, req.To)
+	d, err := h.deps.Store.SetStatus(r.Context(), h.deps.DB, entityID, id, req.To)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	if h.deps.Bus != nil {
@@ -180,6 +196,11 @@ func (h *Handler) SetStatus(w http.ResponseWriter, r *http.Request) {
 
 // ConvertDoc clones a document into the next family with lineage.
 func (h *Handler) ConvertDoc(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	src, ok := h.load(w, r)
 	if !ok {
 		return
@@ -196,10 +217,10 @@ func (h *Handler) ConvertDoc(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	next.EntityID = entityOf(r)
+	next.EntityID = entityID
 	out := &next
 	if err := h.deps.Store.CreateDoc(r.Context(), h.deps.DB, out, yearMonth()); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, out)
@@ -215,6 +236,11 @@ type paymentRequest struct {
 
 // RecordPayment records a payment and allocates it across invoices.
 func (h *Handler) RecordPayment(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var req paymentRequest
 	if err := decode(r, &req); err != nil || req.Amount <= 0 || len(req.InvoiceIDs) == 0 {
 		writeErr(w, http.StatusBadRequest, "amount and invoice_ids required")
@@ -226,11 +252,11 @@ func (h *Handler) RecordPayment(w http.ResponseWriter, r *http.Request) {
 	if req.Method == "" {
 		req.Method = "transfer"
 	}
-	p := &Payment{EntityID: entityOf(r), OrgID: req.OrgID, Amount: req.Amount,
+	p := &Payment{EntityID: entityID, OrgID: req.OrgID, Amount: req.Amount,
 		Currency: req.Currency, Method: req.Method, PaidAt: time.Now().UTC()}
 	applied, err := h.deps.Store.RecordPayment(r.Context(), h.deps.DB, p, req.InvoiceIDs, yearMonth())
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"payment": p, "applied": applied})
@@ -245,6 +271,11 @@ type fulfillLine struct {
 // Fulfill posts stock shipments for a validated shipment (Phase 05 integration:
 // each line becomes a catalog shipment movement; oversell → 422).
 func (h *Handler) Fulfill(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	d, ok := h.load(w, r)
 	if !ok {
 		return
@@ -269,40 +300,28 @@ func (h *Handler) Fulfill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, l := range req.Lines {
-		m := catalog.StockMovement{EntityID: entityOf(r), ProductID: l.ProductID,
+		m := catalog.StockMovement{EntityID: entityID, ProductID: l.ProductID,
 			WarehouseID: l.WarehouseID, Qty: -l.Qty, Reason: catalog.ReasonShipment, Ref: d.Ref}
 		if _, err := h.deps.Catalog.AppendMovement(r.Context(), h.deps.DB, &m, false); err != nil {
-			writeErr(w, storeErrorCode(err), err.Error())
+			platform.WriteError(w, err)
 			return
 		}
 	}
-	closed, err := h.deps.Store.SetStatus(r.Context(), h.deps.DB, entityOf(r), d.ID, ShipmentClosed)
+	closed, err := h.deps.Store.SetStatus(r.Context(), h.deps.DB, entityID, d.ID, ShipmentClosed)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, closed)
 }
 
-func storeErrorCode(err error) int {
-	switch {
-	case err == nil:
-		return http.StatusOK
-	case strings.Contains(err.Error(), "not found"):
-		return http.StatusNotFound
-	case strings.Contains(err.Error(), "conflict"):
-		return http.StatusConflict
-	case strings.Contains(err.Error(), "overpayment"):
-		return http.StatusUnprocessableEntity
-	case strings.Contains(err.Error(), "illegal transition"):
-		return http.StatusUnprocessableEntity
-	default:
-		return http.StatusUnprocessableEntity
-	}
-}
-
 // CreateCreditNote clones an invoice's lines into a draft credit note.
 func (h *Handler) CreateCreditNote(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var req struct {
 		InvoiceID int64 `json:"invoice_id"`
 	}
@@ -310,9 +329,9 @@ func (h *Handler) CreateCreditNote(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invoice_id required")
 		return
 	}
-	src, err := h.deps.Store.DocByID(r.Context(), h.deps.DB, entityOf(r), req.InvoiceID)
+	src, err := h.deps.Store.DocByID(r.Context(), h.deps.DB, entityID, req.InvoiceID)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	if src.Type != documents.TypeInvoice {
@@ -323,7 +342,7 @@ func (h *Handler) CreateCreditNote(w http.ResponseWriter, r *http.Request) {
 		OrgID: src.OrgID, Currency: src.Currency, RateToBase: src.RateToBase,
 		SourceType: documents.TypeInvoice, SourceID: src.ID, Lines: src.Lines}
 	if err := h.deps.Store.CreateDoc(r.Context(), h.deps.DB, credit, yearMonth()); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, credit)
@@ -331,6 +350,11 @@ func (h *Handler) CreateCreditNote(w http.ResponseWriter, r *http.Request) {
 
 // ApplyCredit allocates a validated credit note against an invoice balance.
 func (h *Handler) ApplyCredit(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -344,13 +368,13 @@ func (h *Handler) ApplyCredit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invoice_id and amount required")
 		return
 	}
-	if err := h.deps.Store.ApplyCredit(r.Context(), h.deps.DB, entityOf(r), req.InvoiceID, id, req.Amount); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+	if err := h.deps.Store.ApplyCredit(r.Context(), h.deps.DB, entityID, req.InvoiceID, id, req.Amount); err != nil {
+		platform.WriteError(w, err)
 		return
 	}
-	bal, err := h.deps.Store.InvoiceBalance(r.Context(), h.deps.DB, entityOf(r), req.InvoiceID)
+	bal, err := h.deps.Store.InvoiceBalance(r.Context(), h.deps.DB, entityID, req.InvoiceID)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int64{"invoice_id": req.InvoiceID, "balance": bal})

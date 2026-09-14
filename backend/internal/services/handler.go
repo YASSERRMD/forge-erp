@@ -3,12 +3,9 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/go-chi/chi/v5"
 )
@@ -69,30 +66,6 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
-func storeErrorCode(err error) int {
-	switch {
-	case errors.Is(err, identity.ErrNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, identity.ErrVersionConflict):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "duplicate"):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "not found"):
-		return http.StatusNotFound
-	case err != nil && strings.Contains(err.Error(), "conflict"):
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
-}
-
 func pathID(r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, name), 10, 64)
 	if err != nil || id <= 0 {
@@ -127,26 +100,36 @@ type statusIn struct {
 
 // CreateProject opens a draft project (422 on validation/duplicate ref).
 func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var p Project
 	if err := decode(r, &p); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	p.ID = 0
-	p.EntityID = entityOf(r)
+	p.EntityID = entityID
 	p.Status = ProjectDraft
 	if err := h.deps.Store.CreateProject(r.Context(), h.deps.DB, &p); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.services.project.created.v1", "project", p.ID)
+	h.publish(r.Context(), entityID, "forgeerp.services.project.created.v1", "project", p.ID)
 	writeJSON(w, http.StatusCreated, p)
 }
 
 // ListProjects pages projects within the caller's entity.
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	limit, offset := page(r)
-	list, err := h.deps.Store.ListProjects(r.Context(), h.deps.DB, entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListProjects(r.Context(), h.deps.DB, entityID, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -156,14 +139,19 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 
 // GetProject fetches one project.
 func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	p, err := h.deps.Store.ProjectByID(r.Context(), h.deps.DB, entityOf(r), id)
+	p, err := h.deps.Store.ProjectByID(r.Context(), h.deps.DB, entityID, id)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
@@ -171,6 +159,11 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 
 // SetProjectStatus moves a project along its state machine.
 func (h *Handler) SetProjectStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -181,17 +174,22 @@ func (h *Handler) SetProjectStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	p, err := h.deps.Store.SetProjectStatus(r.Context(), h.deps.DB, entityOf(r), id, ProjectStatus(in.Status), in.RowVersion)
+	p, err := h.deps.Store.SetProjectStatus(r.Context(), h.deps.DB, entityID, id, ProjectStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.services.project.status.v1", "project", p.ID)
+	h.publish(r.Context(), entityID, "forgeerp.services.project.status.v1", "project", p.ID)
 	writeJSON(w, http.StatusOK, p)
 }
 
 // CreateTask adds a task to an open project.
 func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	pid, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -203,14 +201,14 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t.ID = 0
-	t.EntityID = entityOf(r)
+	t.EntityID = entityID
 	t.ProjectID = pid
 	t.Status = TaskTodo
 	if err := h.deps.Store.CreateTask(r.Context(), h.deps.DB, &t); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.services.task.created.v1", "task", t.ID)
+	h.publish(r.Context(), entityID, "forgeerp.services.task.created.v1", "task", t.ID)
 	writeJSON(w, http.StatusCreated, t)
 }
 
@@ -231,6 +229,11 @@ func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 
 // SetTaskStatus moves a task along its state machine.
 func (h *Handler) SetTaskStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -241,9 +244,9 @@ func (h *Handler) SetTaskStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	t, err := h.deps.Store.SetTaskStatus(r.Context(), h.deps.DB, entityOf(r), id, TaskStatus(in.Status), in.RowVersion)
+	t, err := h.deps.Store.SetTaskStatus(r.Context(), h.deps.DB, entityID, id, TaskStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
@@ -251,6 +254,11 @@ func (h *Handler) SetTaskStatus(w http.ResponseWriter, r *http.Request) {
 
 // AddTime books hours against an open task.
 func (h *Handler) AddTime(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	tid, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -262,10 +270,10 @@ func (h *Handler) AddTime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e.ID = 0
-	e.EntityID = entityOf(r)
+	e.EntityID = entityID
 	e.TaskID = tid
 	if err := h.deps.Store.AddTime(r.Context(), h.deps.DB, &e); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, e)
@@ -303,24 +311,34 @@ func (h *Handler) ProjectHours(w http.ResponseWriter, r *http.Request) {
 
 // CreateContract opens a draft service contract.
 func (h *Handler) CreateContract(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var c ServiceContract
 	if err := decode(r, &c); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	c.ID = 0
-	c.EntityID = entityOf(r)
+	c.EntityID = entityID
 	c.Status = ContractDraft
 	if err := h.deps.Store.CreateContract(r.Context(), h.deps.DB, &c); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.services.contract.created.v1", "contract", c.ID)
+	h.publish(r.Context(), entityID, "forgeerp.services.contract.created.v1", "contract", c.ID)
 	writeJSON(w, http.StatusCreated, c)
 }
 
 // SetContractStatus moves a contract along its state machine.
 func (h *Handler) SetContractStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -331,9 +349,9 @@ func (h *Handler) SetContractStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	c, err := h.deps.Store.SetContractStatus(r.Context(), h.deps.DB, entityOf(r), id, ContractStatus(in.Status), in.RowVersion)
+	c, err := h.deps.Store.SetContractStatus(r.Context(), h.deps.DB, entityID, id, ContractStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, c)
@@ -341,8 +359,13 @@ func (h *Handler) SetContractStatus(w http.ResponseWriter, r *http.Request) {
 
 // ListContracts pages contracts within the caller's entity.
 func (h *Handler) ListContracts(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	limit, offset := page(r)
-	list, err := h.deps.Store.ListContracts(r.Context(), h.deps.DB, entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListContracts(r.Context(), h.deps.DB, entityID, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -367,26 +390,36 @@ func (h *Handler) ContractsOfOrg(w http.ResponseWriter, r *http.Request) {
 
 // CreateIntervention schedules a field intervention.
 func (h *Handler) CreateIntervention(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var in Intervention
 	if err := decode(r, &in); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	in.ID = 0
-	in.EntityID = entityOf(r)
+	in.EntityID = entityID
 	in.Status = InterventionScheduled
 	if err := h.deps.Store.CreateIntervention(r.Context(), h.deps.DB, &in); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.services.intervention.created.v1", "intervention", in.ID)
+	h.publish(r.Context(), entityID, "forgeerp.services.intervention.created.v1", "intervention", in.ID)
 	writeJSON(w, http.StatusCreated, in)
 }
 
 // ListInterventions pages interventions within the caller's entity.
 func (h *Handler) ListInterventions(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	limit, offset := page(r)
-	list, err := h.deps.Store.ListInterventions(r.Context(), h.deps.DB, entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListInterventions(r.Context(), h.deps.DB, entityID, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -396,6 +429,11 @@ func (h *Handler) ListInterventions(w http.ResponseWriter, r *http.Request) {
 
 // SetInterventionStatus moves an intervention along its state machine.
 func (h *Handler) SetInterventionStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -406,9 +444,9 @@ func (h *Handler) SetInterventionStatus(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	upd, err := h.deps.Store.SetInterventionStatus(r.Context(), h.deps.DB, entityOf(r), id, InterventionStatus(in.Status), in.RowVersion)
+	upd, err := h.deps.Store.SetInterventionStatus(r.Context(), h.deps.DB, entityID, id, InterventionStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, upd)
@@ -416,26 +454,36 @@ func (h *Handler) SetInterventionStatus(w http.ResponseWriter, r *http.Request) 
 
 // CreateTicket opens a ticket.
 func (h *Handler) CreateTicket(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var t Ticket
 	if err := decode(r, &t); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	t.ID = 0
-	t.EntityID = entityOf(r)
+	t.EntityID = entityID
 	t.Status = TicketOpen
 	if err := h.deps.Store.CreateTicket(r.Context(), h.deps.DB, &t); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.services.ticket.created.v1", "ticket", t.ID)
+	h.publish(r.Context(), entityID, "forgeerp.services.ticket.created.v1", "ticket", t.ID)
 	writeJSON(w, http.StatusCreated, t)
 }
 
 // ListTickets pages tickets within the caller's entity.
 func (h *Handler) ListTickets(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	limit, offset := page(r)
-	list, err := h.deps.Store.ListTickets(r.Context(), h.deps.DB, entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListTickets(r.Context(), h.deps.DB, entityID, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -445,14 +493,19 @@ func (h *Handler) ListTickets(w http.ResponseWriter, r *http.Request) {
 
 // GetTicket fetches one ticket.
 func (h *Handler) GetTicket(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	t, err := h.deps.Store.TicketByID(r.Context(), h.deps.DB, entityOf(r), id)
+	t, err := h.deps.Store.TicketByID(r.Context(), h.deps.DB, entityID, id)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
@@ -460,6 +513,11 @@ func (h *Handler) GetTicket(w http.ResponseWriter, r *http.Request) {
 
 // SetTicketStatus moves a ticket along its state machine.
 func (h *Handler) SetTicketStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -470,9 +528,9 @@ func (h *Handler) SetTicketStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	t, err := h.deps.Store.SetTicketStatus(r.Context(), h.deps.DB, entityOf(r), id, TicketStatus(in.Status), in.RowVersion)
+	t, err := h.deps.Store.SetTicketStatus(r.Context(), h.deps.DB, entityID, id, TicketStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
@@ -480,6 +538,11 @@ func (h *Handler) SetTicketStatus(w http.ResponseWriter, r *http.Request) {
 
 // AddMessage appends a helpdesk message to an open ticket.
 func (h *Handler) AddMessage(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	tid, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -491,10 +554,10 @@ func (h *Handler) AddMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m.ID = 0
-	m.EntityID = entityOf(r)
+	m.EntityID = entityID
 	m.TicketID = tid
 	if err := h.deps.Store.AddMessage(r.Context(), h.deps.DB, &m); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, m)

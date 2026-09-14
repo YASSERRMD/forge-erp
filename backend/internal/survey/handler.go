@@ -3,12 +3,9 @@ package survey
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/go-chi/chi/v5"
 )
@@ -55,30 +52,6 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
-func storeErrorCode(err error) int {
-	switch {
-	case errors.Is(err, identity.ErrNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, identity.ErrVersionConflict):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "duplicate"):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "not found"):
-		return http.StatusNotFound
-	case err != nil && strings.Contains(err.Error(), "conflict"):
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
-}
-
 func pathID(r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, name), 10, 64)
 	if err != nil || id <= 0 {
@@ -101,25 +74,35 @@ type statusIn struct {
 
 // CreateSurvey opens a draft survey.
 func (h *Handler) CreateSurvey(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var s Survey
 	if err := decode(r, &s); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	s.ID = 0
-	s.EntityID = entityOf(r)
+	s.EntityID = entityID
 	s.Status = SurveyDraft
 	if err := h.deps.Store.CreateSurvey(r.Context(), h.deps.DB, &s); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.survey.created.v1", "survey", s.ID)
+	h.publish(r.Context(), entityID, "forgeerp.survey.created.v1", "survey", s.ID)
 	writeJSON(w, http.StatusCreated, s)
 }
 
 // ListSurveys lists surveys within the caller's entity.
 func (h *Handler) ListSurveys(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListSurveys(r.Context(), h.deps.DB, entityOf(r))
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	list, err := h.deps.Store.ListSurveys(r.Context(), h.deps.DB, entityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -129,6 +112,11 @@ func (h *Handler) ListSurveys(w http.ResponseWriter, r *http.Request) {
 
 // SetSurveyStatus opens or closes a survey.
 func (h *Handler) SetSurveyStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -139,9 +127,9 @@ func (h *Handler) SetSurveyStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	s, err := h.deps.Store.SetSurveyStatus(r.Context(), h.deps.DB, entityOf(r), id, SurveyStatus(in.Status), in.RowVersion)
+	s, err := h.deps.Store.SetSurveyStatus(r.Context(), h.deps.DB, entityID, id, SurveyStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, s)
@@ -149,6 +137,11 @@ func (h *Handler) SetSurveyStatus(w http.ResponseWriter, r *http.Request) {
 
 // AddQuestion appends a question to a draft survey.
 func (h *Handler) AddQuestion(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	sid, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -160,10 +153,10 @@ func (h *Handler) AddQuestion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q.ID = 0
-	q.EntityID = entityOf(r)
+	q.EntityID = entityID
 	q.SurveyID = sid
 	if err := h.deps.Store.AddQuestion(r.Context(), h.deps.DB, &q); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, q)
@@ -171,12 +164,17 @@ func (h *Handler) AddQuestion(w http.ResponseWriter, r *http.Request) {
 
 // ListQuestions lists a survey's questions.
 func (h *Handler) ListQuestions(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	sid, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.QuestionsOf(r.Context(), h.deps.DB, entityOf(r), sid)
+	list, err := h.deps.Store.QuestionsOf(r.Context(), h.deps.DB, entityID, sid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -186,6 +184,11 @@ func (h *Handler) ListQuestions(w http.ResponseWriter, r *http.Request) {
 
 // AddOption appends an answer choice.
 func (h *Handler) AddOption(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	qid, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -197,10 +200,10 @@ func (h *Handler) AddOption(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	o.ID = 0
-	o.EntityID = entityOf(r)
+	o.EntityID = entityID
 	o.QuestionID = qid
 	if err := h.deps.Store.AddOption(r.Context(), h.deps.DB, &o); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, o)
@@ -208,12 +211,17 @@ func (h *Handler) AddOption(w http.ResponseWriter, r *http.Request) {
 
 // ListOptions lists a question's choices.
 func (h *Handler) ListOptions(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	qid, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.OptionsOf(r.Context(), h.deps.DB, entityOf(r), qid)
+	list, err := h.deps.Store.OptionsOf(r.Context(), h.deps.DB, entityID, qid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -223,6 +231,11 @@ func (h *Handler) ListOptions(w http.ResponseWriter, r *http.Request) {
 
 // CastVote records or replaces one ballot.
 func (h *Handler) CastVote(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	qid, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -234,10 +247,10 @@ func (h *Handler) CastVote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v.ID = 0
-	v.EntityID = entityOf(r)
+	v.EntityID = entityID
 	v.QuestionID = qid
 	if err := h.deps.Store.CastVote(r.Context(), h.deps.DB, &v); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, v)
@@ -245,14 +258,19 @@ func (h *Handler) CastVote(w http.ResponseWriter, r *http.Request) {
 
 // Results serves the vote tally for a question.
 func (h *Handler) Results(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	qid, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	tally, err := h.deps.Store.Results(r.Context(), h.deps.DB, entityOf(r), qid)
+	tally, err := h.deps.Store.Results(r.Context(), h.deps.DB, entityID, qid)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, tally)

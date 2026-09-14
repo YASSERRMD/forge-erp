@@ -99,11 +99,11 @@ func nextRefLocked(ctx context.Context, db platform.DBTX, entityID int64, t docu
 
 func (s *PGStore) CreateDoc(ctx context.Context, db platform.DBTX, d *Document, yearMonth string) error {
 	if err := d.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	tot, err := documents.Sum(d.Lines)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	tx, finish, err := platform.JoinTx(ctx, s.pool, db)
 	if err != nil {
@@ -182,7 +182,7 @@ func (s *PGStore) SetStatus(ctx context.Context, db platform.DBTX, entityID, id 
 		return Document{}, err
 	}
 	if err := d.MoveTo(to); err != nil {
-		return Document{}, err
+		return Document{}, fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_documents SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, d.RowVersion)
@@ -201,11 +201,11 @@ func (s *PGStore) SetStatus(ctx context.Context, db platform.DBTX, entityID, id 
 // Non-draft documents are rejected (validated docs are API-immutable).
 func (s *PGStore) UpdateDocLines(ctx context.Context, db platform.DBTX, entityID, id int64, lines []documents.Line) (Document, error) {
 	if len(lines) == 0 {
-		return Document{}, errors.New("sales: document requires at least one line")
+		return Document{}, fmt.Errorf("sales: document requires at least one line: %w", platform.ErrValidation)
 	}
 	tot, err := documents.Sum(lines)
 	if err != nil {
-		return Document{}, err
+		return Document{}, fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	tx, finish, err := platform.JoinTx(ctx, s.pool, db)
 	if err != nil {
@@ -219,7 +219,7 @@ func (s *PGStore) UpdateDocLines(ctx context.Context, db platform.DBTX, entityID
 		return Document{}, finish(err)
 	}
 	if status != 0 {
-		return Document{}, finish(errors.New("sales: only draft documents can be edited"))
+		return Document{}, finish(fmt.Errorf("sales: only draft documents can be edited: %w", platform.ErrValidation))
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM ferp_doc_lines WHERE doc_id=$1`, id); err != nil {
 		return Document{}, finish(err)
@@ -245,7 +245,7 @@ func (s *PGStore) UpdateDocLines(ctx context.Context, db platform.DBTX, entityID
 
 func (s *PGStore) RecordPayment(ctx context.Context, db platform.DBTX, p *Payment, invoiceIDs []int64, yearMonth string) ([]int64, error) {
 	if p.Amount <= 0 {
-		return nil, errors.New("sales: payment amount must be positive")
+		return nil, fmt.Errorf("sales: payment amount must be positive: %w", platform.ErrValidation)
 	}
 	tx, finish, err := platform.JoinTx(ctx, s.pool, db)
 	if err != nil {
@@ -256,7 +256,7 @@ func (s *PGStore) RecordPayment(ctx context.Context, db platform.DBTX, p *Paymen
 		var gross, paid int64
 		err := tx.QueryRow(ctx, `SELECT total_gross FROM ferp_documents WHERE id=$1 AND entity_id=$2 AND type='invoice'`, invID, p.EntityID).Scan(&gross)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, finish(fmt.Errorf("sales: invoice %d not found", invID))
+			return nil, finish(fmt.Errorf("sales: invoice %d not found: %w", invID, platform.ErrNotFound))
 		}
 		if err != nil {
 			return nil, finish(err)
@@ -264,15 +264,15 @@ func (s *PGStore) RecordPayment(ctx context.Context, db platform.DBTX, p *Paymen
 		_ = tx.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0) FROM ferp_payment_allocations WHERE invoice_id=$1`, invID).Scan(&paid)
 		balances[i] = gross - paid
 		if balances[i] <= 0 {
-			return nil, finish(fmt.Errorf("sales: invoice %d already settled", invID))
+			return nil, finish(fmt.Errorf("sales: invoice %d already settled: %w", invID, platform.ErrValidation))
 		}
 	}
 	applied, rest, err := AllocateAcross(balances, p.Amount)
 	if err != nil {
-		return nil, finish(err)
+		return nil, finish(fmt.Errorf("%w: %w", err, platform.ErrValidation))
 	}
 	if rest != 0 {
-		return nil, finish(fmt.Errorf("sales: overpayment refused (unapplied %d)", rest))
+		return nil, finish(fmt.Errorf("sales: overpayment refused (unapplied %d): %w", rest, platform.ErrValidation))
 	}
 	var seq int64
 	err = tx.QueryRow(ctx, `INSERT INTO ferp_doc_counters (entity_id, type, year_month, next_seq)
@@ -334,7 +334,7 @@ func (s *PGStore) InvoiceBalance(ctx context.Context, db platform.DBTX, entityID
 // ApplyCredit allocates a validated credit note against an invoice balance.
 func (s *PGStore) ApplyCredit(ctx context.Context, db platform.DBTX, entityID, invoiceID, creditID, amount int64) error {
 	if amount <= 0 {
-		return errors.New("sales: credit amount must be positive")
+		return fmt.Errorf("sales: credit amount must be positive: %w", platform.ErrValidation)
 	}
 	var ctype string
 	var cstatus int16
@@ -347,17 +347,17 @@ func (s *PGStore) ApplyCredit(ctx context.Context, db platform.DBTX, entityID, i
 		return err
 	}
 	if ctype != string(documents.TypeCreditNote) || cstatus != 1 {
-		return errors.New("sales: credit note must be validated")
+		return fmt.Errorf("sales: credit note must be validated: %w", platform.ErrValidation)
 	}
 	bal, err := s.InvoiceBalance(ctx, db, entityID, invoiceID)
 	if err != nil {
 		return err
 	}
 	if amount > bal {
-		return fmt.Errorf("sales: credit %d exceeds balance %d", amount, bal)
+		return fmt.Errorf("sales: credit %d exceeds balance %d: %w", amount, bal, platform.ErrValidation)
 	}
 	if amount > ctotal {
-		return fmt.Errorf("sales: credit %d exceeds note total %d", amount, ctotal)
+		return fmt.Errorf("sales: credit %d exceeds note total %d: %w", amount, ctotal, platform.ErrValidation)
 	}
 	_, err = db.Exec(ctx, `INSERT INTO ferp_credit_allocations (invoice_id, credit_id, amount)
 		VALUES ($1,$2,$3) ON CONFLICT (invoice_id, credit_id)
@@ -394,11 +394,11 @@ func (m *MemoryStore) ref(entityID int64, kind, ym string) string {
 
 func (m *MemoryStore) CreateDoc(_ context.Context, _ platform.DBTX, d *Document, yearMonth string) error {
 	if err := d.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	tot, err := documents.Sum(d.Lines)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -447,7 +447,7 @@ func (m *MemoryStore) SetStatus(_ context.Context, _ platform.DBTX, entityID, id
 		return Document{}, identity.ErrNotFound
 	}
 	if err := d.MoveTo(to); err != nil {
-		return Document{}, err
+		return Document{}, fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	d.Status = to
 	d.RowVersion++
@@ -458,11 +458,11 @@ func (m *MemoryStore) SetStatus(_ context.Context, _ platform.DBTX, entityID, id
 // UpdateDocLines replaces a DRAFT document's lines with recomputed totals.
 func (m *MemoryStore) UpdateDocLines(_ context.Context, _ platform.DBTX, entityID, id int64, lines []documents.Line) (Document, error) {
 	if len(lines) == 0 {
-		return Document{}, errors.New("sales: document requires at least one line")
+		return Document{}, fmt.Errorf("sales: document requires at least one line: %w", platform.ErrValidation)
 	}
 	tot, err := documents.Sum(lines)
 	if err != nil {
-		return Document{}, err
+		return Document{}, fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -471,7 +471,7 @@ func (m *MemoryStore) UpdateDocLines(_ context.Context, _ platform.DBTX, entityI
 		return Document{}, identity.ErrNotFound
 	}
 	if d.Status != 0 {
-		return Document{}, errors.New("sales: only draft documents can be edited")
+		return Document{}, fmt.Errorf("sales: only draft documents can be edited: %w", platform.ErrValidation)
 	}
 	d.Lines = lines
 	d.Totals = tot
@@ -482,7 +482,7 @@ func (m *MemoryStore) UpdateDocLines(_ context.Context, _ platform.DBTX, entityI
 
 func (m *MemoryStore) RecordPayment(_ context.Context, _ platform.DBTX, p *Payment, invoiceIDs []int64, yearMonth string) ([]int64, error) {
 	if p.Amount <= 0 {
-		return nil, errors.New("sales: payment amount must be positive")
+		return nil, fmt.Errorf("sales: payment amount must be positive: %w", platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -490,19 +490,19 @@ func (m *MemoryStore) RecordPayment(_ context.Context, _ platform.DBTX, p *Payme
 	for i, invID := range invoiceIDs {
 		inv, ok := m.docs[invID]
 		if !ok || inv.EntityID != p.EntityID || inv.Type != documents.TypeInvoice {
-			return nil, fmt.Errorf("sales: invoice %d not found", invID)
+			return nil, fmt.Errorf("sales: invoice %d not found: %w", invID, platform.ErrNotFound)
 		}
 		balances[i] = inv.Totals.Gross - m.alloc[invID] - m.credited[invID]
 		if balances[i] <= 0 {
-			return nil, fmt.Errorf("sales: invoice %d already settled", invID)
+			return nil, fmt.Errorf("sales: invoice %d already settled: %w", invID, platform.ErrValidation)
 		}
 	}
 	applied, rest, err := AllocateAcross(balances, p.Amount)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	if rest != 0 {
-		return nil, fmt.Errorf("sales: overpayment refused (unapplied %d)", rest)
+		return nil, fmt.Errorf("sales: overpayment refused (unapplied %d): %w", rest, platform.ErrValidation)
 	}
 	p.ID = m.next()
 	p.Ref = m.ref(p.EntityID, "payment", yearMonth)
@@ -536,13 +536,13 @@ func (m *MemoryStore) InvoiceBalance(_ context.Context, _ platform.DBTX, entityI
 // ApplyCredit allocates a validated credit note against an invoice balance.
 func (m *MemoryStore) ApplyCredit(_ context.Context, _ platform.DBTX, entityID, invoiceID, creditID, amount int64) error {
 	if amount <= 0 {
-		return errors.New("sales: credit amount must be positive")
+		return fmt.Errorf("sales: credit amount must be positive: %w", platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cr, ok := m.docs[creditID]
 	if !ok || cr.EntityID != entityID || cr.Type != documents.TypeCreditNote || cr.Status != 1 {
-		return errors.New("sales: credit note must be validated")
+		return fmt.Errorf("sales: credit note must be validated: %w", platform.ErrValidation)
 	}
 	inv, ok := m.docs[invoiceID]
 	if !ok || inv.EntityID != entityID || inv.Type != documents.TypeInvoice {
@@ -550,10 +550,10 @@ func (m *MemoryStore) ApplyCredit(_ context.Context, _ platform.DBTX, entityID, 
 	}
 	bal := inv.Totals.Gross - m.alloc[invoiceID] - m.credited[invoiceID]
 	if amount > bal {
-		return fmt.Errorf("sales: credit %d exceeds balance %d", amount, bal)
+		return fmt.Errorf("sales: credit %d exceeds balance %d: %w", amount, bal, platform.ErrValidation)
 	}
 	if amount > cr.Totals.Gross {
-		return fmt.Errorf("sales: credit %d exceeds note total %d", amount, cr.Totals.Gross)
+		return fmt.Errorf("sales: credit %d exceeds note total %d: %w", amount, cr.Totals.Gross, platform.ErrValidation)
 	}
 	m.credited[invoiceID] += amount
 	return nil

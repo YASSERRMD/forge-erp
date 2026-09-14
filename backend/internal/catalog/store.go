@@ -161,7 +161,7 @@ func (s *PGStore) AppendMovement(ctx context.Context, db platform.DBTX, m *Stock
 	}
 	next, err := Apply(cur, *m, allowNegative)
 	if err != nil {
-		return StockLevel{}, finish(err)
+		return StockLevel{}, finish(fmt.Errorf("%w: %w", err, platform.ErrValidation))
 	}
 	if err := tx.QueryRow(ctx, `INSERT INTO ferp_stock_movements
 		(entity_id, product_id, warehouse_id, lot_id, qty, unit_cost, reason, ref, created_by)
@@ -215,13 +215,13 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
 func (m *MemoryStore) CreateProduct(_ context.Context, _ platform.DBTX, p *Product) error {
 	if err := p.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	k := skuKey(p.EntityID, p.SKU)
 	if _, dup := m.bySKU[k]; dup {
-		return errors.New("catalog: duplicate SKU")
+		return fmt.Errorf("catalog: duplicate SKU: %w", platform.ErrConflict)
 	}
 	p.ID = m.next()
 	p.RowVersion = 1
@@ -263,7 +263,7 @@ func (m *MemoryStore) ListProducts(_ context.Context, _ platform.DBTX, entityID 
 
 func (m *MemoryStore) CreateWarehouse(_ context.Context, _ platform.DBTX, w *Warehouse) error {
 	if err := w.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -300,7 +300,7 @@ func (m *MemoryStore) AppendMovement(_ context.Context, _ platform.DBTX, mov *St
 	k := [2]int64{mov.ProductID, mov.WarehouseID}
 	next, err := Apply(m.levels[k], *mov, allowNegative)
 	if err != nil {
-		return StockLevel{}, err
+		return StockLevel{}, fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	mov.ID = m.next()
 	m.moves = append(m.moves, *mov)
@@ -316,7 +316,7 @@ func (m *MemoryStore) Level(_ context.Context, _ platform.DBTX, productID, wareh
 
 func (m *MemoryStore) CreateLot(_ context.Context, _ platform.DBTX, l *Lot) error {
 	if err := l.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()

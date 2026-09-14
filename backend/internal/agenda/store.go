@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -50,7 +51,7 @@ func scanEvent(row pgx.Row) (Event, error) {
 
 func (s *PGStore) CreateEvent(ctx context.Context, db platform.DBTX, e *Event) error {
 	if err := e.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	att, _ := json.Marshal(e.Attendees)
 	if att == nil {
@@ -97,7 +98,7 @@ func (s *PGStore) SetEventStatus(ctx context.Context, db platform.DBTX, entityID
 		return Event{}, identity.ErrVersionConflict
 	}
 	if !e.CanTransition(to) {
-		return Event{}, errors.New("agenda: illegal transition")
+		return Event{}, fmt.Errorf("agenda: illegal transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_events SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$4 AND row_version=$3`, to, id, rowVersion, entityID)
@@ -182,7 +183,7 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
 func (m *MemoryStore) CreateEvent(_ context.Context, _ platform.DBTX, e *Event) error {
 	if err := e.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -232,7 +233,7 @@ func (m *MemoryStore) SetEventStatus(_ context.Context, _ platform.DBTX, entityI
 		return Event{}, identity.ErrVersionConflict
 	}
 	if !e.CanTransition(to) {
-		return Event{}, errors.New("agenda: illegal transition")
+		return Event{}, fmt.Errorf("agenda: illegal transition: %w", platform.ErrValidation)
 	}
 	e.Status = to
 	e.RowVersion++

@@ -48,7 +48,7 @@ func scanSurvey(row pgx.Row) (Survey, error) {
 
 func (s *PGStore) CreateSurvey(ctx context.Context, db platform.DBTX, sv *Survey) error {
 	if err := sv.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_surveys
 		(entity_id, title, description, status, created_by)
@@ -87,7 +87,7 @@ func (s *PGStore) SetSurveyStatus(ctx context.Context, db platform.DBTX, entityI
 		return Survey{}, identity.ErrVersionConflict
 	}
 	if !sv.CanTransition(to) {
-		return Survey{}, errors.New("survey: illegal transition")
+		return Survey{}, fmt.Errorf("survey: illegal transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_surveys SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$4 AND row_version=$3`, to, id, rowVersion, entityID)
@@ -104,14 +104,14 @@ func (s *PGStore) SetSurveyStatus(ctx context.Context, db platform.DBTX, entityI
 
 func (s *PGStore) AddQuestion(ctx context.Context, db platform.DBTX, q *Question) error {
 	if err := q.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	sv, err := s.SurveyByID(ctx, db, q.EntityID, q.SurveyID)
 	if err != nil {
 		return err
 	}
 	if sv.Status != SurveyDraft {
-		return errors.New("survey: questions editable on drafts only")
+		return fmt.Errorf("survey: questions editable on drafts only: %w", platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_survey_questions
 		(entity_id, survey_id, text, multi, position)
@@ -156,7 +156,7 @@ func (s *PGStore) questionByID(ctx context.Context, db platform.DBTX, entityID i
 
 func (s *PGStore) AddOption(ctx context.Context, db platform.DBTX, o *Option) error {
 	if err := o.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	if _, err := s.questionByID(ctx, db, o.EntityID, o.QuestionID); err != nil {
 		return err
@@ -189,7 +189,7 @@ func (s *PGStore) OptionsOf(ctx context.Context, db platform.DBTX, entityID int6
 // CastVote records or replaces one ballot (one per user per question).
 func (s *PGStore) CastVote(ctx context.Context, db platform.DBTX, v *Vote) error {
 	if err := v.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	q, err := s.questionByID(ctx, db, v.EntityID, v.QuestionID)
 	if err != nil {
@@ -200,7 +200,7 @@ func (s *PGStore) CastVote(ctx context.Context, db platform.DBTX, v *Vote) error
 		return err
 	}
 	if sv.Status != SurveyOpen {
-		return errors.New("survey: voting open on open surveys only")
+		return fmt.Errorf("survey: voting open on open surveys only: %w", platform.ErrValidation)
 	}
 	opts, err := s.OptionsOf(ctx, db, v.EntityID, q.ID)
 	if err != nil {
@@ -284,7 +284,7 @@ func ballotKey(entityID, questionID int64, user string) string {
 
 func (m *MemoryStore) CreateSurvey(_ context.Context, _ platform.DBTX, s *Survey) error {
 	if err := s.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -327,7 +327,7 @@ func (m *MemoryStore) SetSurveyStatus(_ context.Context, _ platform.DBTX, entity
 		return Survey{}, identity.ErrVersionConflict
 	}
 	if !s.CanTransition(to) {
-		return Survey{}, errors.New("survey: illegal transition")
+		return Survey{}, fmt.Errorf("survey: illegal transition: %w", platform.ErrValidation)
 	}
 	s.Status = to
 	s.RowVersion++
@@ -337,16 +337,16 @@ func (m *MemoryStore) SetSurveyStatus(_ context.Context, _ platform.DBTX, entity
 
 func (m *MemoryStore) AddQuestion(_ context.Context, _ platform.DBTX, q *Question) error {
 	if err := q.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sv, ok := m.surveys[q.SurveyID]
 	if !ok || sv.EntityID != q.EntityID {
-		return errors.New("survey: survey not found")
+		return fmt.Errorf("survey: survey not found: %w", platform.ErrNotFound)
 	}
 	if sv.Status != SurveyDraft {
-		return errors.New("survey: questions editable on drafts only")
+		return fmt.Errorf("survey: questions editable on drafts only: %w", platform.ErrValidation)
 	}
 	q.ID = m.next()
 	m.questions[q.ID] = *q
@@ -371,7 +371,7 @@ func (m *MemoryStore) QuestionsOf(_ context.Context, _ platform.DBTX, entityID i
 
 func (m *MemoryStore) AddOption(_ context.Context, _ platform.DBTX, o *Option) error {
 	if err := o.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -404,7 +404,7 @@ func (m *MemoryStore) OptionsOf(_ context.Context, _ platform.DBTX, entityID int
 
 func (m *MemoryStore) CastVote(_ context.Context, _ platform.DBTX, v *Vote) error {
 	if err := v.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -414,7 +414,7 @@ func (m *MemoryStore) CastVote(_ context.Context, _ platform.DBTX, v *Vote) erro
 	}
 	sv, ok := m.surveys[q.SurveyID]
 	if !ok || sv.EntityID != v.EntityID || sv.Status != SurveyOpen {
-		return errors.New("survey: voting open on open surveys only")
+		return fmt.Errorf("survey: voting open on open surveys only: %w", platform.ErrValidation)
 	}
 	valid := map[int64]bool{}
 	for _, o := range m.options {

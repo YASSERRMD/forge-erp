@@ -1,6 +1,7 @@
 package payments
 
 import (
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -16,7 +17,11 @@ import (
 )
 
 func passthrough(_, _, _ string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler { return next }
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(platform.ContextWithEntity(r.Context(), 1)))
+		})
+	}
 }
 
 func testRouter(secret string) http.Handler {
@@ -81,6 +86,10 @@ func TestIntentAndWebhookFlow(t *testing.T) {
 	post := func(body []byte, signature string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodPost, "/api/v1/payments/webhooks/stripe", bytes.NewReader(body))
 		r.Header.Set("Stripe-Signature", signature)
+		// The test harness stands in for the tenant-resolving edge: Stripe
+		// itself sends no tenant, so production must resolve it before the
+		// handler (which never defaults to entity 1).
+		r = r.WithContext(platform.ContextWithEntity(r.Context(), 1))
 		rr := httptest.NewRecorder()
 		h.ServeHTTP(rr, r)
 		return rr
@@ -111,6 +120,16 @@ func TestIntentAndWebhookFlow(t *testing.T) {
 	rec = post(payload, "t=1,v1=deadbeef")
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("bad signature: code=%d want 401", rec.Code)
+	}
+	// No resolvable tenant → 401 (never defaults to entity 1, even though
+	// the webhook carries no auth of its own).
+	bare := httptest.NewRequest(http.MethodPost, "/api/v1/payments/webhooks/stripe",
+		bytes.NewReader(payload))
+	bare.Header.Set("Stripe-Signature", sig)
+	barerec := httptest.NewRecorder()
+	h.ServeHTTP(barerec, bare)
+	if barerec.Code != http.StatusUnauthorized {
+		t.Fatalf("tenantless webhook: code=%d want 401", barerec.Code)
 	}
 }
 

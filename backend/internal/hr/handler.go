@@ -3,15 +3,12 @@ package hr
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/finance"
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
@@ -69,30 +66,6 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
-func storeErrorCode(err error) int {
-	switch {
-	case errors.Is(err, identity.ErrNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, identity.ErrVersionConflict):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "duplicate"):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "not found"):
-		return http.StatusNotFound
-	case err != nil && strings.Contains(err.Error(), "conflict"):
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
-}
-
 func pathID(r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, name), 10, 64)
 	if err != nil || id <= 0 {
@@ -128,26 +101,36 @@ type statusIn struct {
 
 // CreateLeave files a draft leave request (days server-computed).
 func (h *Handler) CreateLeave(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var l LeaveRequest
 	if err := decode(r, &l); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	l.ID = 0
-	l.EntityID = entityOf(r)
+	l.EntityID = entityID
 	l.Status = LeaveDraft
 	if err := h.deps.Store.CreateLeave(r.Context(), h.deps.DB, &l); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.hr.leave.created.v1", "leave", l.ID)
+	h.publish(r.Context(), entityID, "forgeerp.hr.leave.created.v1", "leave", l.ID)
 	writeJSON(w, http.StatusCreated, l)
 }
 
 // ListLeaves pages leave requests, optionally filtered by user.
 func (h *Handler) ListLeaves(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	limit, offset, user := page(r)
-	list, err := h.deps.Store.LeavesOf(r.Context(), h.deps.DB, entityOf(r), user, limit, offset)
+	list, err := h.deps.Store.LeavesOf(r.Context(), h.deps.DB, entityID, user, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -157,6 +140,11 @@ func (h *Handler) ListLeaves(w http.ResponseWriter, r *http.Request) {
 
 // SetLeaveStatus moves a leave request along its state machine.
 func (h *Handler) SetLeaveStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -167,9 +155,9 @@ func (h *Handler) SetLeaveStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	l, err := h.deps.Store.SetLeaveStatus(r.Context(), h.deps.DB, entityOf(r), id, LeaveStatus(in.Status), in.RowVersion)
+	l, err := h.deps.Store.SetLeaveStatus(r.Context(), h.deps.DB, entityID, id, LeaveStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, l)
@@ -177,26 +165,36 @@ func (h *Handler) SetLeaveStatus(w http.ResponseWriter, r *http.Request) {
 
 // CreateExpense opens a draft expense report.
 func (h *Handler) CreateExpense(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var rep ExpenseReport
 	if err := decode(r, &rep); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	rep.ID = 0
-	rep.EntityID = entityOf(r)
+	rep.EntityID = entityID
 	rep.Status = ExpenseDraft
 	if err := h.deps.Store.CreateExpense(r.Context(), h.deps.DB, &rep); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.hr.expense.created.v1", "expense", rep.ID)
+	h.publish(r.Context(), entityID, "forgeerp.hr.expense.created.v1", "expense", rep.ID)
 	writeJSON(w, http.StatusCreated, rep)
 }
 
 // ListExpenses pages expense reports, optionally filtered by user.
 func (h *Handler) ListExpenses(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	limit, offset, user := page(r)
-	list, err := h.deps.Store.ExpensesOf(r.Context(), h.deps.DB, entityOf(r), user, limit, offset)
+	list, err := h.deps.Store.ExpensesOf(r.Context(), h.deps.DB, entityID, user, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -206,6 +204,11 @@ func (h *Handler) ListExpenses(w http.ResponseWriter, r *http.Request) {
 
 // AddExpenseLine appends a line to a draft report (total recomputed).
 func (h *Handler) AddExpenseLine(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	rid, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -217,10 +220,10 @@ func (h *Handler) AddExpenseLine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	l.ID = 0
-	l.EntityID = entityOf(r)
+	l.EntityID = entityID
 	l.ReportID = rid
 	if err := h.deps.Store.AddExpenseLine(r.Context(), h.deps.DB, &l); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, l)
@@ -228,6 +231,11 @@ func (h *Handler) AddExpenseLine(w http.ResponseWriter, r *http.Request) {
 
 // SetExpenseStatus moves an expense report along its state machine.
 func (h *Handler) SetExpenseStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -238,9 +246,9 @@ func (h *Handler) SetExpenseStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	rep, err := h.deps.Store.SetExpenseStatus(r.Context(), h.deps.DB, entityOf(r), id, ExpenseStatus(in.Status), in.RowVersion)
+	rep, err := h.deps.Store.SetExpenseStatus(r.Context(), h.deps.DB, entityID, id, ExpenseStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rep)
@@ -257,6 +265,11 @@ type payExpenseIn struct {
 // flip and balanced ledger entry (debit expense, credit bank) commit
 // atomically. A ledger failure now rolls back instead of best-effort revert.
 func (h *Handler) PayExpense(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -276,36 +289,46 @@ func (h *Handler) PayExpense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	paid, err := h.svc.Pay(r.Context(), PayCmd{
-		EntityID: entityOf(r), ReportID: id, JournalID: in.JournalID,
+		EntityID: entityID, ReportID: id, JournalID: in.JournalID,
 		ExpenseAccount: in.ExpenseAccount, BankAccount: in.BankAccount, RowVersion: in.RowVersion})
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, paid)
 }
 // CreateSalary records a draft salary line (net must equal gross minus charges).
 func (h *Handler) CreateSalary(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var s Salary
 	if err := decode(r, &s); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	s.ID = 0
-	s.EntityID = entityOf(r)
+	s.EntityID = entityID
 	s.Status = SalaryDraft
 	if err := h.deps.Store.CreateSalary(r.Context(), h.deps.DB, &s); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.hr.salary.created.v1", "salary", s.ID)
+	h.publish(r.Context(), entityID, "forgeerp.hr.salary.created.v1", "salary", s.ID)
 	writeJSON(w, http.StatusCreated, s)
 }
 
 // ListSalaries lists salary records, optionally filtered by user.
 func (h *Handler) ListSalaries(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	_, _, user := page(r)
-	list, err := h.deps.Store.SalariesOf(r.Context(), h.deps.DB, entityOf(r), user)
+	list, err := h.deps.Store.SalariesOf(r.Context(), h.deps.DB, entityID, user)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -315,6 +338,11 @@ func (h *Handler) ListSalaries(w http.ResponseWriter, r *http.Request) {
 
 // SetSalaryStatus moves a salary record along its state machine.
 func (h *Handler) SetSalaryStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -325,9 +353,9 @@ func (h *Handler) SetSalaryStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	s, err := h.deps.Store.SetSalaryStatus(r.Context(), h.deps.DB, entityOf(r), id, SalaryStatus(in.Status), in.RowVersion)
+	s, err := h.deps.Store.SetSalaryStatus(r.Context(), h.deps.DB, entityID, id, SalaryStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, s)

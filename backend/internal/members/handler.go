@@ -3,12 +3,9 @@ package members
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/go-chi/chi/v5"
 )
@@ -57,30 +54,6 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
-func storeErrorCode(err error) int {
-	switch {
-	case errors.Is(err, identity.ErrNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, identity.ErrVersionConflict):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "duplicate"):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "not found"):
-		return http.StatusNotFound
-	case err != nil && strings.Contains(err.Error(), "conflict"):
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
-}
-
 func pathID(r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, name), 10, 64)
 	if err != nil || id <= 0 {
@@ -115,15 +88,20 @@ type statusIn struct {
 
 // CreateType registers a membership class.
 func (h *Handler) CreateType(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var t MemberType
 	if err := decode(r, &t); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	t.ID = 0
-	t.EntityID = entityOf(r)
+	t.EntityID = entityID
 	if err := h.deps.Store.CreateType(r.Context(), h.deps.DB, &t); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, t)
@@ -131,7 +109,12 @@ func (h *Handler) CreateType(w http.ResponseWriter, r *http.Request) {
 
 // ListTypes lists membership classes.
 func (h *Handler) ListTypes(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListTypes(r.Context(), h.deps.DB, entityOf(r))
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	list, err := h.deps.Store.ListTypes(r.Context(), h.deps.DB, entityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -141,26 +124,36 @@ func (h *Handler) ListTypes(w http.ResponseWriter, r *http.Request) {
 
 // CreateMember registers a draft member.
 func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var m Member
 	if err := decode(r, &m); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	m.ID = 0
-	m.EntityID = entityOf(r)
+	m.EntityID = entityID
 	m.Status = MemberDraft
 	if err := h.deps.Store.CreateMember(r.Context(), h.deps.DB, &m); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.members.created.v1", "member", m.ID)
+	h.publish(r.Context(), entityID, "forgeerp.members.created.v1", "member", m.ID)
 	writeJSON(w, http.StatusCreated, m)
 }
 
 // ListMembers pages members.
 func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	limit, offset := page(r)
-	list, err := h.deps.Store.ListMembers(r.Context(), h.deps.DB, entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListMembers(r.Context(), h.deps.DB, entityID, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -170,6 +163,11 @@ func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
 
 // SetMemberStatus moves a member along its lifecycle.
 func (h *Handler) SetMemberStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -180,9 +178,9 @@ func (h *Handler) SetMemberStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	m, err := h.deps.Store.SetMemberStatus(r.Context(), h.deps.DB, entityOf(r), id, MemberStatus(in.Status), in.RowVersion)
+	m, err := h.deps.Store.SetMemberStatus(r.Context(), h.deps.DB, entityID, id, MemberStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
@@ -190,6 +188,11 @@ func (h *Handler) SetMemberStatus(w http.ResponseWriter, r *http.Request) {
 
 // CreateSubscription opens a draft yearly subscription.
 func (h *Handler) CreateSubscription(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	mid, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -201,11 +204,11 @@ func (h *Handler) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.ID = 0
-	s.EntityID = entityOf(r)
+	s.EntityID = entityID
 	s.MemberID = mid
 	s.Status = SubDraft
 	if err := h.deps.Store.CreateSubscription(r.Context(), h.deps.DB, &s); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, s)
@@ -213,12 +216,17 @@ func (h *Handler) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 
 // ListSubscriptions lists a member's subscriptions.
 func (h *Handler) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	mid, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
 		return
 	}
-	list, err := h.deps.Store.SubscriptionsOf(r.Context(), h.deps.DB, entityOf(r), mid)
+	list, err := h.deps.Store.SubscriptionsOf(r.Context(), h.deps.DB, entityID, mid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -228,6 +236,11 @@ func (h *Handler) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
 
 // SetSubscriptionStatus moves a subscription along its flow.
 func (h *Handler) SetSubscriptionStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -238,9 +251,9 @@ func (h *Handler) SetSubscriptionStatus(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	s, err := h.deps.Store.SetSubscriptionStatus(r.Context(), h.deps.DB, entityOf(r), id, SubscriptionStatus(in.Status), in.RowVersion)
+	s, err := h.deps.Store.SetSubscriptionStatus(r.Context(), h.deps.DB, entityID, id, SubscriptionStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, s)
@@ -248,26 +261,36 @@ func (h *Handler) SetSubscriptionStatus(w http.ResponseWriter, r *http.Request) 
 
 // CreateDonation records a promised donation.
 func (h *Handler) CreateDonation(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var d Donation
 	if err := decode(r, &d); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	d.ID = 0
-	d.EntityID = entityOf(r)
+	d.EntityID = entityID
 	d.Status = DonationPromised
 	if err := h.deps.Store.CreateDonation(r.Context(), h.deps.DB, &d); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.donation.created.v1", "donation", d.ID)
+	h.publish(r.Context(), entityID, "forgeerp.donation.created.v1", "donation", d.ID)
 	writeJSON(w, http.StatusCreated, d)
 }
 
 // ListDonations pages donations.
 func (h *Handler) ListDonations(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	limit, offset := page(r)
-	list, err := h.deps.Store.ListDonations(r.Context(), h.deps.DB, entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListDonations(r.Context(), h.deps.DB, entityID, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -277,6 +300,11 @@ func (h *Handler) ListDonations(w http.ResponseWriter, r *http.Request) {
 
 // SetDonationStatus settles or cancels a donation.
 func (h *Handler) SetDonationStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -287,9 +315,9 @@ func (h *Handler) SetDonationStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	d, err := h.deps.Store.SetDonationStatus(r.Context(), h.deps.DB, entityOf(r), id, DonationStatus(in.Status), in.RowVersion)
+	d, err := h.deps.Store.SetDonationStatus(r.Context(), h.deps.DB, entityID, id, DonationStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, d)

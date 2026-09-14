@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -43,13 +44,13 @@ type Mailbox struct {
 // Validate checks mailbox invariants.
 func (m Mailbox) Validate() error {
 	if m.EntityID <= 0 {
-		return errors.New("inbound: entity_id required")
+		return fmt.Errorf("inbound: entity_id required: %w", platform.ErrValidation)
 	}
 	if strings.TrimSpace(m.Code) == "" || strings.TrimSpace(m.Host) == "" {
-		return errors.New("inbound: code and host required")
+		return fmt.Errorf("inbound: code and host required: %w", platform.ErrValidation)
 	}
 	if m.Port <= 0 || m.Port > 65535 {
-		return errors.New("inbound: bad port")
+		return fmt.Errorf("inbound: bad port: %w", platform.ErrValidation)
 	}
 	return nil
 }
@@ -93,7 +94,7 @@ func mailboxErr(err error) error {
 
 func (s *PGStore) UpsertMailbox(ctx context.Context, db platform.DBTX, mb *Mailbox) error {
 	if err := mb.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_mailboxes
 		(entity_id, code, host, port, username, use_tls, active)
@@ -159,7 +160,7 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
 func (m *MemoryStore) UpsertMailbox(_ context.Context, _ platform.DBTX, mb *Mailbox) error {
 	if err := mb.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -251,24 +252,6 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
-func storeErrorCode(err error) int {
-	switch {
-	case errors.Is(err, identity.ErrNotFound):
-		return http.StatusNotFound
-	case err != nil && strings.Contains(err.Error(), "duplicate"):
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
-}
-
 func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
 	if h.deps.Bus == nil {
 		return
@@ -278,14 +261,19 @@ func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity s
 
 // UpsertMailbox registers or updates a fetch source.
 func (h *Handler) UpsertMailbox(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var mb Mailbox
 	if err := decode(r, &mb); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	mb.EntityID = entityOf(r)
+	mb.EntityID = entityID
 	if err := h.deps.Store.UpsertMailbox(r.Context(), h.deps.DB, &mb); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, mb)
@@ -293,7 +281,12 @@ func (h *Handler) UpsertMailbox(w http.ResponseWriter, r *http.Request) {
 
 // ListMailboxes lists fetch sources with last-fetch state.
 func (h *Handler) ListMailboxes(w http.ResponseWriter, r *http.Request) {
-	list, err := h.deps.Store.ListMailboxes(r.Context(), h.deps.DB, entityOf(r))
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	list, err := h.deps.Store.ListMailboxes(r.Context(), h.deps.DB, entityID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -311,6 +304,11 @@ type inboundMessage struct {
 // Receive files one fetched message as a ticket on a known active mailbox
 // and stamps the fetch log (the live IMAP poller calls this per message).
 func (h *Handler) Receive(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var in inboundMessage
 	if err := decode(r, &in); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
@@ -321,9 +319,9 @@ func (h *Handler) Receive(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnprocessableEntity, "inbound: mailbox, from and subject required")
 		return
 	}
-	mb, err := h.deps.Store.MailboxByCode(r.Context(), h.deps.DB, entityOf(r), in.Mailbox)
+	mb, err := h.deps.Store.MailboxByCode(r.Context(), h.deps.DB, entityID, in.Mailbox)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	if !mb.Active {
@@ -332,19 +330,19 @@ func (h *Handler) Receive(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	ref := "MAIL-" + strconv.FormatInt(now.UnixNano(), 10)
-	tk := &services.Ticket{EntityID: entityOf(r), Ref: ref,
+	tk := &services.Ticket{EntityID: entityID, Ref: ref,
 		Subject: in.Subject, Priority: 2, Status: services.TicketOpen}
 	if err := h.deps.Tickets.CreateTicket(r.Context(), h.deps.DB, tk); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	msg := &services.TicketMessage{EntityID: tk.EntityID, TicketID: tk.ID,
 		Author: in.From, Body: in.Body}
 	if err := h.deps.Tickets.AddMessage(r.Context(), h.deps.DB, msg); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	_ = h.deps.Store.RecordFetch(r.Context(), h.deps.DB, tk.EntityID, mb.Code, now, "")
-	h.publish(r.Context(), entityOf(r), "forgeerp.inbound.ticketed.v1", "ticket", tk.ID)
+	h.publish(r.Context(), entityID, "forgeerp.inbound.ticketed.v1", "ticket", tk.ID)
 	writeJSON(w, http.StatusCreated, tk)
 }

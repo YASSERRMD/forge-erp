@@ -6,6 +6,7 @@ package assets
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -50,13 +51,13 @@ type Asset struct {
 // Validate checks asset invariants.
 func (a Asset) Validate() error {
 	if a.EntityID <= 0 {
-		return errors.New("assets: entity_id required")
+		return fmt.Errorf("assets: entity_id required: %w", platform.ErrValidation)
 	}
 	if strings.TrimSpace(a.Code) == "" || strings.TrimSpace(a.Label) == "" {
-		return errors.New("assets: code and label required")
+		return fmt.Errorf("assets: code and label required: %w", platform.ErrValidation)
 	}
 	if !assetKinds[a.Kind] {
-		return errors.New("assets: unknown kind (equipment|workstation|vehicle|it)")
+		return fmt.Errorf("assets: unknown kind (equipment|workstation|vehicle|it): %w", platform.ErrValidation)
 	}
 	return nil
 }
@@ -103,7 +104,7 @@ func scanAsset(row pgx.Row) (Asset, error) {
 
 func (s *PGStore) CreateAsset(ctx context.Context, db platform.DBTX, a *Asset) error {
 	if err := a.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_assets
 		(entity_id, code, label, kind, product_id, serial, warehouse_id, status, acquired_at)
@@ -127,10 +128,10 @@ func (s *PGStore) UpdateAsset(ctx context.Context, db platform.DBTX, entityID in
 		return Asset{}, identity.ErrVersionConflict
 	}
 	if a.Status == AssetRetired {
-		return Asset{}, errors.New("assets: retired assets are frozen")
+		return Asset{}, fmt.Errorf("assets: retired assets are frozen: %w", platform.ErrValidation)
 	}
 	if strings.TrimSpace(label) == "" {
-		return Asset{}, errors.New("assets: label required")
+		return Asset{}, fmt.Errorf("assets: label required: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_assets SET label=$1, serial=$2, warehouse_id=$3,
 		updated_at=now(), row_version=row_version+1 WHERE id=$4 AND entity_id=$5 AND row_version=$6`,
@@ -175,7 +176,7 @@ func (s *PGStore) SetAssetStatus(ctx context.Context, db platform.DBTX, entityID
 		return Asset{}, identity.ErrVersionConflict
 	}
 	if !a.CanTransition(to) {
-		return Asset{}, errors.New("assets: illegal transition")
+		return Asset{}, fmt.Errorf("assets: illegal transition: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_assets SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, rowVersion)
@@ -206,13 +207,13 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
 func (m *MemoryStore) CreateAsset(_ context.Context, _ platform.DBTX, a *Asset) error {
 	if err := a.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.assets {
 		if e.EntityID == a.EntityID && e.Code == a.Code {
-			return errors.New("assets: duplicate code")
+			return fmt.Errorf("assets: duplicate code: %w", platform.ErrConflict)
 		}
 	}
 	a.ID = m.next()
@@ -242,10 +243,10 @@ func (m *MemoryStore) UpdateAsset(_ context.Context, _ platform.DBTX, entityID i
 		return Asset{}, identity.ErrVersionConflict
 	}
 	if a.Status == AssetRetired {
-		return Asset{}, errors.New("assets: retired assets are frozen")
+		return Asset{}, fmt.Errorf("assets: retired assets are frozen: %w", platform.ErrValidation)
 	}
 	if strings.TrimSpace(label) == "" {
-		return Asset{}, errors.New("assets: label required")
+		return Asset{}, fmt.Errorf("assets: label required: %w", platform.ErrValidation)
 	}
 	a.Label = label
 	a.Serial = serial
@@ -285,7 +286,7 @@ func (m *MemoryStore) SetAssetStatus(_ context.Context, _ platform.DBTX, entityI
 		return Asset{}, identity.ErrVersionConflict
 	}
 	if !a.CanTransition(to) {
-		return Asset{}, errors.New("assets: illegal transition")
+		return Asset{}, fmt.Errorf("assets: illegal transition: %w", platform.ErrValidation)
 	}
 	a.Status = to
 	a.RowVersion++

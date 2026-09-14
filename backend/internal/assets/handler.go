@@ -3,12 +3,9 @@ package assets
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
-	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/go-chi/chi/v5"
 )
@@ -50,26 +47,6 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
 }
 
-func entityOf(r *http.Request) int64 {
-	if u, ok := identity.AuthUser(r); ok && u.EntityID != 0 {
-		return u.EntityID
-	}
-	return 1
-}
-
-func storeErrorCode(err error) int {
-	switch {
-	case errors.Is(err, identity.ErrNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, identity.ErrVersionConflict):
-		return http.StatusConflict
-	case err != nil && strings.Contains(err.Error(), "duplicate"):
-		return http.StatusConflict
-	default:
-		return http.StatusUnprocessableEntity
-	}
-}
-
 func pathID(r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, name), 10, 64)
 	if err != nil || id <= 0 {
@@ -92,19 +69,24 @@ type statusIn struct {
 
 // CreateAsset registers an in-service asset.
 func (h *Handler) CreateAsset(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	var a Asset
 	if err := decode(r, &a); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	a.ID = 0
-	a.EntityID = entityOf(r)
+	a.EntityID = entityID
 	a.Status = AssetInService
 	if err := h.deps.Store.CreateAsset(r.Context(), h.deps.DB, &a); err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
-	h.publish(r.Context(), entityOf(r), "forgeerp.assets.created.v1", "asset", a.ID)
+	h.publish(r.Context(), entityID, "forgeerp.assets.created.v1", "asset", a.ID)
 	writeJSON(w, http.StatusCreated, a)
 }
 
@@ -117,6 +99,11 @@ type updateAssetIn struct {
 
 // UpdateAsset edits a non-retired asset.
 func (h *Handler) UpdateAsset(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -127,9 +114,9 @@ func (h *Handler) UpdateAsset(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a, err := h.deps.Store.UpdateAsset(r.Context(), h.deps.DB, entityOf(r), id, in.Label, in.Serial, in.WarehouseID, in.RowVersion)
+	a, err := h.deps.Store.UpdateAsset(r.Context(), h.deps.DB, entityID, id, in.Label, in.Serial, in.WarehouseID, in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, a)
@@ -137,12 +124,17 @@ func (h *Handler) UpdateAsset(w http.ResponseWriter, r *http.Request) {
 
 // ListAssets pages assets.
 func (h *Handler) ListAssets(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	list, err := h.deps.Store.ListAssets(r.Context(), h.deps.DB, entityOf(r), limit, offset)
+	list, err := h.deps.Store.ListAssets(r.Context(), h.deps.DB, entityID, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "list failed")
 		return
@@ -152,6 +144,11 @@ func (h *Handler) ListAssets(w http.ResponseWriter, r *http.Request) {
 
 // SetAssetStatus moves an asset along its lifecycle.
 func (h *Handler) SetAssetStatus(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
 	id, ok := pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "bad id")
@@ -162,9 +159,9 @@ func (h *Handler) SetAssetStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	a, err := h.deps.Store.SetAssetStatus(r.Context(), h.deps.DB, entityOf(r), id, AssetStatus(in.Status), in.RowVersion)
+	a, err := h.deps.Store.SetAssetStatus(r.Context(), h.deps.DB, entityID, id, AssetStatus(in.Status), in.RowVersion)
 	if err != nil {
-		writeErr(w, storeErrorCode(err), err.Error())
+		platform.WriteError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, a)

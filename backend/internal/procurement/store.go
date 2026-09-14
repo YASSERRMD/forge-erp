@@ -82,11 +82,11 @@ func loadLines(ctx context.Context, q queryFunc, docID int64) ([]documents.Line,
 
 func (s *PGStore) CreateDoc(ctx context.Context, db platform.DBTX, d *Document, yearMonth string) error {
 	if err := d.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	tot, err := documents.Sum(d.Lines)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	tx, finish, err := platform.JoinTx(ctx, s.pool, db)
 	if err != nil {
@@ -147,11 +147,11 @@ func (s *PGStore) SetStatus(ctx context.Context, db platform.DBTX, entityID, id 
 		return Document{}, err
 	}
 	if err := d.MoveTo(to); err != nil {
-		return Document{}, err
+		return Document{}, fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	if d.Type == documents.TypeSupplierOrder && to == Validated &&
 		d.RequiresApproval(DefaultApprovalThreshold) && d.ApprovedBy == nil {
-		return Document{}, errors.New("procurement: order above threshold requires approval")
+		return Document{}, fmt.Errorf("procurement: order above threshold requires approval: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_supplier_docs SET status=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, to, id, entityID, d.RowVersion)
@@ -193,7 +193,7 @@ func (s *PGStore) SetApproval(ctx context.Context, db platform.DBTX, entityID, i
 		return Document{}, err
 	}
 	if d.Type != documents.TypeSupplierOrder {
-		return Document{}, errors.New("procurement: approval applies to supplier orders")
+		return Document{}, fmt.Errorf("procurement: approval applies to supplier orders: %w", platform.ErrValidation)
 	}
 	tag, err := db.Exec(ctx, `UPDATE ferp_supplier_docs SET approved_by=$1, updated_at=now(), row_version=row_version+1
 		WHERE id=$2 AND entity_id=$3 AND row_version=$4`, approverID, id, entityID, d.RowVersion)
@@ -236,7 +236,7 @@ func (s *PGStore) PricesFor(ctx context.Context, db platform.DBTX, entityID, pro
 
 func (s *PGStore) RecordPayment(ctx context.Context, db platform.DBTX, p *SupplierPayment, invoiceIDs []int64, yearMonth string) ([]int64, error) {
 	if p.Amount <= 0 {
-		return nil, errors.New("procurement: payment amount must be positive")
+		return nil, fmt.Errorf("procurement: payment amount must be positive: %w", platform.ErrValidation)
 	}
 	tx, finish, err := platform.JoinTx(ctx, s.pool, db)
 	if err != nil {
@@ -247,7 +247,7 @@ func (s *PGStore) RecordPayment(ctx context.Context, db platform.DBTX, p *Suppli
 		var gross, paid int64
 		err := tx.QueryRow(ctx, `SELECT total_gross FROM ferp_supplier_docs WHERE id=$1 AND entity_id=$2 AND type='supplier_invoice'`, invID, p.EntityID).Scan(&gross)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, finish(fmt.Errorf("procurement: invoice %d not found", invID))
+			return nil, finish(fmt.Errorf("procurement: invoice %d not found: %w", invID, platform.ErrNotFound))
 		}
 		if err != nil {
 			return nil, finish(err)
@@ -255,15 +255,15 @@ func (s *PGStore) RecordPayment(ctx context.Context, db platform.DBTX, p *Suppli
 		_ = tx.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0) FROM ferp_supplier_allocations WHERE invoice_id=$1`, invID).Scan(&paid)
 		balances[i] = gross - paid
 		if balances[i] <= 0 {
-			return nil, finish(fmt.Errorf("procurement: invoice %d already settled", invID))
+			return nil, finish(fmt.Errorf("procurement: invoice %d already settled: %w", invID, platform.ErrValidation))
 		}
 	}
 	applied, rest, err := sales.AllocateAcross(balances, p.Amount)
 	if err != nil {
-		return nil, finish(err)
+		return nil, finish(fmt.Errorf("%w: %w", err, platform.ErrValidation))
 	}
 	if rest != 0 {
-		return nil, finish(fmt.Errorf("procurement: overpayment refused (unapplied %d)", rest))
+		return nil, finish(fmt.Errorf("procurement: overpayment refused (unapplied %d): %w", rest, platform.ErrValidation))
 	}
 	var seq int64
 	err = tx.QueryRow(ctx, `INSERT INTO ferp_doc_counters (entity_id, type, year_month, next_seq)
@@ -344,11 +344,11 @@ func (m *MemoryStore) ref(entityID int64, t documents.DocType, ym string) string
 
 func (m *MemoryStore) CreateDoc(_ context.Context, _ platform.DBTX, d *Document, yearMonth string) error {
 	if err := d.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	tot, err := documents.Sum(d.Lines)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -378,11 +378,11 @@ func (m *MemoryStore) SetStatus(_ context.Context, _ platform.DBTX, entityID, id
 		return Document{}, identity.ErrNotFound
 	}
 	if err := d.MoveTo(to); err != nil {
-		return Document{}, err
+		return Document{}, fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	if d.Type == documents.TypeSupplierOrder && to == Validated &&
 		d.RequiresApproval(DefaultApprovalThreshold) && d.ApprovedBy == nil {
-		return Document{}, errors.New("procurement: order above threshold requires approval")
+		return Document{}, fmt.Errorf("procurement: order above threshold requires approval: %w", platform.ErrValidation)
 	}
 	d.Status = to
 	d.RowVersion++
@@ -419,7 +419,7 @@ func (m *MemoryStore) SetApproval(_ context.Context, _ platform.DBTX, entityID, 
 		return Document{}, identity.ErrNotFound
 	}
 	if d.Type != documents.TypeSupplierOrder {
-		return Document{}, errors.New("procurement: approval applies to supplier orders")
+		return Document{}, fmt.Errorf("procurement: approval applies to supplier orders: %w", platform.ErrValidation)
 	}
 	d.ApprovedBy = &approverID
 	d.RowVersion++
@@ -457,7 +457,7 @@ func (m *MemoryStore) PricesFor(_ context.Context, _ platform.DBTX, entityID, pr
 
 func (m *MemoryStore) RecordPayment(_ context.Context, _ platform.DBTX, p *SupplierPayment, invoiceIDs []int64, yearMonth string) ([]int64, error) {
 	if p.Amount <= 0 {
-		return nil, errors.New("procurement: payment amount must be positive")
+		return nil, fmt.Errorf("procurement: payment amount must be positive: %w", platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -465,19 +465,19 @@ func (m *MemoryStore) RecordPayment(_ context.Context, _ platform.DBTX, p *Suppl
 	for i, invID := range invoiceIDs {
 		inv, ok := m.docs[invID]
 		if !ok || inv.EntityID != p.EntityID || inv.Type != documents.TypeSupplierInvoice {
-			return nil, fmt.Errorf("procurement: invoice %d not found", invID)
+			return nil, fmt.Errorf("procurement: invoice %d not found: %w", invID, platform.ErrNotFound)
 		}
 		balances[i] = inv.Totals.Gross - m.alloc[invID]
 		if balances[i] <= 0 {
-			return nil, fmt.Errorf("procurement: invoice %d already settled", invID)
+			return nil, fmt.Errorf("procurement: invoice %d already settled: %w", invID, platform.ErrValidation)
 		}
 	}
 	applied, rest, err := sales.AllocateAcross(balances, p.Amount)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	if rest != 0 {
-		return nil, fmt.Errorf("procurement: overpayment refused (unapplied %d)", rest)
+		return nil, fmt.Errorf("procurement: overpayment refused (unapplied %d): %w", rest, platform.ErrValidation)
 	}
 	p.ID = m.next()
 	k := fmt.Sprintf("%d/supplier_payment/%s", p.EntityID, yearMonth)

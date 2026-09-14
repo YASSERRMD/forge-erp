@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -204,16 +205,16 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 
 func (m *MemoryStore) CreateOrg(_ context.Context, _ platform.DBTX, o *Organization) error {
 	if err := o.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.orgs {
 		if e.EntityID == o.EntityID && o.CustomerCode != "" && e.CustomerCode == o.CustomerCode {
-			return errors.New("partners: duplicate customer code")
+			return fmt.Errorf("partners: duplicate customer code: %w", platform.ErrConflict)
 		}
 		if e.EntityID == o.EntityID && o.SupplierCode != "" && e.SupplierCode == o.SupplierCode {
-			return errors.New("partners: duplicate supplier code")
+			return fmt.Errorf("partners: duplicate supplier code: %w", platform.ErrConflict)
 		}
 	}
 	o.ID = m.next()
@@ -253,7 +254,7 @@ func (m *MemoryStore) ListOrgs(_ context.Context, _ platform.DBTX, entityID int6
 
 func (m *MemoryStore) UpdateOrg(_ context.Context, _ platform.DBTX, o *Organization) error {
 	if err := o.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -281,12 +282,12 @@ func (m *MemoryStore) ParentOf(_ context.Context, _ platform.DBTX, entityID, id 
 
 func (m *MemoryStore) CreateContact(_ context.Context, _ platform.DBTX, c *Contact) error {
 	if err := c.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.orgs[c.OrgID]; !ok {
-		return errors.New("partners: organization not found")
+		return fmt.Errorf("partners: organization not found: %w", platform.ErrNotFound)
 	}
 	c.ID = m.next()
 	c.RowVersion = 1
@@ -308,7 +309,7 @@ func (m *MemoryStore) ContactsOf(_ context.Context, _ platform.DBTX, orgID int64
 
 func (m *MemoryStore) CreateCategory(_ context.Context, _ platform.DBTX, c *Category) error {
 	if err := c.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
