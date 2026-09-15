@@ -2,22 +2,31 @@ package sales
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/docgen"
 )
 
 // Deps wires handlers to persistence, catalog (for fulfillment), and events.
+//
+// DocModels selects the Kernel-5 print template; nil falls back to
+// docgen.DefaultRegistry(). DB doubles as the ferp_config source for the
+// per-entity template override (nil DB falls back to the default model).
 type Deps struct {
-	Store   Store
-	Catalog catalog.Store // nil disables fulfillment validation of stock effects
-	Bus     platform.Bus
-	DB      platform.DBTX
+	Store     Store
+	Catalog   catalog.Store // nil disables fulfillment validation of stock effects
+	Bus       platform.Bus
+	DB        platform.DBTX
+	DocModels *docgen.Registry
 }
 
 // Middleware builds Require-style RBAC gates.
@@ -36,6 +45,7 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("sales", "shipment", "write")).Post("/sales/shipments/{id}/fulfill", h.Fulfill)
 	r.With(mw("sales", "credit", "write")).Post("/sales/credit-notes", h.CreateCreditNote)
 	r.With(mw("sales", "credit", "write")).Post("/sales/credit-notes/{id}/apply", h.ApplyCredit)
+	r.With(mw("sales", "document", "read")).Post("/sales/documents/{id}/pdf", h.RenderDocPDF)
 }
 
 // Handler implements the sales HTTP surface.
@@ -346,6 +356,72 @@ func (h *Handler) CreateCreditNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, credit)
+}
+
+// RenderDocPDF renders an invoice or credit note through the entity's
+// Kernel-5 print template: POST /sales/documents/{id}/pdf?model=&locale=.
+// The template code comes from ?model= when given, else the entity's
+// ferp_config override (FERP_SALES_DOC_MODEL), else "standard". The document
+// is loaded entity-scoped (cross-tenant ids 404 via load); other families
+// are 422 (no template applies). Bytes stream back as an attachment so the
+// caller can save or forward them to documentsvc.
+func (h *Handler) RenderDocPDF(w http.ResponseWriter, r *http.Request) {
+	entityID, entityErr := platform.EntityOf(r)
+	if entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	d, ok := h.load(w, r)
+	if !ok {
+		return
+	}
+	code := strings.TrimSpace(r.URL.Query().Get("model"))
+	if code == "" {
+		var err error
+		code, err = docgen.ModelForEntity(r.Context(), h.deps.DB, entityID)
+		if err != nil {
+			platform.WriteError(w, err)
+			return
+		}
+	}
+	reg := h.deps.DocModels
+	if reg == nil {
+		reg = docgen.DefaultRegistry()
+	}
+	m, err := reg.Lookup(code)
+	if err != nil {
+		platform.WriteError(w, err)
+		return
+	}
+	if !m.Applies(string(d.Type)) {
+		writeErr(w, http.StatusUnprocessableEntity, "document model does not apply to "+string(d.Type))
+		return
+	}
+	locale := strings.TrimSpace(r.URL.Query().Get("locale"))
+	if locale == "" {
+		locale = "en"
+	}
+	issued := ""
+	if !d.CreatedAt.IsZero() {
+		issued = d.CreatedAt.UTC().Format("2006-01-02")
+	}
+	rd, contentType, err := m.Render(r.Context(), docgen.InvoiceSubject{
+		Ref: d.Ref, DocType: string(d.Type), EntityID: d.EntityID, OrgID: d.OrgID,
+		Currency: d.Currency, IssuedOn: issued, Lines: d.Lines, Totals: d.Totals,
+	}, locale)
+	if err != nil {
+		platform.WriteError(w, err)
+		return
+	}
+	body, err := io.ReadAll(rd)
+	if err != nil {
+		platform.WriteError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", d.Ref+".pdf"))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }
 
 // ApplyCredit allocates a validated credit note against an invoice balance.

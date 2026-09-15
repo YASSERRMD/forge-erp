@@ -1271,3 +1271,15 @@ paths:
       summary: STUB (generated) - route is served but undocumented; fill in contract details
       responses:
         '200': { description: OK }
+  /api/v1/sales/documents/{id}/pdf:
+    post:
+      operationId: postStubSalesDocumentsIdPdf
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/modules:
+    get:
+      operationId: getStubModules
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }

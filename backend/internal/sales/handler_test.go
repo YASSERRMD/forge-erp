@@ -2,12 +2,15 @@ package sales
 
 import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/docgen"
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -211,5 +214,101 @@ func TestCreditNoteApplyFlow(t *testing.T) {
 	_ = json.NewDecoder(rec.Body).Decode(&out)
 	if out["balance"] != 1000 {
 		t.Fatalf("balance=%d want 1000", out["balance"])
+	}
+}
+
+func postPDF(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// stubModel records the locale it was asked to render with.
+type stubModel struct{ gotLocale string }
+
+func (s *stubModel) Code() string        { return "stub" }
+func (s *stubModel) Applies(string) bool { return true }
+func (s *stubModel) Render(_ context.Context, _ any, locale string) (io.Reader, string, error) {
+	s.gotLocale = locale
+	return strings.NewReader("STUB-BYTES"), "application/pdf", nil
+}
+
+func TestRenderDocPDF(t *testing.T) {
+	h, _, _ := testRouter()
+	inv := createDoc(t, h, documents.TypeInvoice, 7)
+
+	rec := postPDF(t, h, "/api/v1/sales/documents/"+itoa(inv.ID)+"/pdf")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("pdf: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/pdf" {
+		t.Fatalf("content-type = %q", ct)
+	}
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, inv.Ref) {
+		t.Fatalf("content-disposition = %q, want ref %q", cd, inv.Ref)
+	}
+	first := append([]byte(nil), rec.Body.Bytes()...)
+	if len(first) < 4 || string(first[:4]) != "%PDF" {
+		t.Fatal("body is not a PDF")
+	}
+	again := postPDF(t, h, "/api/v1/sales/documents/"+itoa(inv.ID)+"/pdf")
+	if !bytes.Equal(first, again.Body.Bytes()) {
+		t.Fatal("identical invoice rendered different bytes")
+	}
+
+	// Unknown ?model= is a validation error (422 via platform sentinel).
+	bad := postPDF(t, h, "/api/v1/sales/documents/"+itoa(inv.ID)+"/pdf?model=nope")
+	if bad.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("unknown model: code=%d want 422", bad.Code)
+	}
+	// Proposals have no template in the standard family (422).
+	prop := createDoc(t, h, documents.TypeProposal, 7)
+	badFam := postPDF(t, h, "/api/v1/sales/documents/"+itoa(prop.ID)+"/pdf")
+	if badFam.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("proposal pdf: code=%d want 422", badFam.Code)
+	}
+	// Missing id 404s; cross-tenant ids 404 via the same entity-scoped load.
+	missing := postPDF(t, h, "/api/v1/sales/documents/999999/pdf")
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing pdf: code=%d want 404", missing.Code)
+	}
+	// Credit notes reuse the invoice layout family.
+	cnRec := post(t, h, "/api/v1/sales/credit-notes", map[string]any{"invoice_id": inv.ID})
+	if cnRec.Code != http.StatusCreated {
+		t.Fatalf("credit: code=%d body=%s", cnRec.Code, cnRec.Body.String())
+	}
+	var cn Document
+	_ = json.NewDecoder(cnRec.Body).Decode(&cn)
+	cnPDF := postPDF(t, h, "/api/v1/sales/documents/"+itoa(cn.ID)+"/pdf")
+	if cnPDF.Code != http.StatusOK || !bytes.HasPrefix(cnPDF.Body.Bytes(), []byte("%PDF")) {
+		t.Fatalf("credit pdf: code=%d", cnPDF.Code)
+	}
+}
+
+func TestRenderDocPDFModelSelection(t *testing.T) {
+	sst := NewMemoryStore()
+	stub := &stubModel{}
+	reg := docgen.NewRegistry()
+	reg.Register(stub)
+	reg.Register(docgen.StandardModel{})
+	r := chi.NewRouter()
+	r.Route("/api/v1", func(r chi.Router) {
+		Routes(r, Deps{Store: sst, DocModels: reg}, passthrough)
+	})
+	ctx := platform.ContextWithEntity(context.Background(), 1)
+	d := &Document{EntityID: 1, Type: documents.TypeInvoice, OrgID: 7,
+		Currency: "USD", RateToBase: 1000000,
+		Lines: []documents.Line{{ProductID: 1, Label: "Widget", Qty: 2, UnitNet: 500, VATRateBps: 2000}}}
+	if err := sst.CreateDoc(ctx, nil, d, "202609"); err != nil {
+		t.Fatal(err)
+	}
+	rec := postPDF(t, r, "/api/v1/sales/documents/"+itoa(d.ID)+"/pdf?model=stub&locale=fr")
+	if rec.Code != http.StatusOK || rec.Body.String() != "STUB-BYTES" {
+		t.Fatalf("stub model: code=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if stub.gotLocale != "fr" {
+		t.Fatalf("locale = %q want fr", stub.gotLocale)
 	}
 }

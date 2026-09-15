@@ -53,6 +53,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
 	"github.com/YASSERRMD/forge-erp/backend/internal/payments"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/module"
 	"github.com/YASSERRMD/forge-erp/backend/internal/pos"
 	"github.com/YASSERRMD/forge-erp/backend/internal/procurement"
 	"github.com/YASSERRMD/forge-erp/backend/internal/reporting"
@@ -113,6 +114,7 @@ func specRouter() chi.Router {
 		sepa.Routes(r, sepa.Deps{}, idH.Require)
 		inbound.Routes(r, inbound.Deps{}, idH.Require)
 		agenda.Routes(r, agenda.Deps{}, idH.Require)
+		module.Routes(r, module.Deps{Registry: module.NewRegistry()}, idH.Require)
 		documentsvc.Routes(r, &documentsvc.Service{}, idH.Require)
 		search.Routes(r, search.NewMemorySearcher(), idH.Require)
 	})
