@@ -303,24 +303,29 @@ func run() error {
 				WalkinOrg: walkinOrg, Bus: bus, DB: pool, Pool: pool}
 		}(),
 		reporting: reporting.Deps{Ledger: fstore, Billing: sstore, Stock: cstore,
-			Orgs: pstore, DB: pool},
+			Orgs: pstore, Purchases: procstore, DB: pool},
 		payments: func() payments.Deps {
 			paystore := payments.NewPGStore(pool)
 			payreg := payments.NewRegistry(
 				payments.NewOnlineProvider(payments.ProviderStripe),
 				payments.NewOnlineProvider(payments.ProviderPayPal))
 			return payments.Deps{Store: paystore, Providers: payreg,
-				WebhookSecret: payments.WebhookSecretFromEnv(), Bus: bus, DB: pool}
+				WebhookSecret: payments.WebhookSecretFromEnv(), Bus: bus, DB: pool,
+				Stripe: payments.NewStripeClient(payments.StripeConfigFromEnv()),
+				PayPal: payments.NewPayPalClient(payments.PayPalConfigFromEnv()),
+				PayPalWebhookSecret: payments.PayPalWebhookSecretFromEnv()}
 		}(),
 		booking: booking.Deps{Store: booking.NewPGStore(pool), Bus: bus, DB: pool},
 		survey:  survey.Deps{Store: survey.NewPGStore(pool), Bus: bus, DB: pool},
-		members: members.Deps{Store: members.NewPGStore(pool), Bus: bus, DB: pool},
-		assets:  assets.Deps{Store: assets.NewPGStore(pool), Bus: bus, DB: pool},
+		members: members.Deps{Store: members.NewPGStore(pool), Bus: bus, DB: pool, Ledger: fstore},
+		assets: assets.Deps{Store: assets.NewPGStore(pool), Finance: fstore,
+			Bus: bus, DB: pool, Pool: pool},
 		kb:      kb.Deps{Store: kb.NewPGStore(pool), Bus: bus, DB: pool},
 		events:  events.Deps{Store: events.NewPGStore(pool), Bus: bus, DB: pool},
 		dataio:  dataio.Deps{Orgs: pstore, Products: cstore, Bus: bus, DB: pool},
 		fx:      fx.Deps{Store: fx.NewPGStore(pool), Bus: bus, DB: pool},
-		sepa:    sepa.Deps{Store: sepa.NewPGStore(pool), Bus: bus, DB: pool},
+		sepa: sepa.Deps{Store: sepa.NewPGStore(pool), Bus: bus, DB: pool,
+			Pool: pool, Ledger: fstore},
 		inbound: inbound.Deps{Store: inbound.NewPGStore(pool), Tickets: svcstore,
 			Bus: bus, DB: pool},
 		agenda:   agenda.Deps{Store: agenda.NewPGStore(pool), Bus: bus, DB: pool},

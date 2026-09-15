@@ -1283,3 +1283,317 @@ paths:
       summary: STUB (generated) - route is served but undocumented; fill in contract details
       responses:
         '200': { description: OK }
+  /api/v1/assets/schedules/{sid}/post:
+    post:
+      operationId: postStubAssetsSchedulesSidPost
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/assets/{id}/dispose:
+    post:
+      operationId: postStubAssetsIdDispose
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/assets/{id}/schedules:
+    get:
+      operationId: getStubAssetsIdSchedules
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubAssetsIdSchedules
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/barcode/labels:
+    post:
+      operationId: postStubBarcodeLabels
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/donations/{id}/receipt:
+    get:
+      operationId: getStubDonationsIdReceipt
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/finance/bank-accounts/{id}/reconcile-match:
+    post:
+      operationId: postStubFinanceBankAccountsIdReconcileMatch
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/finance/bank-accounts/{id}/statement:
+    get:
+      operationId: getStubFinanceBankAccountsIdStatement
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/finance/bank-imports:
+    post:
+      operationId: postStubFinanceBankImports
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/finance/bank-transfers:
+    post:
+      operationId: postStubFinanceBankTransfers
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/finance/charges:
+    get:
+      operationId: getStubFinanceCharges
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubFinanceCharges
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/finance/charges-due:
+    get:
+      operationId: getStubFinanceChargesDue
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/finance/charges/{id}/pay:
+    post:
+      operationId: postStubFinanceChargesIdPay
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/finance/fiscal-years:
+    get:
+      operationId: getStubFinanceFiscalYears
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubFinanceFiscalYears
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/finance/fiscal-years/{id}/close:
+    post:
+      operationId: postStubFinanceFiscalYearsIdClose
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/finance/ledger-accounts/{id}:
+    get:
+      operationId: getStubFinanceLedgerAccountsId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/finance/ledger-book:
+    get:
+      operationId: getStubFinanceLedgerBook
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/finance/tax-periods:
+    get:
+      operationId: getStubFinanceTaxPeriods
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubFinanceTaxPeriods
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/finance/tax-periods/{id}/status:
+    post:
+      operationId: postStubFinanceTaxPeriodsIdStatus
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/finance/vat-rates:
+    get:
+      operationId: getStubFinanceVatRates
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubFinanceVatRates
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/finance/vat-return:
+    get:
+      operationId: getStubFinanceVatReturn
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/hr/payroll/runs:
+    get:
+      operationId: getStubHrPayrollRuns
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubHrPayrollRuns
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/hr/payroll/runs/{id}/lines:
+    get:
+      operationId: getStubHrPayrollRunsIdLines
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubHrPayrollRunsIdLines
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/hr/payroll/runs/{id}/post:
+    post:
+      operationId: postStubHrPayrollRunsIdPost
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/member-loans:
+    post:
+      operationId: postStubMemberLoans
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/member-loans/{id}/disburse:
+    post:
+      operationId: postStubMemberLoansIdDisburse
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/member-loans/{id}/repay:
+    post:
+      operationId: postStubMemberLoansIdRepay
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/member-loans/{id}/schedule:
+    get:
+      operationId: getStubMemberLoansIdSchedule
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/payments/attempts/{id}/refund:
+    post:
+      operationId: postStubPaymentsAttemptsIdRefund
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/payments/webhooks/paypal:
+    post:
+      operationId: postStubPaymentsWebhooksPaypal
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/reports/close-preview:
+    get:
+      operationId: getStubReportsClosePreview
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/reports/general-ledger.csv:
+    get:
+      operationId: getStubReportsGeneralLedgerCsv
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/reports/intra-eu.csv:
+    get:
+      operationId: getStubReportsIntraEuCsv
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/reports/intra-eu.deb:
+    get:
+      operationId: getStubReportsIntraEuDeb
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/reports/ledger/account:
+    get:
+      operationId: getStubReportsLedgerAccount
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/sepa/batches/{id}/rtransactions:
+    get:
+      operationId: getStubSepaBatchesIdRtransactions
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubSepaBatchesIdRtransactions
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/sepa/mandates:
+    get:
+      operationId: getStubSepaMandates
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubSepaMandates
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/sepa/mandates/{id}:
+    get:
+      operationId: getStubSepaMandatesId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/sepa/mandates/{id}/amend:
+    post:
+      operationId: postStubSepaMandatesIdAmend
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/sepa/mandates/{id}/cancel:
+    post:
+      operationId: postStubSepaMandatesIdCancel
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/sepa/mandates/{id}/sign:
+    post:
+      operationId: postStubSepaMandatesIdSign
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/sepa/transfers:
+    get:
+      operationId: getStubSepaTransfers
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubSepaTransfers
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/sepa/transfers/{id}:
+    get:
+      operationId: getStubSepaTransfersId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/sepa/transfers/{id}/status:
+    post:
+      operationId: postStubSepaTransfersIdStatus
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/sepa/transfers/{id}/xml:
+    get:
+      operationId: getStubSepaTransfersIdXml
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
