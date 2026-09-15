@@ -25,6 +25,12 @@ type Store interface {
 	CreateSalary(ctx context.Context, db platform.DBTX, s *Salary) error
 	SetSalaryStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to SalaryStatus, rowVersion int64) (Salary, error)
 	SalariesOf(ctx context.Context, db platform.DBTX, entityID int64, userLogin string) ([]Salary, error)
+	CreatePayrollRun(ctx context.Context, db platform.DBTX, r *PayrollRun) error
+	AddPayrollRunLine(ctx context.Context, db platform.DBTX, l *PayrollRunLine) error
+	PayrollRunByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (PayrollRun, error)
+	PayrollRunLines(ctx context.Context, db platform.DBTX, entityID int64, runID int64) ([]PayrollRunLine, error)
+	PayrollRunsOf(ctx context.Context, db platform.DBTX, entityID int64) ([]PayrollRun, error)
+	SetPayrollRunStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to PayrollRunStatus, rowVersion int64) (PayrollRun, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -283,6 +289,8 @@ type MemoryStore struct {
 	expenses map[int64]ExpenseReport
 	lines    map[int64]ExpenseLine
 	salaries map[int64]Salary
+	runs     map[int64]PayrollRun
+	runLines map[int64]PayrollRunLine
 }
 
 // NewMemoryStore builds an empty fake.
@@ -290,6 +298,7 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		leaves: map[int64]LeaveRequest{}, expenses: map[int64]ExpenseReport{},
 		lines: map[int64]ExpenseLine{}, salaries: map[int64]Salary{},
+		runs: map[int64]PayrollRun{}, runLines: map[int64]PayrollRunLine{},
 	}
 }
 

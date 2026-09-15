@@ -36,7 +36,7 @@ func TestChainVerify(t *testing.T) {
 	now := time.Now().UTC()
 	mk := func(prev string, ref string) Entry {
 		e := Entry{ID: 1, EntityID: 1, JournalID: 1, Ref: ref, Date: now,
-			Lines: []EntryLine{{AccountID: 1, Debit: 100}, {AccountID: 2, Credit: 100}},
+			Lines:    []EntryLine{{AccountID: 1, Debit: 100}, {AccountID: 2, Credit: 100}},
 			PrevHash: prev}
 		e.ChainHash = Chain(prev, e.JournalID, e.Ref, e.Date, e.Lines)
 		return e

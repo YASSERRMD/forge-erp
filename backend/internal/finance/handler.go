@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/go-chi/chi/v5"
 )
 
 // Deps wires handlers to persistence.
@@ -36,6 +36,26 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("finance", "bank", "write")).Post("/finance/bank-transactions/{id}/reconcile", h.Reconcile)
 	r.With(mw("finance", "loan", "write")).Post("/finance/loans", h.CreateLoan)
 	r.With(mw("finance", "loan", "read")).Get("/finance/loans", h.ListLoans)
+	// Phase 2: statement import, transfers, ledger book, close, tax.
+	r.With(mw("finance", "bank", "write")).Post("/finance/bank-imports", h.ImportStatement)
+	r.With(mw("finance", "bank", "read")).Get("/finance/bank-accounts/{id}/statement", h.BankStatement)
+	r.With(mw("finance", "bank", "write")).Post("/finance/bank-transfers", h.Transfer)
+	r.With(mw("finance", "bank", "read")).Post("/finance/bank-accounts/{id}/reconcile-match", h.ReconcileMatch)
+	r.With(mw("finance", "entry", "read")).Get("/finance/ledger-book", h.LedgerBook)
+	r.With(mw("finance", "entry", "read")).Get("/finance/ledger-accounts/{id}", h.AccountLedger)
+	r.With(mw("finance", "entry", "write")).Post("/finance/fiscal-years", h.CreateFiscalYear)
+	r.With(mw("finance", "entry", "read")).Get("/finance/fiscal-years", h.ListFiscalYears)
+	r.With(mw("finance", "entry", "write")).Post("/finance/fiscal-years/{id}/close", h.CloseYear)
+	r.With(mw("finance", "tax", "write")).Post("/finance/tax-periods", h.CreateTaxPeriod)
+	r.With(mw("finance", "tax", "read")).Get("/finance/tax-periods", h.ListTaxPeriods)
+	r.With(mw("finance", "tax", "write")).Post("/finance/tax-periods/{id}/status", h.SetTaxPeriodStatus)
+	r.With(mw("finance", "tax", "write")).Post("/finance/vat-rates", h.CreateVATRate)
+	r.With(mw("finance", "tax", "read")).Get("/finance/vat-rates", h.ListVATRates)
+	r.With(mw("finance", "tax", "read")).Get("/finance/vat-return", h.VATReturn)
+	r.With(mw("finance", "tax", "write")).Post("/finance/charges", h.CreateCharge)
+	r.With(mw("finance", "tax", "read")).Get("/finance/charges", h.ListCharges)
+	r.With(mw("finance", "tax", "read")).Get("/finance/charges-due", h.ChargesDue)
+	r.With(mw("finance", "tax", "write")).Post("/finance/charges/{id}/pay", h.PayCharge)
 }
 
 // Handler implements the finance HTTP surface.

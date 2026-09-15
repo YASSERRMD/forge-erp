@@ -31,7 +31,8 @@ type Middleware func(module, entity, action string) func(http.Handler) http.Hand
 
 // Routes mounts the hr surface (caller nests at /api/v1).
 func Routes(r chi.Router, d Deps, mw Middleware) {
-	h := &Handler{deps: d, svc: NewService(d.Pool, d.Store, d.Finance, d.Bus)}
+	h := &Handler{deps: d, svc: NewService(d.Pool, d.Store, d.Finance, d.Bus),
+		payroll: NewPayrollService(d.Pool, d.Store, d.Finance, d.Bus)}
 	r.With(mw("hr", "leave", "write")).Post("/hr/leaves", h.CreateLeave)
 	r.With(mw("hr", "leave", "read")).Get("/hr/leaves", h.ListLeaves)
 	r.With(mw("hr", "leave", "validate")).Post("/hr/leaves/{id}/status", h.SetLeaveStatus)
@@ -43,12 +44,18 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("hr", "salary", "write")).Post("/hr/salaries", h.CreateSalary)
 	r.With(mw("hr", "salary", "read")).Get("/hr/salaries", h.ListSalaries)
 	r.With(mw("hr", "salary", "validate")).Post("/hr/salaries/{id}/status", h.SetSalaryStatus)
+	r.With(mw("hr", "payroll", "write")).Post("/hr/payroll/runs", h.CreatePayrollRun)
+	r.With(mw("hr", "payroll", "read")).Get("/hr/payroll/runs", h.ListPayrollRuns)
+	r.With(mw("hr", "payroll", "write")).Post("/hr/payroll/runs/{id}/lines", h.AddPayrollRunLine)
+	r.With(mw("hr", "payroll", "read")).Get("/hr/payroll/runs/{id}/lines", h.ListPayrollRunLines)
+	r.With(mw("hr", "payroll", "validate")).Post("/hr/payroll/runs/{id}/post", h.PostPayrollRun)
 }
 
 // Handler implements the hr HTTP surface.
 type Handler struct {
-	deps Deps
-	svc  *Service
+	deps    Deps
+	svc     *Service
+	payroll *PayrollService
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

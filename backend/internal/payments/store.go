@@ -46,7 +46,7 @@ func (s *PGStore) CreateAttempt(ctx context.Context, db platform.DBTX, a *Paymen
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_payment_attempts
 		(entity_id, ref, org_id, invoice_id, amount, currency, provider, status, webhook_key)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,'')) RETURNING id, row_version`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, row_version`,
 		a.EntityID, a.Ref, a.OrgID, a.InvoiceID, a.Amount, a.Currency, a.Provider, a.Status, a.WebhookKey,
 	).Scan(&a.ID, &a.RowVersion)
 }
@@ -56,6 +56,9 @@ func (s *PGStore) AttemptByID(ctx context.Context, db platform.DBTX, entityID in
 }
 
 func (s *PGStore) AttemptByWebhook(ctx context.Context, db platform.DBTX, entityID int64, key string) (PaymentAttempt, bool) {
+	if key == "" {
+		return PaymentAttempt{}, false // unset keys never resolve (memory-store parity)
+	}
 	a, err := scanAttempt(db.QueryRow(ctx, `SELECT `+attemptCols+` FROM ferp_payment_attempts
 		WHERE entity_id=$1 AND webhook_key=$2`, entityID, key))
 	if err != nil {

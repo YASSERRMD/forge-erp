@@ -81,6 +81,47 @@ behavioral or structural deviation so auditors can distinguish design from drift
     default, 90-day cap) served unauthenticated at /public/share/{token}
     under the same IP rate limit.
 
+30. Prelevement mandates: UMR unique per entity (not global); lifecycle
+    draft → signed/active → canceled, amendments keep active with amended_at.
+31. R-transactions: validated batch lines stay immutable — R-state lives in
+    ferp_sepa_rtransactions (one row per end_to_end_id) with the money unwind
+    as a finance reversal; allowed on validated/sent batches only.
+32. PaymentByBankTransfer renders simplified pain.001.001.03; int64 minor
+    units formatted without floats; BIC optional with NOTPROVIDED fallback.
+33. Payroll runs record given gross/charges/net per line (net = gross −
+    charges enforced); jurisdictional payroll calculation is never computed
+    server-side. Posting writes one balanced entry atomically with the flip.
+34. Asset depreciation is straight-line or declining-balance on int64 minor
+    units (half-up per period, remainder last); cost basis lives on the
+    schedule; disposal posts proceeds vs NBV gain/loss and retires atomically.
+35. Intra-EU VAT numbers live in organization custom_fields.vat_number
+    (aliases accepted); movements without one are excluded from DEB output.
+36. DEB/DES file is a documented fixed-width parity layout; official DGDDI
+    schema conformance stays operator-side before filing.
+37. Close-preview (GET /reports/close-preview) is a computed, balanced
+    proposal and never posts; closing entries post via finance.
+38. Period P&L walks posted ledger entries in reporting; TrialBalance carries
+    no dates, so finance owns any future date-indexed balance query.
+39. Payments live depth: Stripe/PayPal clients degrade to mint-only refs when
+    secrets are unset; settlement stays webhook-driven/idempotent; partial
+    refunds settle to terminal Refunded; PayPal math is integer-only.
+40. Outbound OAuth vault (ferp_oauth_tokens, AES-256-GCM under FERP_OAUTH_KEY):
+    single key with no rotation; distinct from inbound OIDC login; no external
+    crypto review yet.
+41. payments PG hardening: webhook_key inserts '' (was NULLIF violating
+    NOT NULL); empty-key lookups never resolve.
+42. Accounting bindings replace per-module hardcoded default accounts with one
+    explicit ferp_account_bindings table (Phase 3 auto-posting prerequisite).
+43. Barcode/QR outputs are validated payload strings + label-sheet JSON;
+    image rendering deferred to kernel 5.
+44. Member loans use French amortisation (constant annuity, residual
+    absorption on the last installment).
+45. Donation receipts attest paid donations only (promised → 422).
+46. Loan disburse/repay posts money before flipping status (non-atomic across
+    ledger/status; status failure after posting surfaces as 500 with entry id).
+47. Bank statements import CSV + CAMT.053 with bank-ref dedupe; reconciliation
+    matches on amount + date window; transfers post paired transactions.
+
 ## Deferred scope (post-Phase-12 candidates)
 
 POS (takepos), HR details (holiday/expensereport/salaries),

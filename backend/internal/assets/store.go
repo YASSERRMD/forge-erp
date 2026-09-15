@@ -81,6 +81,10 @@ type Store interface {
 	UpdateAsset(ctx context.Context, db platform.DBTX, entityID int64, id int64, label, serial string, warehouseID *int64, rowVersion int64) (Asset, error)
 	ListAssets(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Asset, error)
 	SetAssetStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to AssetStatus, rowVersion int64) (Asset, error)
+	CreateSchedule(ctx context.Context, db platform.DBTX, s *AssetSchedule) error
+	ScheduleByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (AssetSchedule, error)
+	SchedulesOfAsset(ctx context.Context, db platform.DBTX, entityID int64, assetID int64) ([]AssetSchedule, error)
+	MarkSchedulePosted(ctx context.Context, db platform.DBTX, entityID int64, id int64, amount int64, rowVersion int64) (AssetSchedule, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -193,14 +197,15 @@ func (s *PGStore) SetAssetStatus(ctx context.Context, db platform.DBTX, entityID
 
 // MemoryStore is the in-process fake for handler tests.
 type MemoryStore struct {
-	mu     sync.Mutex
-	seq    int64
-	assets map[int64]Asset
+	mu        sync.Mutex
+	seq       int64
+	assets    map[int64]Asset
+	schedules map[int64]AssetSchedule
 }
 
 // NewMemoryStore builds an empty fake.
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{assets: map[int64]Asset{}}
+	return &MemoryStore{assets: map[int64]Asset{}, schedules: map[int64]AssetSchedule{}}
 }
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }

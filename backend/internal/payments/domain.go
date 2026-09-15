@@ -1,11 +1,15 @@
 // Package payments implements online/offline payment provider integration
-// (Dolibarr paypal/stripe modules): a provider registry, recorded payment
-// attempts with webhook idempotency, and Stripe-style HMAC webhook
-// verification. Live provider secrets stay in env (FERP_STRIPE_*); all logic
-// below is verifiable offline with test vectors.
+// (Dolibarr paypal/stripe modules): a provider registry with live HTTP
+// clients (StripeClient, PayPalClient) that degrade to mint-only references
+// when secrets are unset, recorded payment attempts with webhook idempotency,
+// and HMAC webhook verification for both providers. Live provider secrets
+// stay in env (FERP_STRIPE_*, FERP_PAYPAL_*); raw secrets are never logged or
+// persisted (only provider refs and redacted error snippets leave the client).
+// All logic below is verifiable offline with httptest doubles + test vectors.
 package payments
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -87,11 +91,45 @@ func (a PaymentAttempt) CanTransition(to AttemptStatus) bool {
 	}
 }
 
-// Provider creates collection intents; manual settles immediately, online
-// providers return a client secret / approval URL for the frontend.
+// Provider creates collection intents and issues refunds. Live clients
+// (StripeClient, PayPalClient) perform real provider HTTP calls when their
+// secrets are configured and fall back to mint-only references otherwise, so
+// unset secrets preserve the historical offline behavior. Manual settles
+// immediately; online providers return a client secret / approval URL for
+// the frontend. Amounts are int64 minor units (> 0); currency is ISO-4217.
 type Provider interface {
 	Name() string
-	CreateIntent(amount int64, currency string) (clientRef string, err error)
+	CreateIntent(ctx context.Context, amount int64, currency string) (Intent, error)
+	Refund(ctx context.Context, providerRef string, amount int64) (refundRef string, err error)
+}
+
+// Intent is a provider-side collection reference. Ref is persisted as
+// PaymentAttempt.Ref; ClientSecret / ApprovalURL are returned to the frontend
+// and are NEVER persisted (they carry confirmation capability, not identity).
+type Intent struct {
+	Ref          string
+	ClientSecret string // Stripe payment-intent client_secret (empty for others)
+	ApprovalURL  string // PayPal payer-approval link (empty for others)
+}
+
+// validateIntentInput guards all intent/refund entry points (minor units, ISO code).
+func validateIntentInput(amount int64, currency string) error {
+	if amount <= 0 || strings.TrimSpace(currency) == "" {
+		return errors.New("payments: bad intent")
+	}
+	return nil
+}
+
+// mintIntentRef mints a provider-side intent reference without network calls
+// (offline/test-mode behavior shared by OnlineProvider and live clients whose
+// secrets are unset).
+func mintIntentRef(name, currency string) string {
+	return fmt.Sprintf("%s-pi-%d-%s", name, time.Now().UTC().UnixNano(), strings.ToUpper(currency))
+}
+
+// mintRefundRef mints an offline refund reference (same no-network contract).
+func mintRefundRef(name, providerRef string) string {
+	return fmt.Sprintf("%s-re-%s-%d", name, providerRef, time.Now().UTC().UnixNano())
 }
 
 // ManualProvider settles offline collections (cash/check at the counter).
@@ -101,17 +139,26 @@ type ManualProvider struct{}
 func (ManualProvider) Name() string { return ProviderManual }
 
 // CreateIntent records an offline intent reference.
-func (ManualProvider) CreateIntent(amount int64, currency string) (string, error) {
-	if amount <= 0 || strings.TrimSpace(currency) == "" {
-		return "", errors.New("payments: bad intent")
+func (ManualProvider) CreateIntent(_ context.Context, amount int64, currency string) (Intent, error) {
+	if err := validateIntentInput(amount, currency); err != nil {
+		return Intent{}, err
 	}
-	return fmt.Sprintf("manual-%d-%s", time.Now().UTC().UnixNano(), strings.ToUpper(currency)), nil
+	return Intent{Ref: fmt.Sprintf("manual-%d-%s", time.Now().UTC().UnixNano(), strings.ToUpper(currency))}, nil
+}
+
+// Refund records an offline refund (no network; the handler persists the
+// Succeeded→Refunded transition).
+func (ManualProvider) Refund(_ context.Context, providerRef string, amount int64) (string, error) {
+	if providerRef == "" || amount <= 0 {
+		return "", errors.New("payments: bad refund")
+	}
+	return mintRefundRef(ProviderManual, providerRef), nil
 }
 
 // OnlineProvider is a config-driven placeholder for Stripe/PayPal: it mints
-// provider-side intent references without network calls. Live charge/confirm
-// calls are a follow-up once FERP_STRIPE_*/FERP_PAYPAL_* secrets are configured;
-// settlement always arrives via verified webhooks regardless.
+// provider-side intent references without network calls. Prefer StripeClient /
+// PayPalClient (live when FERP_STRIPE_*/FERP_PAYPAL_* secrets are configured,
+// mint-only otherwise); settlement always arrives via verified webhooks regardless.
 type OnlineProvider struct {
 	name string
 }
@@ -123,11 +170,20 @@ func NewOnlineProvider(name string) OnlineProvider { return OnlineProvider{name:
 func (p OnlineProvider) Name() string { return p.name }
 
 // CreateIntent mints a provider-side intent reference.
-func (p OnlineProvider) CreateIntent(amount int64, currency string) (string, error) {
-	if amount <= 0 || strings.TrimSpace(currency) == "" {
-		return "", errors.New("payments: bad intent")
+func (p OnlineProvider) CreateIntent(_ context.Context, amount int64, currency string) (Intent, error) {
+	if err := validateIntentInput(amount, currency); err != nil {
+		return Intent{}, err
 	}
-	return fmt.Sprintf("%s-pi-%d-%s", p.name, time.Now().UTC().UnixNano(), strings.ToUpper(currency)), nil
+	return Intent{Ref: mintIntentRef(p.name, currency)}, nil
+}
+
+// Refund mints an offline refund reference (no network; the handler persists
+// the Succeeded→Refunded transition).
+func (p OnlineProvider) Refund(_ context.Context, providerRef string, amount int64) (string, error) {
+	if providerRef == "" || amount <= 0 {
+		return "", errors.New("payments: bad refund")
+	}
+	return mintRefundRef(p.name, providerRef), nil
 }
 // Registry resolves providers by name.
 type Registry struct {
@@ -158,7 +214,8 @@ func (r *Registry) Resolve(name string) (Provider, error) {
 
 // VerifyStripeSignature checks a Stripe-style webhook signature header
 // ("t=<unix>,v1=<hex hmac-sha256 of '<t>.<payload>' with tolerance").
-// Fully offline-testable; live mode only needs FERP_STRIPE_WEBHOOK_SECRET.
+// Comparison is constant-time (hmac.Equal); fully offline-testable — live
+// mode only needs FERP_STRIPE_WEBHOOK_SECRET.
 func VerifyStripeSignature(secret, payload, header string, tolerance time.Duration, now time.Time) error {
 	var ts int64 = -1
 	var sigs []string

@@ -88,8 +88,13 @@ func TestMemoryIdempotency(t *testing.T) {
 func TestPGAttemptFlow(t *testing.T) {
 	ctx := context.Background()
 	pool := pgtest.Pool(t)
+	var orgID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO ferp_organizations (entity_id, name, is_customer)
+		VALUES (1,'PG-ORG',true) RETURNING id`).Scan(&orgID); err != nil {
+		t.Fatalf("org: %v", err)
+	}
 	st := NewPGStore(pool)
-	a := &PaymentAttempt{EntityID: 1, Ref: "PG-A", OrgID: 1, Amount: 100,
+	a := &PaymentAttempt{EntityID: 1, Ref: "PG-A", OrgID: orgID, Amount: 100,
 		Currency: "USD", Provider: ProviderManual}
 	if err := st.CreateAttempt(ctx, pool, a); err != nil {
 		t.Fatalf("attempt: %v", err)

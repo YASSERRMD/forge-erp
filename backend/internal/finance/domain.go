@@ -53,12 +53,12 @@ type Journal struct {
 
 // FiscalYear bounds postings (Dolibarr llx_accounting_fiscalyear).
 type FiscalYear struct {
-	ID        int64      `json:"id"`
-	EntityID  int64      `json:"entity_id"`
-	Label     string     `json:"label"`
-	StartDate time.Time  `json:"start_date"`
-	EndDate   time.Time  `json:"end_date"`
-	Locked    bool       `json:"locked"`
+	ID        int64     `json:"id"`
+	EntityID  int64     `json:"entity_id"`
+	Label     string    `json:"label"`
+	StartDate time.Time `json:"start_date"`
+	EndDate   time.Time `json:"end_date"`
+	Locked    bool      `json:"locked"`
 }
 
 // Contains reports whether d falls inside the year.
@@ -68,10 +68,11 @@ func (f FiscalYear) Contains(d time.Time) bool {
 
 // EntryLine is one debit or credit leg (exactly one side non-zero).
 type EntryLine struct {
-	AccountID int64  `json:"account_id"`
-	Label     string `json:"label"`
-	Debit     int64  `json:"debit"`
-	Credit    int64  `json:"credit"`
+	AccountID  int64  `json:"account_id"`
+	Label      string `json:"label"`
+	Debit      int64  `json:"debit"`
+	Credit     int64  `json:"credit"`
+	VATRateBps int    `json:"vat_rate_bps"` // 0 = out of VAT scope; tags base + tax legs of a VAT operation
 }
 
 // Validate leg rules.
@@ -81,6 +82,9 @@ func (l EntryLine) Validate() error {
 	}
 	if l.Debit < 0 || l.Credit < 0 {
 		return errors.New("finance: negative leg")
+	}
+	if l.VATRateBps < 0 {
+		return errors.New("finance: negative VAT rate")
 	}
 	if (l.Debit == 0) == (l.Credit == 0) {
 		return errors.New("finance: leg needs exactly one of debit/credit")
@@ -163,24 +167,25 @@ const GenesisHash = "ferp-genesis"
 
 // BankAccount tracks a real-world account (Dolibarr llx_bank_account).
 type BankAccount struct {
-	ID        int64  `json:"id"`
-	EntityID  int64  `json:"entity_id"`
-	Code      string `json:"code"`
-	Label     string `json:"label"`
-	IBAN      string `json:"iban"`
-	Balance   int64  `json:"balance"` // minor units, derived from transactions
+	ID       int64  `json:"id"`
+	EntityID int64  `json:"entity_id"`
+	Code     string `json:"code"`
+	Label    string `json:"label"`
+	IBAN     string `json:"iban"`
+	Balance  int64  `json:"balance"` // minor units, derived from transactions
 }
 
 // BankTransaction is one movement (Dolibarr llx_bank); reconciled links to entries.
 type BankTransaction struct {
-	ID            int64      `json:"id"`
-	EntityID      int64      `json:"entity_id"`
-	AccountID     int64      `json:"account_id"`
-	Amount        int64      `json:"amount"` // signed minor units
-	Label         string     `json:"label"`
-	ValueDate     time.Time  `json:"value_date"`
-	Reconciled    bool       `json:"reconciled"`
-	ReconciledAt  *time.Time `json:"reconciled_at"`
+	ID           int64      `json:"id"`
+	EntityID     int64      `json:"entity_id"`
+	AccountID    int64      `json:"account_id"`
+	Amount       int64      `json:"amount"` // signed minor units
+	Label        string     `json:"label"`
+	BankRef      string     `json:"bank_ref"` // statement natural key; "" = none (never deduped)
+	ValueDate    time.Time  `json:"value_date"`
+	Reconciled   bool       `json:"reconciled"`
+	ReconciledAt *time.Time `json:"reconciled_at"`
 }
 
 // Reconcile marks a transaction reconciled (idempotent guard at store).
@@ -204,14 +209,14 @@ type LoanScheduleLine struct {
 
 // Loan is a financing contract (Dolibarr llx_loan).
 type Loan struct {
-	ID         int64              `json:"id"`
-	EntityID   int64              `json:"entity_id"`
-	Label      string             `json:"label"`
-	Principal  int64              `json:"principal"`
-	RateBps    int                `json:"rate_bps"` // annual, basis points
-	Start      time.Time          `json:"start"`
-	Periods    int                `json:"periods"`
-	Schedule   []LoanScheduleLine `json:"schedule"`
+	ID        int64              `json:"id"`
+	EntityID  int64              `json:"entity_id"`
+	Label     string             `json:"label"`
+	Principal int64              `json:"principal"`
+	RateBps   int                `json:"rate_bps"` // annual, basis points
+	Start     time.Time          `json:"start"`
+	Periods   int                `json:"periods"`
+	Schedule  []LoanScheduleLine `json:"schedule"`
 }
 
 // BuildSchedule generates a straight-line amortisation (principal split evenly,

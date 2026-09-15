@@ -8,13 +8,16 @@ import (
 
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Deps wires handlers to persistence and the event bus.
 type Deps struct {
-	Store Store
-	Bus   platform.Bus
-	DB    platform.DBTX
+	Store   Store
+	Finance Finance // nil disables depreciation/disposal posting
+	Bus     platform.Bus
+	DB      platform.DBTX
+	Pool    *pgxpool.Pool // transaction source for the depreciation service (nil in tests)
 }
 
 // Middleware builds Require-style RBAC gates (identity.Handler.Require in production).
@@ -22,15 +25,22 @@ type Middleware func(module, entity, action string) func(http.Handler) http.Hand
 
 // Routes mounts the assets surface (caller nests at /api/v1).
 func Routes(r chi.Router, d Deps, mw Middleware) {
-	h := &Handler{deps: d}
+	h := &Handler{deps: d, dep: NewDepService(d.Pool, d.Store, d.Finance, d.Bus)}
 	r.With(mw("assets", "asset", "write")).Post("/assets", h.CreateAsset)
 	r.With(mw("assets", "asset", "read")).Get("/assets", h.ListAssets)
 	r.With(mw("assets", "asset", "write")).Put("/assets/{id}", h.UpdateAsset)
 	r.With(mw("assets", "asset", "validate")).Post("/assets/{id}/status", h.SetAssetStatus)
+	r.With(mw("assets", "depreciation", "write")).Post("/assets/{id}/schedules", h.CreateSchedule)
+	r.With(mw("assets", "depreciation", "read")).Get("/assets/{id}/schedules", h.ListSchedules)
+	r.With(mw("assets", "depreciation", "validate")).Post("/assets/schedules/{sid}/post", h.PostDepreciation)
+	r.With(mw("assets", "asset", "validate")).Post("/assets/{id}/dispose", h.DisposeAsset)
 }
 
 // Handler implements the assets HTTP surface.
-type Handler struct{ deps Deps }
+type Handler struct {
+	deps Deps
+	dep  *DepService
+}
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")

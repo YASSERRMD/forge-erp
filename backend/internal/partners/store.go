@@ -7,17 +7,24 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/field"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// OrgFieldScope is the Kernel 6 custom-field scope for organizations.
+const OrgFieldScope = field.ScopeOrganization
 
 // Store is the persistence contract for the partners context.
 type Store interface {
 	CreateOrg(ctx context.Context, db platform.DBTX, o *Organization) error
 	OrgByID(ctx context.Context, db platform.DBTX, entityID, id int64) (Organization, error)
 	ListOrgs(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Organization, error)
+	// ListOrgsByField filters organizations by one custom field's text form
+	// ((custom_fields->>'key') = value); unknown keys match nothing.
+	ListOrgsByField(ctx context.Context, db platform.DBTX, entityID int64, key, value string, limit, offset int) ([]Organization, error)
 	UpdateOrg(ctx context.Context, db platform.DBTX, o *Organization) error
 	ParentOf(ctx context.Context, db platform.DBTX, entityID, id int64) (*int64, bool)
 	CreateContact(ctx context.Context, db platform.DBTX, c *Contact) error
@@ -26,7 +33,14 @@ type Store interface {
 }
 
 // PGStore implements Store against PostgreSQL.
-type PGStore struct{ pool *pgxpool.Pool }
+//
+// Validator, when non-nil, validates organization custom_fields against
+// Kernel 6 definitions on create/update (nil skips — the default, so
+// existing callers are unaffected).
+type PGStore struct {
+	pool      *pgxpool.Pool
+	Validator *field.Validator
+}
 
 // NewPGStore wraps a pool.
 func NewPGStore(pool *pgxpool.Pool) *PGStore { return &PGStore{pool: pool} }
@@ -58,6 +72,9 @@ func scanOrg(row pgx.Row) (Organization, error) {
 // full audit timestamps live in the row. (Timestamps intentionally minimal in domain.)
 
 func (s *PGStore) CreateOrg(ctx context.Context, db platform.DBTX, o *Organization) error {
+	if err := s.Validator.Validate(OrgFieldScope, o.EntityID, o.CustomFields); err != nil {
+		return err
+	}
 	addr, _ := json.Marshal(o.Address)
 	custom, _ := json.Marshal(nullableMap(o.CustomFields))
 	return db.QueryRow(ctx, `INSERT INTO ferp_organizations
@@ -102,7 +119,32 @@ func (s *PGStore) ListOrgs(ctx context.Context, db platform.DBTX, entityID int64
 	return out, rows.Err()
 }
 
+func (s *PGStore) ListOrgsByField(ctx context.Context, db platform.DBTX, entityID int64, key, value string, limit, offset int) ([]Organization, error) {
+	pred, err := field.FieldEqualsClause(key, 2)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(ctx, `SELECT `+orgCols+` FROM ferp_organizations
+		WHERE entity_id=$1 AND `+pred+` ORDER BY name LIMIT $3 OFFSET $4`, entityID, value, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Organization
+	for rows.Next() {
+		o, err := scanOrg(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
 func (s *PGStore) UpdateOrg(ctx context.Context, db platform.DBTX, o *Organization) error {
+	if err := s.Validator.Validate(OrgFieldScope, o.EntityID, o.CustomFields); err != nil {
+		return err
+	}
 	addr, _ := json.Marshal(o.Address)
 	custom, _ := json.Marshal(nullableMap(o.CustomFields))
 	tag, err := db.Exec(ctx, `UPDATE ferp_organizations SET name=$1, alias=$2, ref_ext=$3,
@@ -188,12 +230,16 @@ func (s *PGStore) CreateCategory(ctx context.Context, db platform.DBTX, c *Categ
 }
 
 // MemoryStore is the in-process fake for handler tests.
+//
+// Validator, when non-nil, validates organization custom_fields against
+// Kernel 6 definitions on create/update (nil skips).
 type MemoryStore struct {
-	mu       sync.Mutex
-	seq      int64
-	orgs     map[int64]Organization
-	contacts map[int64]Contact
-	cats     map[int64]Category
+	mu        sync.Mutex
+	seq       int64
+	orgs      map[int64]Organization
+	contacts  map[int64]Contact
+	cats      map[int64]Category
+	Validator *field.Validator
 }
 
 // NewMemoryStore builds an empty fake.
@@ -206,6 +252,9 @@ func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
 func (m *MemoryStore) CreateOrg(_ context.Context, _ platform.DBTX, o *Organization) error {
 	if err := o.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
+	}
+	if err := m.Validator.Validate(OrgFieldScope, o.EntityID, o.CustomFields); err != nil {
+		return err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -256,6 +305,9 @@ func (m *MemoryStore) UpdateOrg(_ context.Context, _ platform.DBTX, o *Organizat
 	if err := o.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
+	if err := m.Validator.Validate(OrgFieldScope, o.EntityID, o.CustomFields); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cur, ok := m.orgs[o.ID]
@@ -268,6 +320,33 @@ func (m *MemoryStore) UpdateOrg(_ context.Context, _ platform.DBTX, o *Organizat
 	o.RowVersion++
 	m.orgs[o.ID] = *o
 	return nil
+}
+
+func (m *MemoryStore) ListOrgsByField(_ context.Context, _ platform.DBTX, entityID int64, key, value string, limit, offset int) ([]Organization, error) {
+	if _, err := field.FieldEqualsClause(key, 1); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Organization
+	for _, o := range m.orgs {
+		if o.EntityID != entityID {
+			continue
+		}
+		v, ok := o.CustomFields[key]
+		if !ok || field.StringValue(v) != value {
+			continue
+		}
+		out = append(out, o)
+	}
+	if offset > len(out) {
+		return nil, nil
+	}
+	out = out[offset:]
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 func (m *MemoryStore) ParentOf(_ context.Context, _ platform.DBTX, entityID, id int64) (*int64, bool) {
