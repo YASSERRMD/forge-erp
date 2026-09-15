@@ -312,12 +312,16 @@ func ExportXML(b Batch, now time.Time) ([]byte, error) {
 	return append([]byte(xml.Header), raw...), nil
 }
 
-// Store is the persistence contract for SEPA batches.
+// Store is the persistence contract for SEPA batches, mandates,
+// R-transactions and credit-transfer batches.
 type Store interface {
 	CreateBatch(ctx context.Context, db platform.DBTX, b *Batch) error
 	BatchByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Batch, error)
 	ListBatches(ctx context.Context, db platform.DBTX, entityID int64) ([]Batch, error)
 	SetBatchStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to BatchStatus, rowVersion int64) (Batch, error)
+	mandateStore
+	rtransactionStore
+	transferStore
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -405,14 +409,25 @@ func (s *PGStore) SetBatchStatus(ctx context.Context, db platform.DBTX, entityID
 
 // MemoryStore is the in-process fake for handler tests.
 type MemoryStore struct {
-	mu      sync.Mutex
-	seq     int64
-	batches map[int64]Batch
+	mu        sync.Mutex
+	seq       int64
+	batches   map[int64]Batch
+	mseq      int64
+	mandates  map[int64]Mandate
+	rseq      int64
+	rtxs      map[int64]RTransaction
+	tseq      int64
+	transfers map[int64]Transfer
 }
 
 // NewMemoryStore builds an empty fake.
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{batches: map[int64]Batch{}}
+	return &MemoryStore{
+		batches:   map[int64]Batch{},
+		mandates:  map[int64]Mandate{},
+		rtxs:      map[int64]RTransaction{},
+		transfers: map[int64]Transfer{},
+	}
 }
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
