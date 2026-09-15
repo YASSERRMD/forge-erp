@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YASSERRMD/forge-erp/backend/internal/finance"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/trigger"
 )
 
 // Service owns the expense-payout transaction boundary (Phase 0 task 4):
@@ -37,10 +38,14 @@ type PayCmd struct {
 }
 
 // Pay flips the report to paid and posts the balanced entry
-// (debit expense, credit bank) in one transaction. Publishes
-// forgeerp.hr.expense.paid.v1 after commit.
+// (debit expense, credit bank) in one transaction. The EXPENSE_PAID trigger
+// is emitted to ferp_outbox inside that same transaction; a trigger.Relay
+// delivers it to forgeerp.hr.expense.paid.v1 after commit (same subject as
+// the legacy direct publish, so existing subscribers keep working).
 func (s *Service) Pay(ctx context.Context, cmd PayCmd) (ExpenseReport, error) {
 	if s.Pool == nil {
+		// Memory path (handler tests): no transaction and no outbox, so
+		// publish directly as before.
 		out, err := s.payOn(ctx, nil, cmd)
 		if err != nil {
 			return ExpenseReport{}, err
@@ -57,10 +62,13 @@ func (s *Service) Pay(ctx context.Context, cmd PayCmd) (ExpenseReport, error) {
 	if err != nil {
 		return ExpenseReport{}, err
 	}
-	s.published(ctx, cmd.EntityID, out.ID)
+	// No direct publish here: payOn staged EXPENSE_PAID in the outbox and
+	// the relay delivers it (crash between commit and publish still delivers).
 	return out, nil
 }
 
+// published is the memory-path fallback (nil Pool: no transaction, no
+// outbox). The pooled path delivers via the outbox relay instead.
 func (s *Service) published(ctx context.Context, entityID, id int64) {
 	if s.Bus == nil {
 		return
@@ -86,6 +94,17 @@ func (s *Service) payOn(ctx context.Context, db platform.DBTX, cmd PayCmd) (Expe
 		}}
 	if err := s.Finance.PostEntry(ctx, db, entry); err != nil {
 		return ExpenseReport{}, err
+	}
+	if db != nil {
+		// Stage EXPENSE_PAID in the caller's transaction (outbox pattern):
+		// delivery happens via trigger.Relay after commit.
+		ev := trigger.ExpensePaid{
+			Entity: cmd.EntityID, ExpenseID: paid.ID,
+			Ref: paid.Ref, UserLogin: paid.UserLogin, Total: total,
+		}
+		if err := trigger.EmitEvent(ctx, db, ev); err != nil {
+			return ExpenseReport{}, err
+		}
 	}
 	return paid, nil
 }
