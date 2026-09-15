@@ -10,6 +10,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/hook"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 )
 
@@ -23,6 +24,7 @@ type Service struct {
 	Sales     Sales
 	WalkinOrg int64 // default customer for anonymous sales (0 = require org)
 	Bus       platform.Bus
+	Hooks     *hook.Bus // Kernel 2: synchronous in-tx hooks (nil = disabled)
 }
 
 // NewService wires a checkout service (Pool may be nil in tests).
@@ -39,6 +41,16 @@ type CheckoutCmd struct {
 	Method    string
 	Tendered  int64
 	Payments  []Tender
+}
+
+// CheckoutHookSubject is the mutable subject for the hook.POSCheckoutValidate
+// hook. Handlers receive a pointer so Result.Mutate can adjust the checkout
+// before any writes happen (e.g. default the customer org, clamp tender legs).
+// Amounts stay int64 minor units; entityID threads through Cmd unchanged.
+type CheckoutHookSubject struct {
+	Cmd      CheckoutCmd
+	Session  Session
+	Terminal Terminal
 }
 
 // Checkout rings a sale atomically: validated invoice + full payment,
@@ -89,6 +101,21 @@ func (s *Service) checkoutOn(ctx context.Context, db platform.DBTX, cmd Checkout
 	}
 	if term.Status != TerminalActive {
 		return Sale{}, errors.New("pos: terminal inactive")
+	}
+	// Kernel 2 (hook bus): run pos.checkout.validate INSIDE the caller's
+	// transaction BEFORE any writes. The subject is a pointer so hook Mutate
+	// functions can adjust the command (Cmd) going forward; a non-nil Veto is
+	// returned as-is so platform.TxEntity rolls the transaction back.
+	if s.Hooks != nil {
+		var tx pgx.Tx
+		if t, ok := db.(pgx.Tx); ok {
+			tx = t
+		}
+		subject := &CheckoutHookSubject{Cmd: cmd, Session: se, Terminal: term}
+		if _, err := s.Hooks.Execute(ctx, tx, hook.POSCheckoutValidate, subject); err != nil {
+			return Sale{}, err
+		}
+		cmd, se, term = subject.Cmd, subject.Session, subject.Terminal
 	}
 	dlines := make([]documents.Line, 0, len(cmd.Lines))
 	type need struct {

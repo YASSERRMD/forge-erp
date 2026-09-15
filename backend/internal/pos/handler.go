@@ -13,6 +13,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/hook"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 )
 
@@ -41,6 +42,7 @@ type Deps struct {
 	Sales     Sales
 	WalkinOrg int64 // FERP_POS_WALKIN_ORG: default customer for anonymous sales (0 = require org)
 	Bus       platform.Bus
+	Hooks     *hook.Bus // Kernel 2: synchronous in-tx hooks for checkout (nil = disabled)
 	DB        platform.DBTX
 	Pool      *pgxpool.Pool // transaction source for the checkout service (nil in tests)
 }
@@ -51,6 +53,7 @@ type Middleware func(module, entity, action string) func(http.Handler) http.Hand
 // Routes mounts the pos surface (caller nests at /api/v1).
 func Routes(r chi.Router, d Deps, mw Middleware) {
 	h := &Handler{deps: d, svc: NewService(d.Pool, d.Store, d.Catalog, d.Sales, d.WalkinOrg, d.Bus)}
+	h.svc.Hooks = d.Hooks
 	r.With(mw("pos", "terminal", "write")).Post("/pos/terminals", h.CreateTerminal)
 	r.With(mw("pos", "terminal", "read")).Get("/pos/terminals", h.ListTerminals)
 	r.With(mw("pos", "session", "write")).Post("/pos/sessions", h.OpenSession)
