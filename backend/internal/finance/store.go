@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 )
 
 // ErrNotFound is returned when a row does not exist (alias of the platform
@@ -36,6 +36,29 @@ type Store interface {
 	Reconcile(ctx context.Context, db platform.DBTX, entityID, txID int64, at time.Time) error
 	AccountBalance(ctx context.Context, db platform.DBTX, accountID int64) (int64, error)
 	CreateLoan(ctx context.Context, db platform.DBTX, l *Loan) error
+	// Phase 2: statement import (idempotent on bank ref), statement +
+	// running balance, and atomic paired transfers.
+	ImportTransactions(ctx context.Context, db platform.DBTX, entityID, accountID int64, lines []ImportLine) (imported, skipped int, err error)
+	BankTransactions(ctx context.Context, db platform.DBTX, accountID int64) ([]BankTransaction, error)
+	BankStatement(ctx context.Context, db platform.DBTX, accountID int64) ([]StatementLine, error)
+	Transfer(ctx context.Context, db platform.DBTX, c TransferCmd) error
+	// Phase 2: fiscal years, general-ledger book and account drill-down.
+	FiscalYearByID(ctx context.Context, db platform.DBTX, entityID, yearID int64) (FiscalYear, error)
+	ListFiscalYears(ctx context.Context, db platform.DBTX, entityID int64) ([]FiscalYear, error)
+	SetFiscalYearLocked(ctx context.Context, db platform.DBTX, entityID, yearID int64, locked bool) error
+	LedgerBook(ctx context.Context, db platform.DBTX, entityID int64, from, to time.Time) ([]Entry, error)
+	AccountLedger(ctx context.Context, db platform.DBTX, entityID, accountID int64, from, to time.Time) (AccountDrilldown, error)
+	// Phase 2: tax periods, VAT rates + return, social/fiscal charges.
+	CreateTaxPeriod(ctx context.Context, db platform.DBTX, p *TaxPeriod) error
+	ListTaxPeriods(ctx context.Context, db platform.DBTX, entityID int64) ([]TaxPeriod, error)
+	SetTaxPeriodStatus(ctx context.Context, db platform.DBTX, entityID, periodID int64, st TaxPeriodStatus) error
+	CreateVATRate(ctx context.Context, db platform.DBTX, v *VATRate) error
+	ListVATRates(ctx context.Context, db platform.DBTX, entityID int64) ([]VATRate, error)
+	VATReturn(ctx context.Context, db platform.DBTX, entityID int64, from, to time.Time) (VATReturn, error)
+	CreateCharge(ctx context.Context, db platform.DBTX, c *TaxCharge) error
+	ListCharges(ctx context.Context, db platform.DBTX, entityID int64) ([]TaxCharge, error)
+	ChargesDue(ctx context.Context, db platform.DBTX, entityID int64, asOf time.Time) ([]TaxCharge, error)
+	MarkChargePaid(ctx context.Context, db platform.DBTX, entityID, chargeID int64, at time.Time) error
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -151,7 +174,7 @@ func (s *PGStore) PostEntry(ctx context.Context, db platform.DBTX, e *Entry) err
 	// head instead of forking it. Xact-scoped: released at commit/rollback.
 	// The UNIQUE (entity_id, prev_hash) constraint backstops any path that
 	// bypasses this lock.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('ferp_entries')::bigint, $1)`, e.EntityID); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('ferp_entries')::bigint, $1::bigint)`, e.EntityID); err != nil {
 		return finish(err)
 	}
 	// Fiscal-year lock: entry date must fall in an unlocked year (or no year defined).
@@ -186,8 +209,8 @@ func (s *PGStore) PostEntry(ctx context.Context, db platform.DBTX, e *Entry) err
 	}
 	for i, l := range e.Lines {
 		if _, err := tx.Exec(ctx, `INSERT INTO ferp_entry_lines
-			(entry_id, pos, account_id, label, debit, credit) VALUES ($1,$2,$3,$4,$5,$6)`,
-			e.ID, i, l.AccountID, l.Label, l.Debit, l.Credit); err != nil {
+			(entry_id, pos, account_id, label, debit, credit, vat_rate_bps) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+			e.ID, i, l.AccountID, l.Label, l.Debit, l.Credit, l.VATRateBps); err != nil {
 			return finish(err)
 		}
 	}
@@ -217,7 +240,7 @@ func loadEntries(ctx context.Context, q queryFunc, journalID int64) ([]Entry, er
 		return nil, err
 	}
 	for i := range out {
-		lr, err := q(ctx, `SELECT account_id, label, debit, credit FROM ferp_entry_lines
+		lr, err := q(ctx, `SELECT account_id, label, debit, credit, vat_rate_bps FROM ferp_entry_lines
 			WHERE entry_id=$1 ORDER BY pos, id`, out[i].ID)
 		if err != nil {
 			return nil, err
@@ -225,7 +248,7 @@ func loadEntries(ctx context.Context, q queryFunc, journalID int64) ([]Entry, er
 		var lines []EntryLine
 		for lr.Next() {
 			var l EntryLine
-			if err := lr.Scan(&l.AccountID, &l.Label, &l.Debit, &l.Credit); err != nil {
+			if err := lr.Scan(&l.AccountID, &l.Label, &l.Debit, &l.Credit, &l.VATRateBps); err != nil {
 				lr.Close()
 				return nil, err
 			}
@@ -273,8 +296,8 @@ func (s *PGStore) RecordTransaction(ctx context.Context, db platform.DBTX, t *Ba
 		return fmt.Errorf("%w: %w", err, platform.ErrValidation)
 	}
 	return db.QueryRow(ctx, `INSERT INTO ferp_bank_transactions
-		(entity_id, account_id, amount, label, value_date) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-		t.EntityID, t.AccountID, t.Amount, t.Label, t.ValueDate).Scan(&t.ID)
+		(entity_id, account_id, amount, label, bank_ref, value_date) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+		t.EntityID, t.AccountID, t.Amount, t.Label, t.BankRef, t.ValueDate).Scan(&t.ID)
 }
 
 func (s *PGStore) Reconcile(ctx context.Context, db platform.DBTX, entityID, txID int64, at time.Time) error {
@@ -316,12 +339,16 @@ type MemoryStore struct {
 	banks   map[int64]BankAccount
 	txs     map[int64]BankTransaction
 	loans   map[int64]Loan
+	periods map[int64]TaxPeriod
+	rates   map[int64]VATRate
+	charges map[int64]TaxCharge
 }
 
 // NewMemoryStore builds an empty fake.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{accts: map[int64]Account{}, jrns: map[int64]Journal{},
-		banks: map[int64]BankAccount{}, txs: map[int64]BankTransaction{}, loans: map[int64]Loan{}}
+		banks: map[int64]BankAccount{}, txs: map[int64]BankTransaction{}, loans: map[int64]Loan{},
+		periods: map[int64]TaxPeriod{}, rates: map[int64]VATRate{}, charges: map[int64]TaxCharge{}}
 }
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
