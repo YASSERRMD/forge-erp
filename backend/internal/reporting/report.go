@@ -200,14 +200,13 @@ func ProductMargins(ctx context.Context, db platform.DBTX, entityID int64, billi
 		if a.rev > 0 {
 			pct = margin * 10000 / a.rev
 		}
-	out = append(out, MarginLine{ProductID: pid, SKU: skuOf[pid],
-		Qty: a.qty, Revenue: a.rev, Cost: cost, Margin: margin, MarginPct: pct})
+		out = append(out, MarginLine{ProductID: pid, SKU: skuOf[pid],
+			Qty: a.qty, Revenue: a.rev, Cost: cost, Margin: margin, MarginPct: pct})
+	}
 	return out, nil
 }
 
 // Receivable is one unpaid invoice balance.
-	return out, nil
-}
 type Receivable struct {
 	InvoiceID int64  `json:"invoice_id"`
 	Ref       string `json:"ref"`
