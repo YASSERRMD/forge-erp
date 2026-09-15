@@ -34,6 +34,8 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
 	"github.com/YASSERRMD/forge-erp/backend/internal/payments"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/module"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/trigger"
 	"github.com/YASSERRMD/forge-erp/backend/internal/pos"
 	"github.com/YASSERRMD/forge-erp/backend/internal/procurement"
 	"github.com/YASSERRMD/forge-erp/backend/internal/reporting"
@@ -203,6 +205,39 @@ func run() error {
 	} else {
 		log.Print("forgeerp: event bus=memory")
 	}
+	// Module registry (Kernel 1): contexts self-register here as they adopt
+	// module.Module; the /api/v1/modules surface lists them per entity.
+	modReg := module.NewRegistry()
+	// Trigger outbox relay (Kernel 3): delivers events staged inside
+	// transactions (crash-safe). Disabled with FERP_RELAY_INTERVAL_S=0.
+	relay := &trigger.Relay{Bus: bus}
+	relaySecs := 5
+	if v := os.Getenv("FERP_RELAY_INTERVAL_S"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			relaySecs = n
+		}
+	}
+	if relaySecs > 0 {
+		go func() {
+			t := time.NewTicker(time.Duration(relaySecs) * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					if n, err := relay.RunOnce(context.Background(), pool); err != nil {
+						log.Printf("forgeerp: trigger relay: %v", err)
+					} else if n > 0 {
+						log.Printf("forgeerp: trigger relay delivered %d", n)
+					}
+				}
+			}
+		}()
+		log.Printf("forgeerp: trigger relay every %ds", relaySecs)
+	} else {
+		log.Print("forgeerp: trigger relay disabled (FERP_RELAY_INTERVAL_S=0)")
+	}
 	if oss, ok := searcher.(*search.OpenSearcher); ok {
 		// Write-through indexing: created orgs/products land in OpenSearch
 		// immediately; startup reindex + provider fallback cover the rest.
@@ -289,6 +324,7 @@ func run() error {
 		inbound: inbound.Deps{Store: inbound.NewPGStore(pool), Tickets: svcstore,
 			Bus: bus, DB: pool},
 		agenda:   agenda.Deps{Store: agenda.NewPGStore(pool), Bus: bus, DB: pool},
+		modules:  module.Deps{Registry: modReg, Store: module.NewPGStore(), DB: pool},
 		docSvc:   docSvc,
 		searcher: searcher,
 	})
@@ -382,6 +418,7 @@ type apiWiring struct {
 	sepa          sepa.Deps
 	inbound       inbound.Deps
 	agenda        agenda.Deps
+	modules       module.Deps
 	docSvc        *documentsvc.Service
 	searcher      search.Searcher
 }
@@ -415,6 +452,7 @@ func mountAPIRoutes(mux chi.Router, w apiWiring) {
 		sepa.Routes(r, w.sepa, idH.Require)
 		inbound.Routes(r, w.inbound, idH.Require)
 		agenda.Routes(r, w.agenda, idH.Require)
+		module.Routes(r, w.modules, idH.Require)
 		documentsvc.Routes(r, w.docSvc, idH.Require)
 		search.Routes(r, w.searcher, idH.Require)
 	})
@@ -429,6 +467,9 @@ func stubWiring() apiWiring {
 	limiter := platform.NewRateLimiter(20, 40)
 	return apiWiring{
 		limit: limiter.Limit,
+		modules: module.Deps{
+			Registry: module.NewRegistry(),
+		},
 		payments: payments.Deps{
 			Providers: payments.NewRegistry(),
 			Bus:       platform.NewMemoryBus(),
