@@ -33,6 +33,7 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("catalog", "stock", "write")).Post("/inventory-adjust", h.Adjust)
 	r.With(mw("catalog", "variant", "write")).Post("/products/{id}/variants", h.CreateVariant)
 	r.With(mw("catalog", "variant", "read")).Get("/products/{id}/variants", h.ListVariants)
+	r.With(mw("catalog", "label", "write")).Post("/barcode/labels", h.LabelSheet)
 }
 
 // Handler implements the catalog HTTP surface.
@@ -290,4 +291,28 @@ func (h *Handler) ListVariants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+type labelSheetRequest struct {
+	Items []LabelItem `json:"items"`
+}
+
+// LabelSheet validates label rows and returns the print-pipeline payload
+// (label sheet JSON for the kernel-5 renderer; no image rendered here).
+func (h *Handler) LabelSheet(w http.ResponseWriter, r *http.Request) {
+	if _, entityErr := platform.EntityOf(r); entityErr != nil {
+		platform.WriteError(w, entityErr)
+		return
+	}
+	var req labelSheetRequest
+	if err := decode(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	sheet, err := BuildLabelSheet(req.Items)
+	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, sheet)
 }

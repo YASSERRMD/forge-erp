@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
@@ -21,11 +22,23 @@ type Store interface {
 	ListMembers(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Member, error)
 	SetMemberStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to MemberStatus, rowVersion int64) (Member, error)
 	CreateSubscription(ctx context.Context, db platform.DBTX, s *Subscription) error
+	SubscriptionByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Subscription, error)
 	SetSubscriptionStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to SubscriptionStatus, rowVersion int64) (Subscription, error)
 	SubscriptionsOf(ctx context.Context, db platform.DBTX, entityID int64, memberID int64) ([]Subscription, error)
 	CreateDonation(ctx context.Context, db platform.DBTX, d *Donation) error
+	DonationByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Donation, error)
 	SetDonationStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to DonationStatus, rowVersion int64) (Donation, error)
 	ListDonations(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Donation, error)
+	// CreateMemberLoan validates terms, generates the French-amortisation
+	// schedule, and persists header + lines atomically.
+	CreateMemberLoan(ctx context.Context, db platform.DBTX, l *MemberLoan) error
+	MemberLoanByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (MemberLoan, error)
+	// MemberLoanSchedule lists an installment schedule in seq order.
+	MemberLoanSchedule(ctx context.Context, db platform.DBTX, entityID int64, loanID int64) ([]MemberLoanLine, error)
+	SetMemberLoanStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to MemberLoanStatus, rowVersion int64) (MemberLoan, error)
+	// MarkLoanLinePaid flags one installment paid (idempotent guard: paid
+	// lines conflict).
+	MarkLoanLinePaid(ctx context.Context, db platform.DBTX, entityID int64, loanID int64, seq int, at time.Time) (MemberLoanLine, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -278,6 +291,8 @@ type MemoryStore struct {
 	members map[int64]Member
 	subs    map[int64]Subscription
 	dons    map[int64]Donation
+	mloans  map[int64]MemberLoan
+	mlines  map[int64][]MemberLoanLine
 }
 
 // NewMemoryStore builds an empty fake.
@@ -285,6 +300,7 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		types: map[int64]MemberType{}, members: map[int64]Member{},
 		subs: map[int64]Subscription{}, dons: map[int64]Donation{},
+		mloans: map[int64]MemberLoan{}, mlines: map[int64][]MemberLoanLine{},
 	}
 }
 
