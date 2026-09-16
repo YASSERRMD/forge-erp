@@ -31,6 +31,16 @@ type Store interface {
 	PayrollRunLines(ctx context.Context, db platform.DBTX, entityID int64, runID int64) ([]PayrollRunLine, error)
 	PayrollRunsOf(ctx context.Context, db platform.DBTX, entityID int64) ([]PayrollRun, error)
 	SetPayrollRunStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to PayrollRunStatus, rowVersion int64) (PayrollRun, error)
+	CreateEstablishment(ctx context.Context, db platform.DBTX, e *Establishment) error
+	EstablishmentsOf(ctx context.Context, db platform.DBTX, entityID int64) ([]Establishment, error)
+	CreateEmployee(ctx context.Context, db platform.DBTX, e *Employee) error
+	EmployeeByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Employee, error)
+	EmployeesOf(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Employee, error)
+	SetEmployeeStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to EmployeeStatus, rowVersion int64) (Employee, error)
+	AddSkill(ctx context.Context, db platform.DBTX, s *EmployeeSkill) error
+	SkillsOf(ctx context.Context, db platform.DBTX, entityID int64, employeeID int64) ([]EmployeeSkill, error)
+	AddEvaluation(ctx context.Context, db platform.DBTX, e *Evaluation) error
+	EvaluationsOf(ctx context.Context, db platform.DBTX, entityID int64, employeeID int64) ([]Evaluation, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -291,6 +301,10 @@ type MemoryStore struct {
 	salaries map[int64]Salary
 	runs     map[int64]PayrollRun
 	runLines map[int64]PayrollRunLine
+	estabs   map[int64]Establishment
+	emps     map[int64]Employee
+	skills   map[int64]EmployeeSkill
+	evals    map[int64]Evaluation
 }
 
 // NewMemoryStore builds an empty fake.
@@ -299,6 +313,8 @@ func NewMemoryStore() *MemoryStore {
 		leaves: map[int64]LeaveRequest{}, expenses: map[int64]ExpenseReport{},
 		lines: map[int64]ExpenseLine{}, salaries: map[int64]Salary{},
 		runs: map[int64]PayrollRun{}, runLines: map[int64]PayrollRunLine{},
+		estabs: map[int64]Establishment{}, emps: map[int64]Employee{},
+		skills: map[int64]EmployeeSkill{}, evals: map[int64]Evaluation{},
 	}
 }
 
