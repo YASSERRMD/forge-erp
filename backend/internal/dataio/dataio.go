@@ -36,6 +36,8 @@ type ProductStore interface {
 type Deps struct {
 	Orgs     OrgStore
 	Products ProductStore
+	Members  MemberStore // nil disables the members adapter
+	Sales    SalesStore  // nil disables the sales adapter
 	Bus      platform.Bus
 	DB       platform.DBTX
 }
@@ -50,6 +52,7 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("dataio", "export", "read")).Get("/exports/products.csv", h.ExportProducts)
 	r.With(mw("dataio", "import", "write")).Post("/imports/organizations", h.ImportOrgs)
 	r.With(mw("dataio", "import", "write")).Post("/imports/products", h.ImportProducts)
+	RoutesExchange(r, h, mw)
 }
 
 // Handler implements the exchange surface.

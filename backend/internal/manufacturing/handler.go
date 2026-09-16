@@ -37,6 +37,15 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("manufacturing", "mo", "read")).Get("/manufacturing/mos/{id}", h.GetMO)
 	r.With(mw("manufacturing", "mo", "validate")).Post("/manufacturing/mos/{id}/status", h.SetMOStatus)
 	r.With(mw("manufacturing", "mo", "produce")).Post("/manufacturing/mos/{id}/produce", h.Produce)
+	r.With(mw("manufacturing", "workstation", "write")).Post("/manufacturing/workstations", h.CreateWorkstation)
+	r.With(mw("manufacturing", "workstation", "read")).Get("/manufacturing/workstations", h.ListWorkstations)
+	r.With(mw("manufacturing", "workstation", "read")).Get("/manufacturing/workstations/{id}", h.GetWorkstation)
+	r.With(mw("manufacturing", "bom", "write")).Post("/manufacturing/boms/{id}/operations", h.AddBOMOperation)
+	r.With(mw("manufacturing", "bom", "read")).Get("/manufacturing/boms/{id}/operations", h.ListBOMOperations)
+	r.With(mw("manufacturing", "mo", "write")).Post("/manufacturing/mos/{id}/schedule", h.ScheduleMO)
+	r.With(mw("manufacturing", "mo", "read")).Get("/manufacturing/mos/{id}/operations", h.ListMOOperations)
+	r.With(mw("manufacturing", "mo", "produce")).Post("/manufacturing/mos/{id}/operations/{seq}/complete", h.CompleteMOOperation)
+	r.With(mw("manufacturing", "workstation", "read")).Get("/manufacturing/capacity", h.Capacity)
 }
 
 // Handler implements the manufacturing HTTP surface.

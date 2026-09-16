@@ -49,6 +49,7 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("hr", "payroll", "write")).Post("/hr/payroll/runs/{id}/lines", h.AddPayrollRunLine)
 	r.With(mw("hr", "payroll", "read")).Get("/hr/payroll/runs/{id}/lines", h.ListPayrollRunLines)
 	r.With(mw("hr", "payroll", "validate")).Post("/hr/payroll/runs/{id}/post", h.PostPayrollRun)
+	RoutesHRM(r, h, mw)
 }
 
 // Handler implements the hr HTTP surface.

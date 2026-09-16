@@ -28,6 +28,18 @@ type Store interface {
 	SalesOfSession(ctx context.Context, db platform.DBTX, sessionID int64) ([]Sale, error)
 	VoidSale(ctx context.Context, db platform.DBTX, entityID, id int64) (Sale, error)
 	MarkReturned(ctx context.Context, db platform.DBTX, entityID, id int64) (Sale, error)
+	// Offline queue (TakePOS depth): queued till payloads replay through the
+	// checkout service, idempotent on (entity, idempotency_key).
+	EnqueueOffline(ctx context.Context, db platform.DBTX, q *QueuedSale) error
+	QueueByKey(ctx context.Context, db platform.DBTX, entityID int64, key string) (QueuedSale, error)
+	QueuedDrain(ctx context.Context, db platform.DBTX, entityID, sessionID int64) ([]QueuedSale, error)
+	QueueList(ctx context.Context, db platform.DBTX, entityID, sessionID int64, status string) ([]QueuedSale, error)
+	MarkQueue(ctx context.Context, db platform.DBTX, entityID, id int64, status QueueStatus, lastErr string) (QueuedSale, error)
+	// Session cash (TakePOS depth): payouts out of the drawer + count snapshots.
+	RecordPayout(ctx context.Context, db platform.DBTX, p *Payout) error
+	PayoutsOfSession(ctx context.Context, db platform.DBTX, entityID, sessionID int64) ([]Payout, error)
+	RecordCount(ctx context.Context, db platform.DBTX, c *CashCount) error
+	CountsOfSession(ctx context.Context, db platform.DBTX, entityID, sessionID int64) ([]CashCount, error)
 }
 
 // PGStore implements Store against PostgreSQL.
@@ -234,12 +246,16 @@ type MemoryStore struct {
 	terminals map[int64]Terminal
 	sessions  map[int64]Session
 	sales     map[int64]Sale
+	queue     map[int64]QueuedSale
+	payouts   map[int64]Payout
+	counts    map[int64]CashCount
 }
 
 // NewMemoryStore builds an empty fake.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		terminals: map[int64]Terminal{}, sessions: map[int64]Session{}, sales: map[int64]Sale{},
+		queue: map[int64]QueuedSale{}, payouts: map[int64]Payout{}, counts: map[int64]CashCount{},
 	}
 }
 

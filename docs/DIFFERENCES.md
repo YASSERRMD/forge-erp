@@ -121,6 +121,30 @@ behavioral or structural deviation so auditors can distinguish design from drift
     ledger/status; status failure after posting surfaces as 500 with entry id).
 47. Bank statements import CSV + CAMT.053 with bank-ref dedupe; reconciliation
     matches on amount + date window; transfers post paired transactions.
+48. Manufacturing MRP depth: workstations carry daily minute capacity; BOM
+    routings schedule MO operations by forward day-bucketing (UTC days);
+    overload is flagged, never auto-resolved. Scheduled MOs produce only
+    through operation completion; direct produce on a scheduled MO is 422.
+49. Receipt reprints resolve labels/prices live from catalog (sales store no
+    price snapshot); drawer expectation counts cash-method sales only; X/Z
+    totals exclude voided/returned sales; ESC/POS folds to 7-bit ASCII.
+50. Offline till replay requires an open session; payloads replayed after
+    close flip to failed with the checkout error preserved.
+51. ECM folders are unique per (entity, parent, name) with cycle-guarded
+    moves; re-upload versions instead of duplicating (restore inserts a new
+    version); filing rules map (scope, object_type) to folder templates;
+    full-text search indexes text/* + filenames only (no binary parsers).
+52. Portal customers are not staff users: opaque org-bound bearers, entity
+    resolved from the token (SHA256 salted, not argon2id); cross-customer
+    IDs 404, never 403; quotes acceptable only when validated.
+53. Cron cron_expr takes precedence when set (empty = legacy interval);
+    failed jobs advance schedule without hot-looping and emit a bus alert;
+    unregistered codes record as failed runs, never silently.
+54. HRM employees are distinct from identity users with no FK (logins are
+    auth handles); terminated is terminal via a dedicated endpoint.
+55. Generic import/export is adapter-based (members/products/orgs/sales);
+    dry-run validates without writing, per-row errors; sales imports one
+    single-line document per row, money in minor units.
 
 ## Deferred scope (post-Phase-12 candidates)
 

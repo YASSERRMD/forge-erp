@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,6 +27,16 @@ type Store interface {
 	ListMOs(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]ManufacturingOrder, error)
 	SetMOStatus(ctx context.Context, db platform.DBTX, entityID int64, id int64, to MOStatus, rowVersion int64) (ManufacturingOrder, error)
 	MarkProduced(ctx context.Context, db platform.DBTX, entityID int64, id int64, rowVersion int64) (ManufacturingOrder, error)
+	// Workstation / routing / operation scheduling (Phase 2 MRP depth).
+	CreateWorkstation(ctx context.Context, db platform.DBTX, w *Workstation) error
+	WorkstationByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Workstation, error)
+	ListWorkstations(ctx context.Context, db platform.DBTX, entityID int64, limit, offset int) ([]Workstation, error)
+	AddBOMOperation(ctx context.Context, db platform.DBTX, o *BOMOperation) error
+	BOMOperations(ctx context.Context, db platform.DBTX, bomID int64) ([]BOMOperation, error)
+	ReplaceMOOperations(ctx context.Context, db platform.DBTX, entityID int64, moID int64, ops []MOOperation) error
+	MOOperations(ctx context.Context, db platform.DBTX, moID int64) ([]MOOperation, error)
+	CompleteMOOperation(ctx context.Context, db platform.DBTX, entityID int64, moID int64, seq int32, actualMinutes int64) (MOOperation, error)
+	OperationsByWorkstation(ctx context.Context, db platform.DBTX, entityID int64, workstationID int64, from, to time.Time) ([]MOOperation, error)
 }
 
 // Ledger abstracts the catalog stock postings used at produce time.
@@ -260,16 +271,20 @@ func (s *PGStore) MarkProduced(ctx context.Context, db platform.DBTX, entityID i
 
 // MemoryStore is the in-process fake for handler tests.
 type MemoryStore struct {
-	mu    sync.Mutex
-	seq   int64
-	boms  map[int64]BOM
-	lines map[int64]BOMLine
-	mos   map[int64]ManufacturingOrder
+	mu           sync.Mutex
+	seq          int64
+	boms         map[int64]BOM
+	lines        map[int64]BOMLine
+	mos          map[int64]ManufacturingOrder
+	workstations map[int64]Workstation
+	bomOps       map[int64]BOMOperation
+	moOps        map[int64]MOOperation
 }
 
 // NewMemoryStore builds an empty fake.
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{boms: map[int64]BOM{}, lines: map[int64]BOMLine{}, mos: map[int64]ManufacturingOrder{}}
+	return &MemoryStore{boms: map[int64]BOM{}, lines: map[int64]BOMLine{}, mos: map[int64]ManufacturingOrder{},
+		workstations: map[int64]Workstation{}, bomOps: map[int64]BOMOperation{}, moOps: map[int64]MOOperation{}}
 }
 
 func (m *MemoryStore) next() int64 { m.seq++; return m.seq }
