@@ -34,8 +34,10 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
 	"github.com/YASSERRMD/forge-erp/backend/internal/payments"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/cron"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/module"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/trigger"
+	"github.com/YASSERRMD/forge-erp/backend/internal/portal"
 	"github.com/YASSERRMD/forge-erp/backend/internal/pos"
 	"github.com/YASSERRMD/forge-erp/backend/internal/procurement"
 	"github.com/YASSERRMD/forge-erp/backend/internal/reporting"
@@ -280,6 +282,23 @@ func run() error {
 	// (Phase 0 task 7).
 	stopLimiter := apiLimiter.StartCleanup(time.Minute, 10*time.Minute)
 	defer stopLimiter()
+	// Cron scheduler (Phase 2): advisory-lock elected, retention-capped,
+	// disabled with FERP_CRON_INTERVAL_S=0.
+	cronStore := cron.NewPGStore(pool)
+	cronSecs := 60
+	if v := os.Getenv("FERP_CRON_INTERVAL_S"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cronSecs = n
+		}
+	}
+	cronSched := &cron.Scheduler{Store: cronStore, DB: pool, Pool: pool, Bus: bus,
+		Interval: time.Duration(cronSecs) * time.Second, Logger: platform.Default()}
+	if cronSecs > 0 {
+		go cronSched.Run(ctx)
+		log.Printf("forgeerp: cron scheduler every %ds", cronSecs)
+	} else {
+		log.Print("forgeerp: cron scheduler disabled (FERP_CRON_INTERVAL_S=0)")
+	}
 	mountAPIRoutes(mux, apiWiring{
 		ident:    identDeps,
 		limit:    apiLimiter.Limit,
@@ -322,7 +341,11 @@ func run() error {
 			Bus: bus, DB: pool, Pool: pool},
 		kb:      kb.Deps{Store: kb.NewPGStore(pool), Bus: bus, DB: pool},
 		events:  events.Deps{Store: events.NewPGStore(pool), Bus: bus, DB: pool},
-		dataio:  dataio.Deps{Orgs: pstore, Products: cstore, Bus: bus, DB: pool},
+		dataio: dataio.Deps{Orgs: pstore, Products: cstore, Members: members.NewPGStore(pool),
+			Sales: sstore, Bus: bus, DB: pool},
+		portal: portal.Deps{Store: portal.NewPGStore(pool), Sales: sstore,
+			Services: svcstore, Bus: bus, DB: pool, Pool: pool},
+		cron: cron.Deps{Store: cronStore, Scheduler: cronSched, Bus: bus, DB: pool},
 		fx:      fx.Deps{Store: fx.NewPGStore(pool), Bus: bus, DB: pool},
 		sepa: sepa.Deps{Store: sepa.NewPGStore(pool), Bus: bus, DB: pool,
 			Pool: pool, Ledger: fstore},
@@ -418,8 +441,10 @@ type apiWiring struct {
 	assets        assets.Deps
 	kb            kb.Deps
 	events        events.Deps
-	dataio        dataio.Deps
-	fx            fx.Deps
+		dataio        dataio.Deps
+		portal        portal.Deps
+		cron          cron.Deps
+		fx            fx.Deps
 	sepa          sepa.Deps
 	inbound       inbound.Deps
 	agenda        agenda.Deps
@@ -453,6 +478,8 @@ func mountAPIRoutes(mux chi.Router, w apiWiring) {
 		kb.Routes(r, w.kb, idH.Require)
 		events.Routes(r, w.events, idH.Require)
 		dataio.Routes(r, w.dataio, idH.Require)
+		portal.Routes(r, w.portal, idH.Require)
+		cron.Routes(r, w.cron, idH.Require)
 		fx.Routes(r, w.fx, idH.Require)
 		sepa.Routes(r, w.sepa, idH.Require)
 		inbound.Routes(r, w.inbound, idH.Require)
@@ -472,6 +499,8 @@ func stubWiring() apiWiring {
 	limiter := platform.NewRateLimiter(20, 40)
 	return apiWiring{
 		limit: limiter.Limit,
+		portal: portal.Deps{},
+		cron:   cron.Deps{},
 		modules: module.Deps{
 			Registry: module.NewRegistry(),
 		},
