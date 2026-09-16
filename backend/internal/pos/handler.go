@@ -13,6 +13,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/docgen"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/hook"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 )
@@ -42,7 +43,8 @@ type Deps struct {
 	Sales     Sales
 	WalkinOrg int64 // FERP_POS_WALKIN_ORG: default customer for anonymous sales (0 = require org)
 	Bus       platform.Bus
-	Hooks     *hook.Bus // Kernel 2: synchronous in-tx hooks for checkout (nil = disabled)
+	Hooks     *hook.Bus        // Kernel 2: synchronous in-tx hooks for checkout (nil = disabled)
+	DocModels *docgen.Registry // Kernel 5: receipt template set (nil = docgen.DefaultRegistry())
 	DB        platform.DBTX
 	Pool      *pgxpool.Pool // transaction source for the checkout service (nil in tests)
 }
@@ -64,6 +66,15 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("pos", "sale", "validate")).Post("/pos/sales/{id}/void", h.VoidSale)
 	r.With(mw("pos", "sale", "read")).Get("/pos/sales/{id}", h.GetSale)
 	r.With(mw("pos", "sale", "validate")).Post("/pos/returns", h.ReturnSale)
+	r.With(mw("pos", "sale", "read")).Get("/pos/sales/{id}/receipt", h.Receipt)
+	r.With(mw("pos", "sale", "read")).Get("/pos/sales/{id}/escpos", h.ESCPos)
+	r.With(mw("pos", "sale", "write")).Post("/pos/offline/queue", h.EnqueueOffline)
+	r.With(mw("pos", "sale", "read")).Get("/pos/offline/queue", h.ListQueue)
+	r.With(mw("pos", "sale", "write")).Post("/pos/offline/replay", h.ReplayQueue)
+	r.With(mw("pos", "session", "write")).Post("/pos/sessions/{id}/payouts", h.RecordPayout)
+	r.With(mw("pos", "session", "write")).Post("/pos/sessions/{id}/count", h.RecordCount)
+	r.With(mw("pos", "session", "read")).Get("/pos/sessions/{id}/x", h.XReport)
+	r.With(mw("pos", "session", "validate")).Post("/pos/sessions/{id}/z", h.ZReport)
 }
 
 // Handler implements the pos HTTP surface.

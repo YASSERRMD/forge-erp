@@ -44,9 +44,16 @@ func TestPGCheckoutAtomic(t *testing.T) {
 	if err := pst.OpenSession(ctx, pool, se); err != nil {
 		t.Fatal(err)
 	}
+	// Till sales need a real customer org (ferp_documents.org_id FK; no org
+	// is seeded by migrations, so the test creates its own).
+	var orgID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO ferp_organizations
+		(entity_id, name, is_customer) VALUES (1, 'PG Checkout', true) RETURNING id`).Scan(&orgID); err != nil {
+		t.Fatal(err)
+	}
 
 	// 2 x 1000 net + 20% VAT = 2400 gross; tender 3000 → change 600.
-	rec, err := svc.Checkout(ctx, CheckoutCmd{EntityID: 1, SessionID: se.ID, OrgID: 7,
+	rec, err := svc.Checkout(ctx, CheckoutCmd{EntityID: 1, SessionID: se.ID, OrgID: orgID,
 		Lines: []SaleLine{{ProductID: p.ID, Qty: 2}}, Method: PayCash, Tendered: 3000})
 	if err != nil {
 		t.Fatalf("checkout: %v", err)
@@ -71,7 +78,7 @@ func TestPGCheckoutAtomic(t *testing.T) {
 
 	// Over-stock checkout must fail with zero side effects: no new invoice,
 	// stock untouched.
-	if _, err := svc.Checkout(ctx, CheckoutCmd{EntityID: 1, SessionID: se.ID, OrgID: 7,
+	if _, err := svc.Checkout(ctx, CheckoutCmd{EntityID: 1, SessionID: se.ID, OrgID: orgID,
 		Lines: []SaleLine{{ProductID: p.ID, Qty: 999}}, Method: PayCash, Tendered: 99999999}); err == nil {
 		t.Fatal("over-stock checkout succeeded")
 	}

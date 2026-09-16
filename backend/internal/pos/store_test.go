@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/pgtest"
 )
 
@@ -53,7 +54,13 @@ func TestPGTerminalSession(t *testing.T) {
 	ctx := context.Background()
 	pool := pgtest.Pool(t)
 	st := NewPGStore(pool)
-	term := &Terminal{EntityID: 1, Code: "PGT1", Label: "Till", WarehouseID: 1, Status: TerminalActive}
+	// Terminals FK to ferp_warehouses; no warehouse is seeded, so the test
+	// creates its own (entity 1 'main' IS seeded by 0001_platform).
+	w := &catalog.Warehouse{EntityID: 1, Code: "PGT1W", Label: "Till WH", Status: 1}
+	if err := catalog.NewPGStore(pool).CreateWarehouse(ctx, pool, w); err != nil {
+		t.Fatalf("warehouse: %v", err)
+	}
+	term := &Terminal{EntityID: 1, Code: "PGT1", Label: "Till", WarehouseID: w.ID, Status: TerminalActive}
 	if err := st.CreateTerminal(ctx, pool, term); err != nil {
 		t.Fatalf("terminal: %v", err)
 	}
