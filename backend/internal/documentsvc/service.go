@@ -7,8 +7,6 @@ package documentsvc
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -21,15 +19,19 @@ import (
 )
 
 // Document is stored-file metadata (Dolibarr llx_ecm_files equivalent).
+// FolderID points into the per-entity folder tree (nil = entity root);
+// Version tracks the current revision (history lives in FileVersion rows).
 type Document struct {
 	ID         int64     `json:"id"`
 	EntityID   int64     `json:"entity_id"`
 	Scope      string    `json:"scope"`     // e.g. "sales", "purchase", "partners"
 	ObjectID   int64     `json:"object_id"` // linked business object
+	FolderID   *int64    `json:"folder_id,omitempty"`
 	Name       string    `json:"name"`
 	MIME       string    `json:"mime"`
 	Size       int64     `json:"size"`
 	SHA256     string    `json:"sha256"`
+	Version    int       `json:"version"`
 	StorageKey string    `json:"-"`
 	CreatedAt  time.Time `json:"created_at"`
 	CreatedBy  *int64    `json:"created_by"`
@@ -133,24 +135,50 @@ func (s *DirStorage) Delete(_ context.Context, key string) error {
 	return err
 }
 
-// Store is the metadata persistence contract.
+// Store is the metadata persistence contract (documents + ECM tree).
 type Store interface {
 	Create(ctx context.Context, db platform.DBTX, d *Document) error
 	ByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Document, error)
 	List(ctx context.Context, db platform.DBTX, entityID int64, scope string, objectID int64) ([]Document, error)
+	FindByFolderName(ctx context.Context, db platform.DBTX, entityID int64, folderID *int64, name string) (Document, error)
+	UpdateCurrent(ctx context.Context, db platform.DBTX, d *Document) error
+	CreateFolder(ctx context.Context, db platform.DBTX, f *Folder) error
+	FolderByID(ctx context.Context, db platform.DBTX, entityID int64, id int64) (Folder, error)
+	FindFolder(ctx context.Context, db platform.DBTX, entityID int64, parentID *int64, name string) (Folder, error)
+	ListFolders(ctx context.Context, db platform.DBTX, entityID int64, parentID *int64) ([]Folder, error)
+	MoveFolder(ctx context.Context, db platform.DBTX, entityID int64, id int64, newParent *int64) error
+	CreateVersion(ctx context.Context, db platform.DBTX, v *FileVersion) error
+	VersionsByFile(ctx context.Context, db platform.DBTX, entityID int64, fileID int64) ([]FileVersion, error)
+	VersionByNumber(ctx context.Context, db platform.DBTX, entityID int64, fileID int64, version int) (FileVersion, error)
+	UpsertFileText(ctx context.Context, db platform.DBTX, fileID int64, content string) error
+	SearchFiles(ctx context.Context, db platform.DBTX, entityID int64, query string, scope string, limit int) ([]SearchHit, error)
+	UpsertFilingRule(ctx context.Context, db platform.DBTX, r FilingRule) error
+	FilingRuleFor(ctx context.Context, db platform.DBTX, scope string, objectType string) (FilingRule, error)
+	ListFilingRules(ctx context.Context, db platform.DBTX) ([]FilingRule, error)
 }
 
 // MemoryStore is the in-process metadata fake.
 type MemoryStore struct {
-	mu     sync.Mutex
-	seq    int64
-	docs   map[int64]Document
-	shares map[string]ShareToken
+	mu        sync.Mutex
+	seq       int64
+	docs      map[int64]Document
+	shares    map[string]ShareToken
+	folderSeq int64
+	folders   map[int64]Folder
+	verSeq    int64
+	versions  map[int64][]FileVersion // by file id
+	texts     map[int64]string        // by file id
+	rules     map[string]FilingRule   // by scope + "\x00" + object_type
 }
 
-// NewMemoryStore builds an empty fake.
+// NewMemoryStore builds an empty fake (seeded with the sales/invoice rule).
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{docs: map[int64]Document{}, shares: map[string]ShareToken{}}
+	m := &MemoryStore{docs: map[int64]Document{}, shares: map[string]ShareToken{},
+		folders: map[int64]Folder{}, versions: map[int64][]FileVersion{},
+		texts: map[int64]string{}, rules: map[string]FilingRule{}}
+	m.rules["sales\x00invoice"] = FilingRule{Scope: "sales", ObjectType: "invoice",
+		PathTemplate: "/sales/invoices/{entity}"}
+	return m
 }
 
 // Service couples metadata with byte storage.
@@ -161,27 +189,11 @@ type Service struct {
 }
 
 // Upload stores bytes + metadata (hash computed server-side).
+// Re-uploading the same name at the entity root appends a new version.
 func (s *Service) Upload(ctx context.Context, entityID int64, scope string, objectID int64,
 	name, mime string, r io.Reader, createdBy *int64) (Document, error) {
-	b, err := io.ReadAll(io.LimitReader(r, 64<<20)) // 64 MiB cap (Phase 10 hardens limits)
-	if err != nil {
-		return Document{}, err
-	}
-	sum := sha256.Sum256(b)
-	d := Document{EntityID: entityID, Scope: scope, ObjectID: objectID, Name: name,
-		MIME: mime, Size: int64(len(b)), SHA256: hex.EncodeToString(sum[:]), CreatedBy: createdBy}
-	if err := d.Validate(); err != nil {
-		return Document{}, err
-	}
-	d.StorageKey = fmt.Sprintf("e%d/%s/%d-%s", entityID, scope, time.Now().UnixNano(), name)
-	if err := s.Storage.Put(ctx, d.StorageKey, bytes.NewReader(b), d.Size, mime); err != nil {
-		return Document{}, err
-	}
-	if err := s.Store.Create(ctx, s.DB, &d); err != nil {
-		_ = s.Storage.Delete(ctx, d.StorageKey)
-		return Document{}, err
-	}
-	return d, nil
+	return s.UploadEx(ctx, entityID, UploadInput{Scope: scope, ObjectID: objectID,
+		Name: name, MIME: mime, Body: r, CreatedBy: createdBy})
 }
 
 func (m *MemoryStore) Create(_ context.Context, _ platform.DBTX, d *Document) error {
@@ -190,8 +202,19 @@ func (m *MemoryStore) Create(_ context.Context, _ platform.DBTX, d *Document) er
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	for _, e := range m.docs {
+		if e.EntityID == d.EntityID && folderEqual(e.FolderID, d.FolderID) && e.Name == d.Name {
+			return fmt.Errorf("documentsvc: duplicate file name: %w", platform.ErrConflict)
+		}
+	}
 	m.seq++
 	d.ID = m.seq
+	if d.Version <= 0 {
+		d.Version = 1
+	}
+	if d.MIME == "" {
+		d.MIME = "application/octet-stream"
+	}
 	d.CreatedAt = time.Now().UTC()
 	m.docs[d.ID] = *d
 	return nil
