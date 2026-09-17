@@ -1904,3 +1904,402 @@ paths:
       summary: STUB (generated) - route is served but undocumented; fill in contract details
       responses:
         '201': { description: OK }
+  /api/v1/ai/assist:
+    post:
+      operationId: postStubAiAssist
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/ai/runs:
+    get:
+      operationId: getStubAiRuns
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/bookmarks:
+    get:
+      operationId: getStubBookmarks
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubBookmarks
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/bookmarks/toggle:
+    post:
+      operationId: postStubBookmarksToggle
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/bookmarks/{id}:
+    delete:
+      operationId: deleteStubBookmarksId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/comments:
+    get:
+      operationId: getStubComments
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubComments
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/comments/{id}:
+    delete:
+      operationId: deleteStubCommentsId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/data-policy/dry-run:
+    get:
+      operationId: getStubDataPolicyDryRun
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/data-policy/erasures:
+    get:
+      operationId: getStubDataPolicyErasures
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubDataPolicyErasures
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/data-policy/erasures/{id}/done:
+    post:
+      operationId: postStubDataPolicyErasuresIdDone
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/data-policy/rules:
+    get:
+      operationId: getStubDataPolicyRules
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    put:
+      operationId: putStubDataPolicyRules
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/incoterms:
+    get:
+      operationId: getStubIncoterms
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/incoterms/{code}:
+    get:
+      operationId: getStubIncotermsCode
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/label-sheets:
+    get:
+      operationId: getStubLabelSheets
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubLabelSheets
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/label-sheets/{id}:
+    delete:
+      operationId: deleteStubLabelSheetsId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    get:
+      operationId: getStubLabelSheetsId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    put:
+      operationId: putStubLabelSheetsId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/label-sheets/{id}/pdf:
+    post:
+      operationId: postStubLabelSheetsIdPdf
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/ldap/status:
+    get:
+      operationId: getStubLdapStatus
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/ldap/sync:
+    post:
+      operationId: postStubLdapSync
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/ldap/users:
+    get:
+      operationId: getStubLdapUsers
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/mailing-campaigns:
+    get:
+      operationId: getStubMailingCampaigns
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubMailingCampaigns
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/mailing-campaigns/{id}:
+    get:
+      operationId: getStubMailingCampaignsId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/mailing-campaigns/{id}/queue:
+    post:
+      operationId: postStubMailingCampaignsIdQueue
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/mailing-campaigns/{id}/recipients:
+    get:
+      operationId: getStubMailingCampaignsIdRecipients
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/mailing-campaigns/{id}/send:
+    post:
+      operationId: postStubMailingCampaignsIdSend
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/mailing-unsubscribe:
+    post:
+      operationId: postStubMailingUnsubscribe
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/memos:
+    get:
+      operationId: getStubMemos
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubMemos
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/memos/{id}:
+    delete:
+      operationId: deleteStubMemosId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    get:
+      operationId: getStubMemosId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    put:
+      operationId: putStubMemosId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/modulebuilder/install:
+    post:
+      operationId: postStubModulebuilderInstall
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/modulebuilder/modules:
+    get:
+      operationId: getStubModulebuilderModules
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/modulebuilder/scaffold:
+    post:
+      operationId: postStubModulebuilderScaffold
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/modulebuilder/uninstall:
+    post:
+      operationId: postStubModulebuilderUninstall
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/modulebuilder/validate:
+    post:
+      operationId: postStubModulebuilderValidate
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/partner-programs:
+    get:
+      operationId: getStubPartnerPrograms
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubPartnerPrograms
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/partner-programs/{id}:
+    get:
+      operationId: getStubPartnerProgramsId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/partner-programs/{id}/referrals:
+    get:
+      operationId: getStubPartnerProgramsIdReferrals
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubPartnerProgramsIdReferrals
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/price-assignments:
+    post:
+      operationId: postStubPriceAssignments
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/price-assignments/{id}:
+    delete:
+      operationId: deleteStubPriceAssignmentsId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/price-rules:
+    get:
+      operationId: getStubPriceRules
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubPriceRules
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/price-rules/{id}:
+    delete:
+      operationId: deleteStubPriceRulesId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    get:
+      operationId: getStubPriceRulesId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    put:
+      operationId: putStubPriceRulesId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/price-rules/{id}/evaluate:
+    post:
+      operationId: postStubPriceRulesIdEvaluate
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/referrals/{id}/accruals:
+    get:
+      operationId: getStubReferralsIdAccruals
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubReferralsIdAccruals
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/stock-transfers:
+    get:
+      operationId: getStubStockTransfers
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubStockTransfers
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/stock-transfers/{id}:
+    delete:
+      operationId: deleteStubStockTransfersId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    get:
+      operationId: getStubStockTransfersId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    put:
+      operationId: putStubStockTransfersId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/stock-transfers/{id}/cancel:
+    post:
+      operationId: postStubStockTransfersIdCancel
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/stock-transfers/{id}/lines:
+    get:
+      operationId: getStubStockTransfersIdLines
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubStockTransfersIdLines
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/stock-transfers/{id}/validate:
+    post:
+      operationId: postStubStockTransfersIdValidate
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/website/pages:
+    get:
+      operationId: getStubWebsitePages
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/website/pages/{slug}:
+    get:
+      operationId: getStubWebsitePagesSlug
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/website/sitemap:
+    get:
+      operationId: getStubWebsiteSitemap
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }

@@ -16,23 +16,35 @@ import (
 	"time"
 
 	"github.com/YASSERRMD/forge-erp/backend/internal/agenda"
+	"github.com/YASSERRMD/forge-erp/backend/internal/ai"
 	"github.com/YASSERRMD/forge-erp/backend/internal/assets"
 	"github.com/YASSERRMD/forge-erp/backend/internal/booking"
+	"github.com/YASSERRMD/forge-erp/backend/internal/bookmark"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
+	"github.com/YASSERRMD/forge-erp/backend/internal/collab"
 	"github.com/YASSERRMD/forge-erp/backend/internal/dataio"
+	"github.com/YASSERRMD/forge-erp/backend/internal/datapolicy"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documentsvc"
+	"github.com/YASSERRMD/forge-erp/backend/internal/dynprice"
 	"github.com/YASSERRMD/forge-erp/backend/internal/events"
 	"github.com/YASSERRMD/forge-erp/backend/internal/finance"
 	"github.com/YASSERRMD/forge-erp/backend/internal/fx"
 	"github.com/YASSERRMD/forge-erp/backend/internal/hr"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/inbound"
+	"github.com/YASSERRMD/forge-erp/backend/internal/incoterm"
 	"github.com/YASSERRMD/forge-erp/backend/internal/kb"
+	"github.com/YASSERRMD/forge-erp/backend/internal/label"
+	"github.com/YASSERRMD/forge-erp/backend/internal/ldap"
+	"github.com/YASSERRMD/forge-erp/backend/internal/mailing"
 	"github.com/YASSERRMD/forge-erp/backend/internal/manufacturing"
 	"github.com/YASSERRMD/forge-erp/backend/internal/members"
+	"github.com/YASSERRMD/forge-erp/backend/internal/modulebuilder"
+	"github.com/YASSERRMD/forge-erp/backend/internal/notify"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
 	"github.com/YASSERRMD/forge-erp/backend/internal/payments"
+	"github.com/YASSERRMD/forge-erp/backend/internal/partnership"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/cron"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/module"
@@ -40,12 +52,15 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/portal"
 	"github.com/YASSERRMD/forge-erp/backend/internal/pos"
 	"github.com/YASSERRMD/forge-erp/backend/internal/procurement"
+	"github.com/YASSERRMD/forge-erp/backend/internal/quickmemo"
 	"github.com/YASSERRMD/forge-erp/backend/internal/reporting"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 	"github.com/YASSERRMD/forge-erp/backend/internal/search"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sepa"
 	"github.com/YASSERRMD/forge-erp/backend/internal/services"
+	"github.com/YASSERRMD/forge-erp/backend/internal/stocktransfer"
 	"github.com/YASSERRMD/forge-erp/backend/internal/survey"
+	"github.com/YASSERRMD/forge-erp/backend/internal/website"
 	"github.com/YASSERRMD/forge-erp/backend/migrations"
 	"github.com/go-chi/chi/v5"
 )
@@ -355,6 +370,72 @@ func run() error {
 		modules:  module.Deps{Registry: modReg, Store: module.NewPGStore(), DB: pool},
 		docSvc:   docSvc,
 		searcher: searcher,
+		// Phase 5 PORT: sales-adjacent + operational depth.
+		incoterm: incoterm.Deps{Store: incoterm.NewPGStore(pool), DB: pool},
+		stocktransfer: stocktransfer.Deps{
+			Svc: stocktransfer.NewService(stocktransfer.NewPGStore(pool), cstore, bus, pool),
+			DB:  pool,
+		},
+		dynprice: dynprice.Deps{
+			Svc: dynprice.NewService(dynprice.NewPGStore(pool), bus, pool),
+			DB:  pool,
+		},
+		partnership: partnership.Deps{
+			Svc:   &partnership.Service{Store: partnership.NewPGStore(pool), Bus: bus, DB: pool},
+			Store: partnership.NewPGStore(pool),
+			Bus:   bus,
+			DB:    pool,
+		},
+		mailing: mailing.Deps{
+			Store: mailing.NewPGStore(pool),
+			Svc: &mailing.Service{Store: mailing.NewPGStore(pool),
+				Sender: notify.NewSMTPSender(notify.LoadSMTPConfig(getenv)),
+				DB:     pool, Bus: bus},
+			Bus: bus,
+			DB:  pool,
+		},
+		datapolicy: datapolicy.Deps{
+			Store: datapolicy.NewPGStore(pool),
+			Svc: &datapolicy.Service{Store: datapolicy.NewPGStore(pool), DB: pool,
+				Bus: bus, Subjects: retentionSubjects(pstore, members.NewPGStore(pool), pool)},
+			Bus: bus,
+			DB:  pool,
+		},
+		label: label.Deps{
+			Store: label.NewPGStore(pool),
+			Svc:   &label.Service{Store: label.NewPGStore(pool), Bus: bus, DB: pool},
+			Bus:   bus,
+			DB:    pool,
+		},
+		// Phase 5 PORT-LITE: small tools + content + directory sync.
+		bookmark: bookmark.Deps{
+			Svc: bookmark.NewService(bookmark.NewPGStore(), bus),
+			DB:  pool,
+		},
+		quickmemo: quickmemo.Deps{
+			Svc: quickmemo.NewService(quickmemo.NewPGStore(), bus),
+			DB:  pool,
+		},
+		collab: collab.Deps{
+			Svc: collab.NewService(collab.NewPGStore(pool), bus),
+			DB:  pool,
+		},
+		ai: ai.Deps{
+			Svc: ai.NewService(ai.NewPGStore(pool), nil, bus, pool),
+			DB:  pool,
+		},
+		website: website.Deps{
+			Svc: website.NewService(website.NewPGStore(), bus, pool),
+			DB:  pool,
+		},
+		modulebuilder: modulebuilder.Deps{
+			Svc: modulebuilder.NewService(modulebuilder.NewPGStore(), bus),
+			DB:  pool,
+		},
+		ldap: ldap.Deps{
+			Svc: ldap.NewService(ldap.NewMemoryStore(), ldap.StaticDialer{}, ldap.ConfigFromEnv(), bus),
+			DB:  pool,
+		},
 	})
 	// Reminder daemon (agenda.Worker). Previously started inside the route-mount
 	// closure, which runs synchronously during Route(); starting it here keeps
@@ -451,6 +532,20 @@ type apiWiring struct {
 	modules       module.Deps
 	docSvc        *documentsvc.Service
 	searcher      search.Searcher
+	incoterm      incoterm.Deps
+	stocktransfer stocktransfer.Deps
+	dynprice      dynprice.Deps
+	partnership   partnership.Deps
+	mailing       mailing.Deps
+	datapolicy    datapolicy.Deps
+	label         label.Deps
+	bookmark      bookmark.Deps
+	quickmemo     quickmemo.Deps
+	collab        collab.Deps
+	ai            ai.Deps
+	website       website.Deps
+	modulebuilder modulebuilder.Deps
+	ldap          ldap.Deps
 }
 
 // mountAPIRoutes mounts every module surface nested at /api/v1 plus the public
@@ -487,6 +582,20 @@ func mountAPIRoutes(mux chi.Router, w apiWiring) {
 		module.Routes(r, w.modules, idH.Require)
 		documentsvc.Routes(r, w.docSvc, idH.Require)
 		search.Routes(r, w.searcher, idH.Require)
+		incoterm.Routes(r, w.incoterm, idH.Require)
+		stocktransfer.Routes(r, w.stocktransfer, idH.Require)
+		dynprice.Routes(r, w.dynprice, idH.Require)
+		partnership.Routes(r, w.partnership, idH.Require)
+		mailing.Routes(r, w.mailing, idH.Require)
+		datapolicy.Routes(r, w.datapolicy, idH.Require)
+		label.Routes(r, w.label, idH.Require)
+		bookmark.Routes(r, w.bookmark, idH.Require)
+		quickmemo.Routes(r, w.quickmemo, idH.Require)
+		collab.Routes(r, w.collab, idH.Require)
+		ai.Routes(r, w.ai, idH.Require)
+		website.Routes(r, w.website, idH.Require)
+		modulebuilder.Routes(r, w.modulebuilder, idH.Require)
+		ldap.Routes(r, w.ldap, idH.Require)
 	})
 	// Public bearer-link downloads (portal-lite). Rate-limited like the API,
 	// but outside RBAC: the unguessable token is the credential.
@@ -539,6 +648,42 @@ func seedAdmin(ctx context.Context, cfg platform.Config, db platform.DBTX, store
 	}
 	log.Printf("forgeerp: seeded admin user %q", cfg.AdminEmail)
 	return nil
+}
+
+// retentionSubjects projects closable records for datapolicy dry-runs:
+// resigned/excluded members and inactive orgs count as closed at their last
+// update; everything else stays open (never retention-due).
+func retentionSubjects(orgs *partners.PGStore, mem *members.PGStore, db platform.DBTX) datapolicy.SubjectsFunc {
+	return func(ctx context.Context, entityID int64, scope string) ([]datapolicy.Subject, error) {
+		switch scope {
+		case datapolicy.ScopeMembers:
+			list, err := mem.ListMembers(ctx, db, entityID, 1000, 0)
+			if err != nil {
+				return nil, err
+			}
+			var out []datapolicy.Subject
+			for _, m := range list {
+				if m.Status == members.MemberResigned || m.Status == members.MemberExcluded {
+					out = append(out, datapolicy.Subject{ID: m.ID, ClosedAt: m.UpdatedAt})
+				}
+			}
+			return out, nil
+		case datapolicy.ScopeOrgs:
+			list, err := orgs.ListOrgs(ctx, db, entityID, 1000, 0)
+			if err != nil {
+				return nil, err
+			}
+			var out []datapolicy.Subject
+			for _, o := range list {
+				if o.Status == partners.OrgInactive {
+					out = append(out, datapolicy.Subject{ID: o.ID, ClosedAt: o.UpdatedAt})
+				}
+			}
+			return out, nil
+		default:
+			return nil, nil
+		}
+	}
 }
 
 // seedDemoOrgs inserts a minimal demo dataset (one customer + one supplier with

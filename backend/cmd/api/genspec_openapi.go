@@ -36,21 +36,32 @@ import (
 	"strings"
 
 	"github.com/YASSERRMD/forge-erp/backend/internal/agenda"
+	"github.com/YASSERRMD/forge-erp/backend/internal/ai"
 	"github.com/YASSERRMD/forge-erp/backend/internal/assets"
 	"github.com/YASSERRMD/forge-erp/backend/internal/booking"
+	"github.com/YASSERRMD/forge-erp/backend/internal/bookmark"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
+	"github.com/YASSERRMD/forge-erp/backend/internal/collab"
 	"github.com/YASSERRMD/forge-erp/backend/internal/dataio"
+	"github.com/YASSERRMD/forge-erp/backend/internal/datapolicy"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documentsvc"
+	"github.com/YASSERRMD/forge-erp/backend/internal/dynprice"
 	"github.com/YASSERRMD/forge-erp/backend/internal/events"
 	"github.com/YASSERRMD/forge-erp/backend/internal/finance"
 	"github.com/YASSERRMD/forge-erp/backend/internal/fx"
 	"github.com/YASSERRMD/forge-erp/backend/internal/hr"
 	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/inbound"
+	"github.com/YASSERRMD/forge-erp/backend/internal/incoterm"
 	"github.com/YASSERRMD/forge-erp/backend/internal/kb"
+	"github.com/YASSERRMD/forge-erp/backend/internal/label"
+	"github.com/YASSERRMD/forge-erp/backend/internal/ldap"
+	"github.com/YASSERRMD/forge-erp/backend/internal/mailing"
 	"github.com/YASSERRMD/forge-erp/backend/internal/manufacturing"
 	"github.com/YASSERRMD/forge-erp/backend/internal/members"
+	"github.com/YASSERRMD/forge-erp/backend/internal/modulebuilder"
 	"github.com/YASSERRMD/forge-erp/backend/internal/partners"
+	"github.com/YASSERRMD/forge-erp/backend/internal/partnership"
 	"github.com/YASSERRMD/forge-erp/backend/internal/payments"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/cron"
@@ -58,12 +69,15 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/portal"
 	"github.com/YASSERRMD/forge-erp/backend/internal/pos"
 	"github.com/YASSERRMD/forge-erp/backend/internal/procurement"
+	"github.com/YASSERRMD/forge-erp/backend/internal/quickmemo"
 	"github.com/YASSERRMD/forge-erp/backend/internal/reporting"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sales"
 	"github.com/YASSERRMD/forge-erp/backend/internal/search"
 	"github.com/YASSERRMD/forge-erp/backend/internal/sepa"
 	"github.com/YASSERRMD/forge-erp/backend/internal/services"
+	"github.com/YASSERRMD/forge-erp/backend/internal/stocktransfer"
 	"github.com/YASSERRMD/forge-erp/backend/internal/survey"
+	"github.com/YASSERRMD/forge-erp/backend/internal/website"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -121,6 +135,20 @@ func specRouter() chi.Router {
 		cron.Routes(r, cron.Deps{}, idH.Require)
 		documentsvc.Routes(r, &documentsvc.Service{}, idH.Require)
 		search.Routes(r, search.NewMemorySearcher(), idH.Require)
+		incoterm.Routes(r, incoterm.Deps{}, idH.Require)
+		stocktransfer.Routes(r, stocktransfer.Deps{}, idH.Require)
+		dynprice.Routes(r, dynprice.Deps{}, idH.Require)
+		partnership.Routes(r, partnership.Deps{}, idH.Require)
+		mailing.Routes(r, mailing.Deps{}, idH.Require)
+		datapolicy.Routes(r, datapolicy.Deps{}, idH.Require)
+		label.Routes(r, label.Deps{}, idH.Require)
+		bookmark.Routes(r, bookmark.Deps{}, idH.Require)
+		quickmemo.Routes(r, quickmemo.Deps{}, idH.Require)
+		collab.Routes(r, collab.Deps{}, idH.Require)
+		ai.Routes(r, ai.Deps{}, idH.Require)
+		website.Routes(r, website.Deps{}, idH.Require)
+		modulebuilder.Routes(r, modulebuilder.Deps{}, idH.Require)
+		ldap.Routes(r, ldap.Deps{}, idH.Require)
 	})
 	mux.With(limiter.Limit).Get("/public/share/{token}", documentsvc.PublicShare(&documentsvc.Service{}))
 	return mux
