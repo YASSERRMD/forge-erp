@@ -31,7 +31,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.1.6
+          version: v2.4.0 # minimum with a go1.25 toolchain (v2.1.6 predates it)
           working-directory: backend
       - name: govulncheck
         working-directory: backend

@@ -1,7 +1,6 @@
 package mailing
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -219,11 +218,4 @@ func (h *Handler) Unsubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "unsubscribed"})
-}
-
-func (h *Handler) publish(ctx context.Context, entityID int64, subject, entity string, id int64) {
-	if h.deps.Bus == nil {
-		return
-	}
-	_ = h.deps.Bus.Publish(ctx, platform.Event{Subject: subject, Entity: entity, EntityID: entityID, ID: id})
 }
