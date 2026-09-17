@@ -1,0 +1,61 @@
+{
+  "locale": "ar",
+  "source": "dolibarr ar_SA (main.lang+companies.lang+bills.lang+orders.lang+products.lang+admin.lang)",
+  "plural": "arabic",
+  "direction": "rtl",
+  "decimal": ".",
+  "thousand": "",
+  "strings": {
+    "common": {
+      "active": "نشطة",
+      "address": "العنوان",
+      "cancel": "إلغاء",
+      "close": "إغلاق",
+      "confirm": "تأكيد",
+      "currency": "العملة",
+      "date": "التاريخ",
+      "delete": "حذف",
+      "email": "البريد الإلكتروني",
+      "filter": "مرشح",
+      "inactive": "غير نشط",
+      "language": "اللغة",
+      "name": "اسم",
+      "no": "لا",
+      "phone": "الهاتف",
+      "ref": "المرجع",
+      "save": "حفظ",
+      "search": "بحث",
+      "status": "الحالة",
+      "yes": "نعم"
+    },
+    "doc": {
+      "credit_note": "إشعار دائن",
+      "description": "الوصف",
+      "invoice": "فاتورة",
+      "invoices": "الفواتير",
+      "order": "أمر",
+      "payment": "دفعة",
+      "quantity": "كمية",
+      "stock": "المخزون",
+      "tax": "ضريبة",
+      "total": "الإجمالي",
+      "total_gross": "الإجمالي (شامل الضريبة)",
+      "total_net": "الإجمالي (غير شامل الضريبة)",
+      "total_vat": "إجمالي الضريبة",
+      "vat": "ضريبة القيمة المضافة"
+    },
+    "error": {
+      "error": "خطأ",
+      "errors": "أخطاء",
+      "not_found": "لا توجد سجلات",
+      "required": "الحقل \"%s\" مطلوب",
+      "unknown": "خطأ غير معروف"
+    },
+    "party": {
+      "company": "الشركة",
+      "customer": "العميل",
+      "supplier": "المورد",
+      "third_party": "الطرف الثالث"
+    }
+  }
+}

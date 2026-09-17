@@ -1,0 +1,61 @@
+{
+  "locale": "fr",
+  "source": "dolibarr fr_FR (main.lang+companies.lang+bills.lang+orders.lang+products.lang+admin.lang)",
+  "plural": "one_many",
+  "direction": "ltr",
+  "decimal": ",",
+  "thousand": " ",
+  "strings": {
+    "common": {
+      "active": "Actif",
+      "address": "Adresse",
+      "cancel": "Annuler",
+      "close": "Clôturer",
+      "confirm": "Confirmer",
+      "currency": "Devise",
+      "date": "Date",
+      "delete": "Supprimer",
+      "email": "Email",
+      "filter": "Filtre",
+      "inactive": "Inactif",
+      "language": "Langue",
+      "name": "Nom",
+      "no": "Non",
+      "phone": "Téléphone",
+      "ref": "Réf.",
+      "save": "Enregistrer",
+      "search": "Rechercher",
+      "status": "État",
+      "yes": "Oui"
+    },
+    "doc": {
+      "credit_note": "Avoir",
+      "description": "Description",
+      "invoice": "Facture",
+      "invoices": "Factures",
+      "order": "Commande",
+      "payment": "Règlement",
+      "quantity": "Quantité",
+      "stock": "Stock",
+      "tax": "Taxe",
+      "total": "Total",
+      "total_gross": "Total TTC",
+      "total_net": "Total HT",
+      "total_vat": "Total TVA",
+      "vat": "TVA"
+    },
+    "error": {
+      "error": "Erreur",
+      "errors": "Erreurs",
+      "not_found": "Aucun enregistrement trouvé",
+      "required": "Le champ '%s' est obligatoire",
+      "unknown": "Erreur inconnue"
+    },
+    "party": {
+      "company": "Société",
+      "customer": "Client",
+      "supplier": "Fournisseur",
+      "third_party": "Tiers"
+    }
+  }
+}
