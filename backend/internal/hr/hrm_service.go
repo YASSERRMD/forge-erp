@@ -33,7 +33,7 @@ func (s *HRMService) Hire(ctx context.Context, db platform.DBTX, entityID int64,
 		s.published(ctx, entityID, e.ID, "forgeerp.hr.employee.hired.v1")
 		return nil
 	}
-	var out *Employee = e
+	out := e
 	err := platform.TxEntity(ctx, s.Pool, entityID, func(tx pgx.Tx) error {
 		return s.Store.CreateEmployee(ctx, tx, out)
 	})

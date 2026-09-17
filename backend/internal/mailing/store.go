@@ -21,7 +21,7 @@ type Store interface {
 	AddRecipient(ctx context.Context, db platform.DBTX, r *Recipient) error
 	RecipientsOf(ctx context.Context, db platform.DBTX, entityID, campaignID int64) ([]Recipient, error)
 	QueuedOf(ctx context.Context, db platform.DBTX, entityID, campaignID int64) ([]Recipient, error)
-	SetRecipientStatus(ctx context.Context, db platform.DBTX, id int64, status, errMsg string) error
+	SetRecipientStatus(ctx context.Context, db platform.DBTX, entityID, id int64, status, errMsg string) error
 	RecipientByToken(ctx context.Context, db platform.DBTX, token string) (Recipient, error)
 	SuppressEmail(ctx context.Context, db platform.DBTX, entityID int64, email string) error
 	SuppressedMap(ctx context.Context, db platform.DBTX, entityID int64) (map[string]bool, error)
@@ -155,9 +155,9 @@ func (s *PGStore) QueuedOf(ctx context.Context, db platform.DBTX, entityID, camp
 	return out, rows.Err()
 }
 
-func (s *PGStore) SetRecipientStatus(ctx context.Context, db platform.DBTX, id int64, status, errMsg string) error {
-	tag, err := db.Exec(ctx, `UPDATE ferp_mailing_recipients SET status=$1, error=$2, updated_at=now() WHERE id=$3`,
-		status, errMsg, id)
+func (s *PGStore) SetRecipientStatus(ctx context.Context, db platform.DBTX, entityID, id int64, status, errMsg string) error {
+	tag, err := db.Exec(ctx, `UPDATE ferp_mailing_recipients SET status=$1, error=$2, updated_at=now() WHERE id=$3 AND campaign_id IN (SELECT id FROM ferp_mailing_campaigns WHERE entity_id=$4)`,
+		status, errMsg, id, entityID)
 	if err != nil {
 		return err
 	}
@@ -320,11 +320,11 @@ func (m *MemoryStore) QueuedOf(_ context.Context, _ platform.DBTX, entityID, cam
 	return out, nil
 }
 
-func (m *MemoryStore) SetRecipientStatus(_ context.Context, _ platform.DBTX, id int64, status, errMsg string) error {
+func (m *MemoryStore) SetRecipientStatus(_ context.Context, _ platform.DBTX, entityID, id int64, status, errMsg string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.recipients[id]
-	if !ok {
+	if !ok || r.EntityID != entityID {
 		return platform.ErrNotFound
 	}
 	r.Status = status

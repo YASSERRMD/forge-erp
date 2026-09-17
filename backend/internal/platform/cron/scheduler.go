@@ -113,7 +113,7 @@ func (s *Scheduler) fireOne(ctx context.Context, db platform.DBTX, j Job, now ti
 	} else if err := fn(ctx); err != nil {
 		status, detail = "failed", err.Error()
 	}
-	if err := s.Store.FinishRun(ctx, db, run.ID, status, detail, s.now()); err != nil {
+	if err := s.Store.FinishRun(ctx, db, j.EntityID, run.ID, status, detail, s.now()); err != nil {
 		return err
 	}
 	next, err := j.NextAfter(now)
@@ -174,7 +174,7 @@ func (s *Scheduler) RunNow(ctx context.Context, entityID int64, code string) (Ru
 	} else if err := fn(ctx); err != nil {
 		status, detail = "failed", err.Error()
 	}
-	if err := s.Store.FinishRun(ctx, s.DB, run.ID, status, detail, s.now()); err != nil {
+	if err := s.Store.FinishRun(ctx, s.DB, j.EntityID, run.ID, status, detail, s.now()); err != nil {
 		return Run{}, err
 	}
 	run.Status, run.Detail = status, detail
