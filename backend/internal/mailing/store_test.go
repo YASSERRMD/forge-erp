@@ -204,3 +204,24 @@ func TestPGMailingFlow(t *testing.T) {
 		t.Fatalf("sent=%d failed=%d want 1/0", sent, failed)
 	}
 }
+
+func TestRecipientStatusIsEntityScoped(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemoryStore()
+	c := &Campaign{EntityID: 1, Subject: "Scoped", Body: "b"}
+	if err := m.CreateCampaign(ctx, nil, c); err != nil {
+		t.Fatal(err)
+	}
+	r := &Recipient{EntityID: 1, CampaignID: c.ID, Email: "s@example.com",
+		Token: "tok-scope", Status: RecipientQueued}
+	if err := m.AddRecipient(ctx, nil, r); err != nil {
+		t.Fatal(err)
+	}
+	// Another entity cannot flip this entity's recipient.
+	if err := m.SetRecipientStatus(ctx, nil, 2, r.ID, RecipientSent, ""); !errors.Is(err, platform.ErrNotFound) {
+		t.Fatalf("cross-entity status err=%v want ErrNotFound", err)
+	}
+	if err := m.SetRecipientStatus(ctx, nil, 1, r.ID, RecipientSent, ""); err != nil {
+		t.Fatalf("own-entity status: %v", err)
+	}
+}

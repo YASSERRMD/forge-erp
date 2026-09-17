@@ -19,7 +19,7 @@ type Store interface {
 	DueJobs(ctx context.Context, db platform.DBTX, now time.Time, limit int) ([]Job, error)
 	MarkNextRun(ctx context.Context, db platform.DBTX, entityID, id int64, next time.Time, status string) error
 	StartRun(ctx context.Context, db platform.DBTX, jobID int64, at time.Time) (Run, error)
-	FinishRun(ctx context.Context, db platform.DBTX, runID int64, status, detail string, at time.Time) error
+	FinishRun(ctx context.Context, db platform.DBTX, entityID, runID int64, status, detail string, at time.Time) error
 	RunsOf(ctx context.Context, db platform.DBTX, jobID int64) ([]Run, error)
 	DeleteRuns(ctx context.Context, db platform.DBTX, runIDs []int64) error
 }
@@ -110,9 +110,9 @@ func (s *PGStore) StartRun(ctx context.Context, db platform.DBTX, jobID int64, a
 	return r, err
 }
 
-func (s *PGStore) FinishRun(ctx context.Context, db platform.DBTX, runID int64, status, detail string, at time.Time) error {
-	tag, err := db.Exec(ctx, `UPDATE ferp_job_runs SET status=$1, detail=$2, finished_at=$3 WHERE id=$4`,
-		status, detail, at, runID)
+func (s *PGStore) FinishRun(ctx context.Context, db platform.DBTX, entityID, runID int64, status, detail string, at time.Time) error {
+	tag, err := db.Exec(ctx, `UPDATE ferp_job_runs SET status=$1, detail=$2, finished_at=$3 WHERE id=$4 AND job_id IN (SELECT id FROM ferp_jobs WHERE entity_id=$5)`,
+		status, detail, at, runID, entityID)
 	if err != nil {
 		return err
 	}
@@ -228,11 +228,14 @@ func (m *MemoryStore) StartRun(_ context.Context, _ platform.DBTX, jobID int64, 
 	return r, nil
 }
 
-func (m *MemoryStore) FinishRun(_ context.Context, _ platform.DBTX, runID int64, status, detail string, at time.Time) error {
+func (m *MemoryStore) FinishRun(_ context.Context, _ platform.DBTX, entityID, runID int64, status, detail string, at time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.runs[runID]
 	if !ok {
+		return identity.ErrNotFound
+	}
+	if j, ok := m.jobs[r.JobID]; !ok || j.EntityID != entityID {
 		return identity.ErrNotFound
 	}
 	r.Status, r.Detail, r.FinishedAt = status, detail, &at

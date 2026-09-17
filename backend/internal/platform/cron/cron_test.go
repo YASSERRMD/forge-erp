@@ -245,3 +245,23 @@ func TestRunNow(t *testing.T) {
 		t.Errorf("failed manual run = %+v", run)
 	}
 }
+
+func TestFinishRunIsEntityScoped(t *testing.T) {
+	ctx := context.Background()
+	st := NewMemoryStore()
+	j := &Job{EntityID: 1, Code: "scoped.job", IntervalS: 60, NextRunAt: time.Now().UTC(), Enabled: true}
+	if err := st.UpsertJob(ctx, nil, j); err != nil {
+		t.Fatal(err)
+	}
+	run, err := st.StartRun(ctx, nil, j.ID, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Another entity cannot finish this entity's run.
+	if err := st.FinishRun(ctx, nil, 2, run.ID, "ok", "", time.Now().UTC()); err == nil {
+		t.Error("cross-entity FinishRun succeeded")
+	}
+	if err := st.FinishRun(ctx, nil, 1, run.ID, "ok", "", time.Now().UTC()); err != nil {
+		t.Errorf("own-entity FinishRun failed: %v", err)
+	}
+}

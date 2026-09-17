@@ -117,7 +117,7 @@ func TestPGCronPersist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	if err := st.FinishRun(ctx, pool, run.ID, "ok", "", time.Now().UTC()); err != nil {
+	if err := st.FinishRun(ctx, pool, 1, run.ID, "ok", "", time.Now().UTC()); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	runs, err := st.RunsOf(ctx, pool, j.ID)

@@ -105,10 +105,10 @@ func (s *Service) SendAll(ctx context.Context, entityID, campaignID int64) (sent
 		item := notify.OutboxItem{EntityID: entityID, Channel: "email",
 			Recipient: r.Email, Subject: c.Subject, Body: c.Body}
 		if d.Dispatch(ctx, &item) {
-			_ = s.Store.SetRecipientStatus(ctx, s.DB, r.ID, RecipientSent, "")
+			_ = s.Store.SetRecipientStatus(ctx, s.DB, entityID, r.ID, RecipientSent, "")
 			sent++
 		} else {
-			_ = s.Store.SetRecipientStatus(ctx, s.DB, r.ID, RecipientFailed, item.Error)
+			_ = s.Store.SetRecipientStatus(ctx, s.DB, entityID, r.ID, RecipientFailed, item.Error)
 			failed++
 		}
 	}
@@ -130,7 +130,7 @@ func (s *Service) Unsubscribe(ctx context.Context, token string) error {
 		return err
 	}
 	if r.Status == RecipientQueued {
-		_ = s.Store.SetRecipientStatus(ctx, s.DB, r.ID, RecipientFailed, "unsubscribed")
+		_ = s.Store.SetRecipientStatus(ctx, s.DB, r.EntityID, r.ID, RecipientFailed, "unsubscribed")
 	}
 	return nil
 }
