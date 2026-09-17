@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS ferp_label_sheets;
+DROP TABLE IF EXISTS ferp_erasure_requests;
+DROP TABLE IF EXISTS ferp_retention_rules;
+DROP TABLE IF EXISTS ferp_mailing_suppressions;
+DROP TABLE IF EXISTS ferp_mailing_recipients;
+DROP TABLE IF EXISTS ferp_mailing_campaigns;
+DROP TABLE IF EXISTS ferp_commission_accruals;
+DROP TABLE IF EXISTS ferp_referrals;
+DROP TABLE IF EXISTS ferp_partner_programs;

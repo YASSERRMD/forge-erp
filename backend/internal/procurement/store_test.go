@@ -82,7 +82,14 @@ func TestPGStoreProcureChain(t *testing.T) {
 	pool := pgtest.Pool(t)
 	st := NewPGStore(pool)
 	ym := "202609"
-	po := &Document{EntityID: 1, Type: documents.TypeSupplierOrder, OrgID: 1,
+	// No org is seeded by migrations, so the test creates its own
+	// (ferp_supplier_docs.org_id FK; same convention as TakePOS PG tests).
+	var orgID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO ferp_organizations
+		(entity_id, name, is_customer) VALUES (1, 'Procure PG', true) RETURNING id`).Scan(&orgID); err != nil {
+		t.Fatal(err)
+	}
+	po := &Document{EntityID: 1, Type: documents.TypeSupplierOrder, OrgID: orgID,
 		Currency: "USD", RateToBase: 1000000,
 		Lines: []documents.Line{{ProductID: 1, Label: "W", Qty: 5, UnitNet: 300}}}
 	if err := st.CreateDoc(ctx, pool, po, ym); err != nil {

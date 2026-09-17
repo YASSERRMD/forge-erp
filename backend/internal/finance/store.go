@@ -174,7 +174,7 @@ func (s *PGStore) PostEntry(ctx context.Context, db platform.DBTX, e *Entry) err
 	// head instead of forking it. Xact-scoped: released at commit/rollback.
 	// The UNIQUE (entity_id, prev_hash) constraint backstops any path that
 	// bypasses this lock.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('ferp_entries')::bigint, $1::bigint)`, e.EntityID); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('ferp_entries'), $1::integer)`, e.EntityID); err != nil {
 		return finish(err)
 	}
 	// Fiscal-year lock: entry date must fall in an unlocked year (or no year defined).

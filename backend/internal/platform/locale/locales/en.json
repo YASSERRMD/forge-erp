@@ -1,0 +1,61 @@
+{
+  "locale": "en",
+  "source": "dolibarr en_US (main.lang+companies.lang+bills.lang+orders.lang+products.lang+admin.lang)",
+  "plural": "one_other",
+  "direction": "ltr",
+  "decimal": ".",
+  "thousand": ",",
+  "strings": {
+    "common": {
+      "active": "Active",
+      "address": "Address",
+      "cancel": "Cancel",
+      "close": "Close",
+      "confirm": "Confirm",
+      "currency": "Currency",
+      "date": "Date",
+      "delete": "Delete",
+      "email": "Email",
+      "filter": "Filter",
+      "inactive": "Inactive",
+      "language": "Language",
+      "name": "Name",
+      "no": "No",
+      "phone": "Phone",
+      "ref": "Ref.",
+      "save": "Save",
+      "search": "Search",
+      "status": "Status",
+      "yes": "Yes"
+    },
+    "doc": {
+      "credit_note": "Credit note",
+      "description": "Description",
+      "invoice": "Invoice",
+      "invoices": "Invoices",
+      "order": "Order",
+      "payment": "Payment",
+      "quantity": "Quantity",
+      "stock": "Stock",
+      "tax": "Tax",
+      "total": "Total",
+      "total_gross": "Total (inc. tax)",
+      "total_net": "Total (excl. tax)",
+      "total_vat": "Total tax",
+      "vat": "Sales tax"
+    },
+    "error": {
+      "error": "Error",
+      "errors": "Errors",
+      "not_found": "No record found",
+      "required": "Field '%s' is required",
+      "unknown": "Unknown error"
+    },
+    "party": {
+      "company": "Company",
+      "customer": "Customer",
+      "supplier": "Vendor",
+      "third_party": "Third party"
+    }
+  }
+}

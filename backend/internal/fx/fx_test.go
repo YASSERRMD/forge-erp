@@ -86,15 +86,29 @@ func TestPGBoardRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	pool := pgtest.Pool(t)
 	st := NewPGStore(pool)
-	if err := st.SetRate(ctx, pool, &Rate{EntityID: 1, Code: "EUR", RateToBase: 1080000}); err != nil {
+	// Seeded EUR resolves case-insensitively.
+	seeded, err := st.RateByCode(ctx, pool, 1, "eur")
+	if err != nil || seeded.RateToBase != 1080000 {
+		t.Fatalf("seeded eur=%+v err=%v", seeded, err)
+	}
+	// Re-setting a seeded code upserts: the board stays at 3 rows.
+	if err := st.SetRate(ctx, pool, &Rate{EntityID: 1, Code: "EUR", RateToBase: 1090000}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	got, err := st.RateByCode(ctx, pool, 1, "eur")
-	if err != nil || got.RateToBase != 1080000 {
+	if err != nil || got.RateToBase != 1090000 {
 		t.Fatalf("get=%+v err=%v", got, err)
 	}
 	list, err := st.ListRates(ctx, pool, 1)
-	if err != nil || len(list) < 4 {
-		t.Fatalf("list=%d err=%v (seed 3 + EUR)", len(list), err)
+	if err != nil || len(list) != 3 {
+		t.Fatalf("list=%d err=%v (upsert keeps seed 3)", len(list), err)
+	}
+	// A new code grows the board to 4.
+	if err := st.SetRate(ctx, pool, &Rate{EntityID: 1, Code: "CHF", RateToBase: 1120000}); err != nil {
+		t.Fatalf("set chf: %v", err)
+	}
+	list, err = st.ListRates(ctx, pool, 1)
+	if err != nil || len(list) != 4 {
+		t.Fatalf("list=%d err=%v (seed 3 + CHF)", len(list), err)
 	}
 }

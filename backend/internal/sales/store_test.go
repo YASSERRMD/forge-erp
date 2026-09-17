@@ -84,7 +84,14 @@ func TestPGStoreChain(t *testing.T) {
 	pool := pgtest.Pool(t)
 	st := NewPGStore(pool)
 	ym := "202609"
-	d := &Document{EntityID: 1, Type: documents.TypeInvoice, OrgID: 1, Currency: "USD",
+	// No org is seeded by migrations, so the test creates its own
+	// (ferp_documents.org_id FK; same convention as TakePOS PG tests).
+	var orgID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO ferp_organizations
+		(entity_id, name, is_customer) VALUES (1, 'Sales PG', true) RETURNING id`).Scan(&orgID); err != nil {
+		t.Fatal(err)
+	}
+	d := &Document{EntityID: 1, Type: documents.TypeInvoice, OrgID: orgID, Currency: "USD",
 		RateToBase: 1000000,
 		Lines: []documents.Line{{ProductID: 1, Label: "W", Qty: 1, UnitNet: 1000, VATRateBps: 2000}}}
 	if err := st.CreateDoc(ctx, pool, d, ym); err != nil {
@@ -112,7 +119,12 @@ func TestPGCrossTenantInvoice(t *testing.T) {
 	pool := pgtest.Pool(t)
 	st := NewPGStore(pool)
 	other := pgtest.NewEntity(t, pool, "otherco")
-	d := &Document{EntityID: 1, Type: documents.TypeInvoice, OrgID: 1, Currency: "USD",
+	var orgID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO ferp_organizations
+		(entity_id, name, is_customer) VALUES (1, 'Sales PG X', true) RETURNING id`).Scan(&orgID); err != nil {
+		t.Fatal(err)
+	}
+	d := &Document{EntityID: 1, Type: documents.TypeInvoice, OrgID: orgID, Currency: "USD",
 		RateToBase: 1000000,
 		Lines: []documents.Line{{ProductID: 1, Label: "W", Qty: 1, UnitNet: 100, VATRateBps: 0}}}
 	if err := st.CreateDoc(ctx, pool, d, "202609"); err != nil {
