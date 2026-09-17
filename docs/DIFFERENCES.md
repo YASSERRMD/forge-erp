@@ -145,6 +145,45 @@ behavioral or structural deviation so auditors can distinguish design from drift
 55. Generic import/export is adapter-based (members/products/orgs/sales);
     dry-run validates without writing, per-row errors; sales imports one
     single-line document per row, money in minor units.
+56. Document lines carry a kind discriminator (normal/section/subtotal,
+    Dolibarr `special_code` equivalent): marker lines validate as markers and
+    contribute zero, so totals always equal the priced lines; per-subtotal
+    block totals are computed, not stored.
+57. Incoterms 2020 ship as a seeded code table (any/sea modes); sales
+    documents carry one incoterm code (procurement wiring is follow-up work).
+58. Inter-warehouse transfers (TRF-YYYYMM-####) validate into paired
+    transfer_out/transfer_in movements with a PMP snapshot per line;
+    insufficient source stock is 422 with no partial post; validated transfers
+    are terminal (reversal is a new transfer, Dolibarr has no equivalent doc).
+59. Dynamic price expressions evaluate over base|qty|cost with exact rational
+    arithmetic (half-up to minor units, no floats); org-specific assignments
+    win over org-0 fallbacks; archived rules are skipped, never deleted.
+60. Partnership commissions accrue in basis points on referred sale totals;
+    payouts (notes/bank transfers) are explicitly out of scope — no endpoint.
+61. Mailing campaigns queue one recipient per address with an unsubscribe
+    token; suppressed addresses are excluded from future expansions;
+    unsubscribed rows fail closed (never sent, never counted as sent).
+62. DataPolicy retention is dry-run-first (missing rule is 404, nothing
+    mutates); subjects are projected seams (resigned/excluded members,
+    inactive orgs) — erasure requests log intent, anonymisation is per-field.
+63. Label sheets render through the docgen registry to deterministic PDFs
+    (frozen creation date); Avery 65-up default geometry ships built-in.
+64. PORT-LITE tools stay thin by design: bookmarks (idempotent toggle),
+    quick memos (per-user), collab (comments only, no co-editing), AI (one
+    assist endpoint over a replaceable provider; runs log excerpts only),
+    website (read-only published-article API for a static site, no CMS),
+    LDAP (read-only sync, refused without FERP_LDAP_URL; Keycloak remains
+    the federated path), ModuleBuilder (scaffold + install/uninstall records).
+65. Statutory accounting tables ship ahead of the posting engine: per-country
+    chart packs (FR PCG25-DEV, DE SKR03, US US-BASE — sibling variants left
+    out), idempotent commercial-document postings, close/reopen audit trail.
+    Auto-posting and FEC export are follow-up work, not silent omissions.
+66. Rights seeding is idempotent by partial unique index: the original
+    multi-column UNIQUE never fired on NULL user_id/group_id (PostgreSQL NULL
+    semantics), so re-activation duplicated grants until 0046.
+67. Dolibarr migration is an offline pipeline (scripts/dolibarr_import):
+    CSV dumps → deterministic ferp_*.json with reconciliation counts;
+    float money converts via Decimal(str()) so float 1.015 lands on 102.
 
 ## Deferred scope (post-Phase-12 candidates)
 
