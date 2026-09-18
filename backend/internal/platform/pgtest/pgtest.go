@@ -22,8 +22,9 @@ var schemaSeq atomic.Int64
 
 // Pool connects to TEST_DATABASE_URL, migrates a private schema, and returns
 // a pool pinned to it via search_path. The schema is dropped on cleanup so
-// parallel packages never collide.
-func Pool(t *testing.T) *pgxpool.Pool {
+// parallel packages never collide. testing.TB keeps benchmarks on the same
+// convention (every *testing.T is a TB, so existing callers are untouched).
+func Pool(t testing.TB) *pgxpool.Pool {
 	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -60,7 +61,7 @@ func Pool(t *testing.T) *pgxpool.Pool {
 }
 
 // NewEntity inserts an extra tenant and returns its id (cross-tenant tests).
-func NewEntity(t *testing.T, pool *pgxpool.Pool, code string) int64 {
+func NewEntity(t testing.TB, pool *pgxpool.Pool, code string) int64 {
 	t.Helper()
 	var id int64
 	if err := pool.QueryRow(context.Background(),
