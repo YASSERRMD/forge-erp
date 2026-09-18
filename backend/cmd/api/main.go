@@ -274,6 +274,28 @@ func run() error {
 		})
 		log.Print("forgeerp: search write-through subscribed")
 	}
+	// Statutory auto-posting (Phase 3): validated sales/supplier invoices
+	// post through bindings, idempotently. Non-invoice validations skip
+	// silently (ErrSkipPosting); real failures log loudly.
+	poster := &finance.Poster{Store: fstore, Postings: fstore, Bindings: fstore,
+		Loaders: map[string]finance.InvoiceLoader{
+			finance.DocSalesInvoice:    salesInvoiceAdapter{docs: sstore, orgs: pstore, db: pool},
+			finance.DocSupplierInvoice: supplierInvoiceAdapter{docs: procstore, orgs: pstore, db: pool},
+		},
+		Bus: bus, DB: pool}
+	bus.Subscribe("forgeerp.sales.document.status.v1", func(ctx context.Context, e platform.Event) {
+		if _, err := poster.PostValidated(ctx, e.EntityID, finance.DocSalesInvoice, e.ID); err != nil &&
+			!errors.Is(err, finance.ErrSkipPosting) {
+			log.Printf("forgeerp: auto-post sales %d: %v", e.ID, err)
+		}
+	})
+	bus.Subscribe("forgeerp.procurement.document.status.v1", func(ctx context.Context, e platform.Event) {
+		if _, err := poster.PostValidated(ctx, e.EntityID, finance.DocSupplierInvoice, e.ID); err != nil &&
+			!errors.Is(err, finance.ErrSkipPosting) {
+			log.Printf("forgeerp: auto-post supplier %d: %v", e.ID, err)
+		}
+	})
+	log.Print("forgeerp: auto-posting subscribed")
 	identDeps := identity.Deps{Store: store, Issuer: issuer, DB: pool}
 	if kc := identity.LoadKeycloakConfig(func(k, d string) string {
 		if v := os.Getenv(k); v != "" {
@@ -322,7 +344,7 @@ func run() error {
 		sales:    sales.Deps{Store: sstore, Catalog: cstore, Bus: bus, DB: pool},
 		procurement: procurement.Deps{Store: procstore, Catalog: cstore,
 			Bus: bus, DB: pool},
-		finance:  finance.Deps{Store: fstore, DB: pool},
+		finance:  finance.Deps{Store: fstore, DB: pool, Poster: poster, CloseLog: fstore, Bindings: fstore},
 		services: services.Deps{Store: svcstore, Bus: bus, DB: pool},
 		manufacturing: manufacturing.Deps{Store: mfstore, Ledger: cstore,
 			Bus: bus, DB: pool, Pool: pool},
@@ -684,6 +706,70 @@ func retentionSubjects(orgs *partners.PGStore, mem *members.PGStore, db platform
 			return nil, nil
 		}
 	}
+}
+
+// salesInvoiceAdapter loads validated sales invoices for auto-posting
+// (finance.InvoiceLoader; wrong family or non-validated status is a silent
+// ErrSkipPosting so quote/order validations never log noise).
+type salesInvoiceAdapter struct {
+	docs *sales.PGStore
+	orgs *partners.PGStore
+	db   platform.DBTX
+}
+
+func (a salesInvoiceAdapter) LoadValidatedInvoice(ctx context.Context, db platform.DBTX, entityID, docID int64) (finance.InvoiceDoc, error) {
+	d, err := a.docs.DocByID(ctx, db, entityID, docID)
+	if err != nil {
+		return finance.InvoiceDoc{}, err
+	}
+	if d.Type != documents.TypeInvoice || d.Status != sales.InvoiceValidated {
+		return finance.InvoiceDoc{}, finance.ErrSkipPosting
+	}
+	org, err := a.orgs.OrgByID(ctx, db, entityID, d.OrgID)
+	if err != nil {
+		return finance.InvoiceDoc{}, err
+	}
+	byRate := map[int]int64{}
+	for _, l := range d.Lines {
+		byRate[l.VATRateBps] += l.VAT()
+	}
+	var slices []finance.VATSlice
+	for rate, vat := range byRate {
+		slices = append(slices, finance.VATSlice{RateBps: rate, VAT: vat})
+	}
+	return finance.InvoiceDoc{ID: d.ID, Ref: d.Ref, Date: d.UpdatedAt, OrgRef: org.CustomerCode,
+		Net: d.Totals.Net, VAT: d.Totals.VAT, VATSlices: slices}, nil
+}
+
+// supplierInvoiceAdapter loads validated supplier invoices for auto-posting.
+type supplierInvoiceAdapter struct {
+	docs *procurement.PGStore
+	orgs *partners.PGStore
+	db   platform.DBTX
+}
+
+func (a supplierInvoiceAdapter) LoadValidatedInvoice(ctx context.Context, db platform.DBTX, entityID, docID int64) (finance.InvoiceDoc, error) {
+	d, err := a.docs.DocByID(ctx, db, entityID, docID)
+	if err != nil {
+		return finance.InvoiceDoc{}, err
+	}
+	if d.Type != documents.TypeSupplierInvoice || d.Status != procurement.Validated {
+		return finance.InvoiceDoc{}, finance.ErrSkipPosting
+	}
+	org, err := a.orgs.OrgByID(ctx, db, entityID, d.OrgID)
+	if err != nil {
+		return finance.InvoiceDoc{}, err
+	}
+	byRate := map[int]int64{}
+	for _, l := range d.Lines {
+		byRate[l.VATRateBps] += l.VAT()
+	}
+	var slices []finance.VATSlice
+	for rate, vat := range byRate {
+		slices = append(slices, finance.VATSlice{RateBps: rate, VAT: vat})
+	}
+	return finance.InvoiceDoc{ID: d.ID, Ref: d.Ref, Date: d.UpdatedAt, OrgRef: org.SupplierCode,
+		Net: d.Totals.Net, VAT: d.Totals.VAT, VATSlices: slices}, nil
 }
 
 // seedDemoOrgs inserts a minimal demo dataset (one customer + one supplier with

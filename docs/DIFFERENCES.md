@@ -184,6 +184,21 @@ behavioral or structural deviation so auditors can distinguish design from drift
 67. Dolibarr migration is an offline pipeline (scripts/dolibarr_import):
     CSV dumps → deterministic ferp_*.json with reconciliation counts;
     float money converts via Decimal(str()) so float 1.015 lands on 102.
+68. Statutory posting is event-driven and immediate: validating a sales or
+    supplier invoice posts the entry at once (DR control / CR revenue / CR
+    VAT per rate) through bindings — there is no draft-review step. Replay
+    safety comes from the (entity, doc_type, doc_id) idempotency row, and
+    review happens after posting (postings list, trial balance, FEC).
+    Missing bindings fail closed naming the key; per-line product accounts
+    are not resolved (one default revenue account per invoice).
+69. Binding resolution tries the specific key then "default" (documented
+    convention, not Dolibarr behavior — Dolibarr scatters per-screen
+    defaults with no fallback chain).
+70. FEC ships the 18 normative columns only (Dolibarr's 3 supplementary
+    columns omitted); lettering columns export empty (no entry lettering
+    ported); amounts are base-currency only (Montantdevise/Idevise empty).
+71. Fiscal-year reopening is allowed with a mandatory audit row (Dolibarr
+    has no reopen trail); the close entry id links the close row.
 
 ## Deferred scope (post-Phase-12 candidates)
 

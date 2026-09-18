@@ -2303,3 +2303,56 @@ paths:
       summary: STUB (generated) - route is served but undocumented; fill in contract details
       responses:
         '200': { description: OK }
+  /api/v1/finance/bindings:
+    get:
+      operationId: getStubFinanceBindings
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: postStubFinanceBindings
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/finance/charts/load:
+    post:
+      operationId: postStubFinanceChartsLoad
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/finance/exports/fec:
+    get:
+      operationId: getStubFinanceExportsFec
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/finance/fiscal-years/{id}/close-log:
+    get:
+      operationId: getStubFinanceFiscalYearsIdCloseLog
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/finance/fiscal-years/{id}/reopen:
+    post:
+      operationId: postStubFinanceFiscalYearsIdReopen
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/finance/postings:
+    get:
+      operationId: getStubFinancePostings
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/finance/postings/sales-invoices/{id}:
+    post:
+      operationId: postStubFinancePostingsSalesInvoicesId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }
+  /api/v1/finance/postings/supplier-invoices/{id}:
+    post:
+      operationId: postStubFinancePostingsSupplierInvoicesId
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '201': { description: OK }

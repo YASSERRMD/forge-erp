@@ -14,10 +14,12 @@ import (
 // Service owns Phase 2 finance orchestration: statement imports, paired
 // account transfers and year-end closes commit atomically inside
 // platform.TxEntity. A nil Pool runs the flow directly on the given db
-// (memory stores in handler tests).
+// (memory stores in handler tests). CloseLog carries the close/reopen audit
+// trail (nil = trail skipped; production always wires it).
 type Service struct {
-	Pool  *pgxpool.Pool
-	Store Store
+	Pool     *pgxpool.Pool
+	Store    Store
+	CloseLog CloseLogStore
 }
 
 // NewService wires a finance service (Pool may be nil in tests).
@@ -71,6 +73,8 @@ type CloseCmd struct {
 	RetainedAccountID int64
 	Ref               string
 	Date              time.Time // defaults to the year end
+	Actor             *int64    // recorded in the close audit trail
+	Note              string
 }
 
 // CloseYear posts the closing entry and locks the fiscal year atomically.
@@ -112,10 +116,52 @@ func (s *Service) CloseYear(ctx context.Context, db platform.DBTX, cmd CloseCmd)
 		if err := s.Store.PostEntry(ctx, tx, out); err != nil {
 			return err
 		}
-		return s.Store.SetFiscalYearLocked(ctx, tx, cmd.EntityID, cmd.YearID, true)
+		if err := s.Store.SetFiscalYearLocked(ctx, tx, cmd.EntityID, cmd.YearID, true); err != nil {
+			return err
+		}
+		if s.CloseLog != nil {
+			entryID := out.ID
+			if err := s.CloseLog.LogClose(ctx, tx, &CloseLogEntry{EntityID: cmd.EntityID,
+				YearID: cmd.YearID, Action: CloseActionClose, EntryID: &entryID,
+				Actor: cmd.Actor, Note: cmd.Note}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// ReopenCmd unlocks one fiscal year with an audit trail row (reopening is
+// allowed but never silent).
+type ReopenCmd struct {
+	EntityID int64
+	YearID   int64
+	Actor    *int64
+	Note     string
+}
+
+// ReopenYear unlocks a locked year and records the reopen trail. The close
+// log is required: without it the reopen would leave no trace.
+func (s *Service) ReopenYear(ctx context.Context, db platform.DBTX, cmd ReopenCmd) error {
+	if s.CloseLog == nil {
+		return fmt.Errorf("finance: close log not configured: %w", platform.ErrValidation)
+	}
+	return s.inTx(ctx, cmd.EntityID, db, func(tx platform.DBTX) error {
+		year, err := s.Store.FiscalYearByID(ctx, tx, cmd.EntityID, cmd.YearID)
+		if err != nil {
+			return err
+		}
+		if !year.Locked {
+			return fmt.Errorf("finance: fiscal year is not locked: %w", platform.ErrValidation)
+		}
+		if err := s.Store.SetFiscalYearLocked(ctx, tx, cmd.EntityID, cmd.YearID, false); err != nil {
+			return err
+		}
+		return s.CloseLog.LogClose(ctx, tx, &CloseLogEntry{EntityID: cmd.EntityID,
+			YearID: cmd.YearID, Action: CloseActionReopen, Actor: cmd.Actor, Note: cmd.Note})
+	})
 }
