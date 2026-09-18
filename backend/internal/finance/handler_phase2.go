@@ -18,7 +18,9 @@ func (h *Handler) svc() *Service {
 	if p, ok := h.deps.DB.(*pgxpool.Pool); ok {
 		pool = p
 	}
-	return NewService(pool, h.deps.Store)
+	svc := NewService(pool, h.deps.Store)
+	svc.CloseLog = h.deps.CloseLog
+	return svc
 }
 
 func dateParam(r *http.Request, name string, def time.Time) time.Time {

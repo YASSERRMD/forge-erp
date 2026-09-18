@@ -11,10 +11,16 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Deps wires handlers to persistence.
+// Deps wires handlers to persistence. Poster drives the manual post
+// triggers (nil = 501 outside production wiring); CloseLog feeds the
+// service close/reopen trail (nil = trail skipped); Bindings serves the
+// mapping endpoints (nil = PGStore assertion, 501 on memory stores).
 type Deps struct {
-	Store Store
-	DB    platform.DBTX
+	Store    Store
+	DB       platform.DBTX
+	Poster   *Poster
+	CloseLog CloseLogStore
+	Bindings BindingStore
 }
 
 // Middleware builds Require-style RBAC gates.
@@ -56,6 +62,7 @@ func Routes(r chi.Router, d Deps, mw Middleware) {
 	r.With(mw("finance", "tax", "read")).Get("/finance/charges", h.ListCharges)
 	r.With(mw("finance", "tax", "read")).Get("/finance/charges-due", h.ChargesDue)
 	r.With(mw("finance", "tax", "write")).Post("/finance/charges/{id}/pay", h.PayCharge)
+	RoutesPhase3(r, d, mw)
 }
 
 // Handler implements the finance HTTP surface.
