@@ -51,4 +51,6 @@ const cognates = new Set([
   'votes',
   'port',
   'stMaintenance',
+  'note',
+  'expression',
 ]);
