@@ -65,6 +65,8 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/payments"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/cron"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/dict"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/locale"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/module"
 	"github.com/YASSERRMD/forge-erp/backend/internal/portal"
 	"github.com/YASSERRMD/forge-erp/backend/internal/pos"
@@ -133,6 +135,8 @@ func specRouter() chi.Router {
 		module.Routes(r, module.Deps{Registry: module.NewRegistry()}, idH.Require)
 		portal.Routes(r, portal.Deps{}, idH.Require)
 		cron.Routes(r, cron.Deps{}, idH.Require)
+		locale.Routes(r, locale.Deps{}, idH.Require)
+		dict.Routes(r, dict.Deps{}, idH.Require)
 		documentsvc.Routes(r, &documentsvc.Service{}, idH.Require)
 		search.Routes(r, search.NewMemorySearcher(), idH.Require)
 		incoterm.Routes(r, incoterm.Deps{}, idH.Require)

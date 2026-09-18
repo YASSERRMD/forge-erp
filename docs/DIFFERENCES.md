@@ -200,8 +200,57 @@ behavioral or structural deviation so auditors can distinguish design from drift
 71. Fiscal-year reopening is allowed with a mandatory audit row (Dolibarr
     has no reopen trail); the close entry id links the close row.
 
+## Refused scope (will not port)
+
+Fourteen Dolibarr modules are declined in writing — faithfulness at the cost
+of the architecture. Anything here belongs in a plugin once the module
+registry (Kernel 1) and hook bus (Kernel 2) exist, not in core.
+
+72. WebServices (SOAP): REST supersedes it; no new SOAP surface will ship.
+73. Fckeditor: the SPA owns its editor; no server-side rich-text module.
+74. DAV and FTP: object storage plus bearer share links supersede both.
+75. ExternalRss, Gravatar, GeoIPMaxmind, SocialNetworks, MailmanSpip,
+    ClickToDial: third-party integrations that belong in plugins.
+    (Gravatar additionally leaks user emails to an outside service.)
+76. Printing (direct printer queues): site-specific printer integrations
+    belong in plugins; ESC/POS receipt output for the till IS covered.
+77. Zapier: the signed webhook catalogue covers outbound automation.
+78. DebugBar: structured logging with correlation IDs plus OpenTelemetry
+    tracing replace the dev toolbar.
+79. Comptabilite vs Accounting: Dolibarr's own legacy split (two ledgers
+    for one books); ForgeERP ships one hash-chained ledger.
+80. Website CMS: the product is a read-only content API for a static site;
+    drafting, themes and page building belong in the site generator.
+81. Backend message translation: API errors stay English-keyed for log
+    greppability; the localized surface is UI strings, documents and
+    dictionary labels.
+
+## Localisation (Phase 4)
+
+82. Locale resolution is user preference → Accept-Language → entity
+    default (`ferp_entities.default_locale`) → English, stored in
+    `ferp_users.locale` / `ferp_entities.default_locale` ("" = unset at
+    every level). The invoice PDF endpoint resolves the same chain with
+    ?locale= as explicit override.
+83. Template labels resolve through the locale catalogue with legacy
+    per-language fallbacks: uncatalogued keys keep yesterday's French for
+    fr and English otherwise — invoices never half-translate and never
+    render empty labels.
+84. PDF amounts/dates are locale-aware (grouping separators, decimal
+    comma, dd/mm vs mm/dd); API money stays minor-unit integers.
+85. Right-to-left locales render the English invoice template: Helvetica
+    core fonts carry no Arabic/Hebrew glyphs, so catalogue Arabic would
+    print as blanks. Arabic catalogue strings still serve the SPA (which
+    owns real fonts and RTL layout).
+86. Dictionaries expose a read-only surface (`/dictionaries`,
+    `/dictionaries/{code}?locale=`) with override-resolved labels;
+    seeding stays migration-owned.
+87. The SPA dictionary ships EN/FR with a vitest parity gate: key sets
+    must match and only allowlisted cognates may share values.
+
 ## Deferred scope (post-Phase-12 candidates)
 
-POS (takepos), HR details (holiday/expensereport/salaries),
-payment plugins (stripe/paypal), surveys (opensurvey), calendar booking (bookcal),
-SOAP API, LDAP sync, DAV/FTP, full i18n (120 langs → English-first + i18n-ready schema).
+Per-line product revenue accounts, FEC supplementary columns + lettering +
+devise amounts, draft-review-before-posting, chart packs beyond FR/DE/US,
+locale content beyond reviewed en/fr/ar (mechanism ships, reviewers needed),
+Stripe live charging (needs secrets).
