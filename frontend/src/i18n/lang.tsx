@@ -471,6 +471,10 @@ const dict = {
 export type Lang = keyof typeof dict;
 export type DictKey = keyof (typeof dict)['en'];
 
+// dictionaries exposes the raw tables for the parity test (and future
+// catalogue-driven tooling); UI code keeps using useLang().t().
+export const dictionaries = dict;
+
 interface LangState {
   lang: Lang;
   setLang: (l: Lang) => void;
