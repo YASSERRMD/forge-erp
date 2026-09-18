@@ -25,6 +25,8 @@ type Store interface {
 	ListBankAccounts(ctx context.Context, db platform.DBTX, entityID int64) ([]BankAccount, error)
 	ListLoans(ctx context.Context, db platform.DBTX, entityID int64) ([]Loan, error)
 	CreateJournal(ctx context.Context, db platform.DBTX, j *Journal) error
+	// JournalByCode resolves one journal by code (auto-posting needs VEN/ACH).
+	JournalByCode(ctx context.Context, db platform.DBTX, entityID int64, code string) (Journal, error)
 	CreateFiscalYear(ctx context.Context, db platform.DBTX, f *FiscalYear) error
 	// PostEntry validates balance + fiscal-year lock, chains the hash, and persists atomically.
 	PostEntry(ctx context.Context, db platform.DBTX, e *Entry) error
@@ -152,6 +154,17 @@ func (s *PGStore) ListLoans(ctx context.Context, db platform.DBTX, entityID int6
 func (s *PGStore) CreateJournal(ctx context.Context, db platform.DBTX, j *Journal) error {
 	return db.QueryRow(ctx, `INSERT INTO ferp_journals (entity_id, code, label)
 		VALUES ($1,$2,$3) RETURNING id`, j.EntityID, j.Code, j.Label).Scan(&j.ID)
+}
+
+// JournalByCode resolves one journal by code (404 outside the entity).
+func (s *PGStore) JournalByCode(ctx context.Context, db platform.DBTX, entityID int64, code string) (Journal, error) {
+	var j Journal
+	err := db.QueryRow(ctx, `SELECT id, entity_id, code, label FROM ferp_journals
+		WHERE entity_id=$1 AND code=$2`, entityID, code).Scan(&j.ID, &j.EntityID, &j.Code, &j.Label)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Journal{}, ErrNotFound
+	}
+	return j, err
 }
 
 func (s *PGStore) CreateFiscalYear(ctx context.Context, db platform.DBTX, f *FiscalYear) error {
@@ -419,6 +432,18 @@ func (m *MemoryStore) CreateJournal(_ context.Context, _ platform.DBTX, j *Journ
 	j.ID = m.next()
 	m.jrns[j.ID] = *j
 	return nil
+}
+
+// JournalByCode resolves one journal by code (404 outside the entity).
+func (m *MemoryStore) JournalByCode(_ context.Context, _ platform.DBTX, entityID int64, code string) (Journal, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, j := range m.jrns {
+		if j.EntityID == entityID && j.Code == code {
+			return j, nil
+		}
+	}
+	return Journal{}, fmt.Errorf("finance: journal %s: %w", code, ErrNotFound)
 }
 
 func (m *MemoryStore) CreateFiscalYear(_ context.Context, _ platform.DBTX, f *FiscalYear) error {
