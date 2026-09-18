@@ -31,6 +31,7 @@ import (
 
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/locale"
 )
 
 // frozenCreationDate stamps every generated PDF's /CreationDate metadata.
@@ -154,17 +155,51 @@ func (StandardModel) Applies(docType string) bool {
 
 type invStrings struct{ title, billed, issued, desc, qty, unit, vat, total, net, vatTot, gross string }
 
-func stringsFor(locale string) invStrings {
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "fr") {
-		return invStrings{"Facture", "Facturé à", "Émise le", "Désignation", "Qté", "P.U. HT",
+// stringsFor resolves template labels through the locale catalogue with the
+// legacy per-language strings as fallback (a key missing even in English
+// keeps yesterday's wording — fail stable, never fail empty, never
+// half-translate: uncatalogued keys fall back to the legacy French wording
+// for fr, English otherwise).
+func stringsFor(localeTag string) invStrings {
+	en := invStrings{"Invoice", "Billed to", "Issued", "Description", "Qty", "Unit net",
+		"VAT %", "Total", "Net total", "VAT", "Gross total"}
+	fallback := en
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(localeTag)), "fr") {
+		fallback = invStrings{"Facture", "Facturé à", "Émise le", "Désignation", "Qté", "P.U. HT",
 			"TVA %", "Total", "Total HT", "TVA", "Total TTC"}
 	}
-	return invStrings{"Invoice", "Billed to", "Issued", "Description", "Qty", "Unit net",
-		"VAT %", "Total", "Net total", "VAT", "Gross total"}
+	loader, err := locale.NewLoader("")
+	if err != nil {
+		return fallback
+	}
+	get := func(key, fb string) string {
+		if v, _ := loader.Lookup(localeTag, key); v != "" && v != key {
+			return v
+		}
+		return fb
+	}
+	return invStrings{
+		title:  get("doc.invoice", fallback.title),
+		billed: get("doc.billed_to", fallback.billed),
+		issued: get("doc.issued_on", fallback.issued),
+		desc:   get("doc.description", fallback.desc),
+		qty:    get("doc.quantity", fallback.qty),
+		unit:   get("doc.unit_price", fallback.unit),
+		vat:    get("doc.vat_rate", fallback.vat),
+		total:  get("doc.total", fallback.total),
+		net:    get("doc.total_net", fallback.net),
+		vatTot: get("doc.total_vat", fallback.vatTot),
+		gross:  get("doc.total_gross", fallback.gross),
+	}
 }
 
 // Render implements DocModel: single-pass gofpdf layout, core fonts only.
-func (StandardModel) Render(_ context.Context, subject any, locale string) (io.Reader, string, error) {
+// Amounts format through the locale catalogue separators (120000/"EUR"/"fr"
+// → "1 200,00 EUR"); labels resolve the same way with stable fallbacks.
+// Right-to-left locales render the English template: Helvetica core fonts
+// carry no Arabic/Hebrew glyphs, so catalogue Arabic would print as blanks —
+// numbers stay ASCII for the same reason (see DIFFERENCES).
+func (StandardModel) Render(_ context.Context, subject any, localeTag string) (io.Reader, string, error) {
 	sub, ok := subject.(InvoiceSubject)
 	if !ok {
 		return nil, "", fmt.Errorf("docgen: standard model needs InvoiceSubject: %w", platform.ErrValidation)
@@ -172,13 +207,19 @@ func (StandardModel) Render(_ context.Context, subject any, locale string) (io.R
 	if len(sub.Lines) == 0 {
 		return nil, "", fmt.Errorf("docgen: invoice has no lines: %w", platform.ErrValidation)
 	}
-	ls := stringsFor(locale)
+	if locale.IsRTL(localeTag) {
+		localeTag = "en"
+	}
+	money := func(minor int64) string { return locale.FormatMoney(minor, sub.Currency, localeTag) }
+	ls := stringsFor(localeTag)
 	title := ls.title
 	if sub.DocType == string(documents.TypeCreditNote) {
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "fr") {
-			title = "Avoir"
-		} else {
-			title = "Credit note"
+		if loader, err := locale.NewLoader(""); err == nil {
+			if v, _ := loader.Lookup(localeTag, "doc.credit_note"); v != "" && v != "doc.credit_note" {
+				title = v
+			} else {
+				title = "Credit note"
+			}
 		}
 	}
 
@@ -214,9 +255,9 @@ func (StandardModel) Render(_ context.Context, subject any, locale string) (io.R
 		cells := []string{
 			l.Label,
 			fmt.Sprintf("%d", l.Qty),
-			FormatMoney(l.UnitNet, sub.Currency),
+			money(l.UnitNet),
 			vatPct,
-			FormatMoney(l.Net()+l.VAT(), sub.Currency),
+			money(l.Net() + l.VAT()),
 		}
 		align := []string{"", "R", "R", "R", "R"}
 		for i, c := range cells {
@@ -227,9 +268,9 @@ func (StandardModel) Render(_ context.Context, subject any, locale string) (io.R
 	pdf.Ln(4)
 	pdf.SetFont("Helvetica", "", 11)
 	for _, row := range [][2]string{
-		{ls.net, FormatMoney(sub.Totals.Net, sub.Currency)},
-		{ls.vatTot, FormatMoney(sub.Totals.VAT, sub.Currency)},
-		{ls.gross, FormatMoney(sub.Totals.Gross, sub.Currency)},
+		{ls.net, money(sub.Totals.Net)},
+		{ls.vatTot, money(sub.Totals.VAT)},
+		{ls.gross, money(sub.Totals.Gross)},
 	} {
 		pdf.CellFormat(150, 7, row[0], "", 0, "R", false, 0, "")
 		pdf.CellFormat(40, 7, row[1], "", 1, "R", false, 0, "")
