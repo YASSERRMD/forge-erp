@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -51,6 +52,7 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/locale"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/module"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/trigger"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/upgrade"
 	"github.com/YASSERRMD/forge-erp/backend/internal/portal"
 	"github.com/YASSERRMD/forge-erp/backend/internal/pos"
 	"github.com/YASSERRMD/forge-erp/backend/internal/procurement"
@@ -91,6 +93,18 @@ func run() error {
 
 	if err := platform.Migrate(ctx, pool, migrations.FS); err != nil {
 		return fmt.Errorf("migrate: %w", err)
+	}
+
+	// Upgrade preflight (Phase 6): report schema-vs-binary drift at every
+	// boot. A non-ready database boots anyway with a loud log — refusing
+	// would strand rollback boots (old binary, newer DB) with no running
+	// version. Operators check /preflight on the admin listener instead.
+	if rep, err := upgrade.Preflight(ctx, pool, migrations.FS); err != nil {
+		log.Printf("forgeerp: upgrade preflight unavailable: %v", err)
+	} else if !rep.Ready {
+		log.Printf("forgeerp: UPGRADE NOT READY (booting anyway): %s", upgrade.Describe(rep))
+	} else {
+		log.Printf("forgeerp: upgrade preflight ready: %s", upgrade.Describe(rep))
 	}
 
 	if n, err := platform.OverlayFromDB(ctx, pool, &cfg); err != nil {
@@ -496,6 +510,17 @@ func run() error {
 	// public API surface does not expose it.
 	adminMux := http.NewServeMux()
 	adminMux.Handle("/metrics", metrics.Handler(build))
+	// Upgrade preflight for operators (loopback-only like /metrics):
+	// schema-vs-binary drift without touching the public API surface.
+	adminMux.HandleFunc("/preflight", func(w http.ResponseWriter, r *http.Request) {
+		rep, err := upgrade.Preflight(r.Context(), pool, migrations.FS)
+		if err != nil {
+			http.Error(w, "preflight unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(rep)
+	})
 	adminSrv := &http.Server{
 		Addr:         "127.0.0.1:" + cfg.AdminPort,
 		Handler:      adminMux,
