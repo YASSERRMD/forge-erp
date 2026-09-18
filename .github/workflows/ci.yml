@@ -41,7 +41,10 @@ jobs:
       - working-directory: backend
         name: tenant-scoping guard
         run: |
-          if grep -rn 'WHERE id=\$[0-9]' internal --include='*.go' --exclude='*_test.go' | grep -v 'entity_id'; then
+          # Every tenant-row lookup scopes by entity_id. ferp_entities is the
+          # tenant root itself (no entity_id column exists), so PK lookups
+          # there are inherently scoped and explicitly excepted.
+          if grep -rn 'WHERE id=\$[0-9]' internal --include='*.go' --exclude='*_test.go' | grep -v 'entity_id' | grep -v 'ferp_entities'; then
             echo "tenant-less id lookup detected (Phase 0 task 3)"; exit 1;
           fi
 
