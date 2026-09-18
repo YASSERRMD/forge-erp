@@ -27,12 +27,16 @@ export function Finance() {
   const [eAmount, setEAmount] = useState('');
   const [eRef, setERef] = useState('');
 
+  const [postings, setPostings] = useState<Array<{ doc_type: string; doc_id: number; entry_id: number }>>([]);
+  const [pack, setPack] = useState('FR');
+
   const reload = () => {
     if (!token) return;
     api.accounts(token).then(setAccounts).catch(() => undefined);
     apiExt.journals(token).then((j) => setJournals(j as Array<{ id: number; code: string; label: string }>)).catch(() => undefined);
     apiExt.bankAccounts(token).then((b) => setBanks(b as Array<{ id: number; code: string; label: string }>)).catch(() => undefined);
     apiExt.loans(token).then((l) => setLoans(l as Array<{ id: number; label: string; principal: number }>)).catch(() => undefined);
+    apiExt.postings(token).then(setPostings).catch(() => undefined);
   };
   useEffect(reload, [token]);
 
@@ -165,6 +169,29 @@ export function Finance() {
               </li>
             ))}
           </ul>
+        </Card>
+        <Card title={t('postings')}>
+          <ul className="clean">
+            {postings.map((p, i) => (
+              <li key={i}>
+                {p.doc_type} #{p.doc_id} → {t('ref')} #{p.entry_id}
+              </li>
+            ))}
+          </ul>
+          {postings.length === 0 && <p className="muted">{t('noData')}</p>}
+          <h4>{t('chartPack')}</h4>
+          <label className="field">
+            {t('chartPack')}{' '}
+            <select value={pack} onChange={(e) => setPack(e.target.value)}>
+              <option value="FR">FR</option>
+              <option value="DE">DE</option>
+              <option value="US">US</option>
+            </select>
+          </label>{' '}
+          <button onClick={() => token && act(apiExt.loadChartPack(token, pack), t('created'))}>
+            {t('loadPack')}
+          </button>{' '}
+          <a href={apiExt.fecUrl()}>{t('downloadFEC')}</a>
         </Card>
       </div>
     </div>

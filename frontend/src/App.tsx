@@ -1,7 +1,9 @@
 import { NavLink, Route, Routes, useNavigate } from 'react-router-dom';
 import {
   Anvil,
+  ArrowLeftRight,
   Banknote,
+  BookMarked,
   BookOpen,
   BookOpenCheck,
   Building2,
@@ -21,6 +23,7 @@ import {
   Settings2,
   ShieldCheck,
   ShoppingCart,
+  Tag,
   Truck,
   Users,
   Wrench,
@@ -48,6 +51,9 @@ import { Knowledge } from './pages/Knowledge';
 import { Happenings } from './pages/Happenings';
 import { Admin } from './pages/Admin';
 import { Collections } from './pages/Collections';
+import { Transfers } from './pages/Transfers';
+import { Pricing } from './pages/Pricing';
+import { Dictionaries } from './pages/Dictionaries';
 
 interface NavItem {
   to: string;
@@ -62,6 +68,8 @@ const COMMERCE: NavItem[] = [
   { to: '/invoices', key: 'invoices', icon: <Receipt size={17} /> },
   { to: '/pos', key: 'pos', icon: <ShoppingCart size={17} /> },
   { to: '/manufacturing', key: 'manufacturing', icon: <Factory size={17} /> },
+  { to: '/transfers', key: 'transfers', icon: <ArrowLeftRight size={17} /> },
+  { to: '/pricing', key: 'priceRules', icon: <Tag size={17} /> },
 ];
 
 const OPERATIONS: NavItem[] = [
@@ -74,6 +82,7 @@ const OPERATIONS: NavItem[] = [
   { to: '/members', key: 'members', icon: <HeartHandshake size={17} /> },
   { to: '/events', key: 'events', icon: <CalendarRange size={17} /> },
   { to: '/knowledge', key: 'knowledge', icon: <BookOpen size={17} /> },
+  { to: '/dictionaries', key: 'dictionaries', icon: <BookMarked size={17} /> },
 ];
 
 const FINANCE: NavItem[] = [
@@ -163,6 +172,9 @@ function Shell() {
           <Route path="/payments" element={<Payments />} />
           <Route path="/collections" element={<Collections />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/transfers" element={<Transfers />} />
+          <Route path="/pricing" element={<Pricing />} />
+          <Route path="/dictionaries" element={<Dictionaries />} />
         </Routes>
       </main>
     </div>

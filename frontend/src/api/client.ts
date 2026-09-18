@@ -109,6 +109,44 @@ export interface Warehouse {
   label: string;
 }
 
+export interface StockTransfer {
+  id: number;
+  ref: string;
+  source_warehouse_id: number;
+  dest_warehouse_id: number;
+  status: number;
+  note: string;
+  row_version: number;
+}
+
+export interface TransferLine {
+  id: number;
+  product_id: number;
+  qty: number;
+  unit_cost: number;
+}
+
+export interface PriceRule {
+  id: number;
+  code: string;
+  label: string;
+  expression: string;
+  status: number;
+  row_version: number;
+}
+
+export interface Dictionary {
+  code: string;
+  label: string;
+  scope: string;
+}
+
+export interface DictionaryEntry {
+  code: string;
+  label: string;
+  active: boolean;
+}
+
 export interface AgendaEvent {
   id: number;
   title: string;
@@ -584,4 +622,34 @@ export const apiExt = {
   // manufacturing depth
   bomLines: (t: string, bomId: number) =>
     get<unknown[]>(t, `/api/v1/manufacturing/boms/${bomId}/lines`),
+  // phase 7: stock transfers (TRF refs, paired postings, terminal validation)
+  transfers: (t: string) => get<StockTransfer[]>(t, '/api/v1/stock-transfers?limit=50'),
+  createTransfer: (t: string, body: { source_warehouse_id: number; dest_warehouse_id: number; note: string }) =>
+    post<StockTransfer>(t, '/api/v1/stock-transfers', body),
+  transferLines: (t: string, id: number) =>
+    get<TransferLine[]>(t, `/api/v1/stock-transfers/${id}/lines`),
+  addTransferLine: (t: string, id: number, body: { product_id: number; qty: number }) =>
+    post<TransferLine>(t, `/api/v1/stock-transfers/${id}/lines`, body),
+  validateTransfer: (t: string, id: number) =>
+    post<StockTransfer>(t, `/api/v1/stock-transfers/${id}/validate`),
+  cancelTransfer: (t: string, id: number) =>
+    post<StockTransfer>(t, `/api/v1/stock-transfers/${id}/cancel`),
+  // phase 7: dynamic price rules (exact rational expressions)
+  priceRules: (t: string) => get<PriceRule[]>(t, '/api/v1/price-rules?limit=50'),
+  createPriceRule: (t: string, body: { code: string; label: string; expression: string }) =>
+    post<PriceRule>(t, '/api/v1/price-rules', body),
+  deletePriceRule: (t: string, id: number) =>
+    request<void>(t, `/api/v1/price-rules/${id}`, { method: 'DELETE' }),
+  evaluatePriceRule: (t: string, id: number, body: { base: number; qty: number; cost: number }) =>
+    post<{ price: number }>(t, `/api/v1/price-rules/${id}/evaluate`, body),
+  // phase 7: reference dictionaries (locale-resolved labels)
+  dictionaries: (t: string) => get<Dictionary[]>(t, '/api/v1/dictionaries'),
+  dictionaryEntries: (t: string, code: string, locale: string) =>
+    get<DictionaryEntry[]>(t, `/api/v1/dictionaries/${code}?locale=${encodeURIComponent(locale)}`),
+  // phase 7: statutory operations (postings, chart packs, FEC download)
+  postings: (t: string) =>
+    get<Array<{ doc_type: string; doc_id: number; entry_id: number }>>(t, '/api/v1/finance/postings?limit=50'),
+  loadChartPack: (t: string, pack: string) =>
+    post<{ pack: string; accounts: number }>(t, '/api/v1/finance/charts/load', { pack }),
+  fecUrl: () => apiUrl('/api/v1/finance/exports/fec'),
 };
