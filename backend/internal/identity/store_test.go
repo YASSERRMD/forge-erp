@@ -82,7 +82,7 @@ func TestPGStoreUsers(t *testing.T) {
 	ctx := context.Background()
 	pool := pgtest.Pool(t)
 	st := NewPGStore(pool)
-	u := &User{EntityID: 1, Login: "pgamina", Email: "pgamina@example.com", Status: UserActive}
+	u := &User{EntityID: 1, Login: "pgamina", Email: "pgamina@example.com", Status: UserActive, Locale: "fr-FR"}
 	if err := st.CreateUser(ctx, pool, u); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -92,6 +92,17 @@ func TestPGStoreUsers(t *testing.T) {
 	got, err := st.UserByLogin(ctx, pool, 1, "pgamina")
 	if err != nil || got.Email != "pgamina@example.com" {
 		t.Fatalf("by login: %+v %v", got, err)
+	}
+	if got.Locale != "fr-FR" {
+		t.Fatalf("locale=%q want fr-FR", got.Locale)
+	}
+	got.Locale = "ar"
+	if err := st.UpdateUser(ctx, pool, 1, &got); err != nil {
+		t.Fatalf("update locale: %v", err)
+	}
+	again, err := st.UserByID(ctx, pool, 1, got.ID)
+	if err != nil || again.Locale != "ar" {
+		t.Fatalf("locale after update=%+v err=%v", again, err)
 	}
 	if _, err := st.UserByEmail(ctx, pool, 1, "pgamina@example.com"); err != nil {
 		t.Fatalf("by email: %v", err)

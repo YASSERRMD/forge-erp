@@ -51,17 +51,17 @@ func NewPGStore(pool *pgxpool.Pool) *PGStore { return &PGStore{pool: pool} }
 
 func (s *PGStore) CreateUser(ctx context.Context, db platform.DBTX, u *User) error {
 	return db.QueryRow(ctx, `INSERT INTO ferp_users
-		(entity_id, login, email, first_name, last_name, status, password_hash, is_admin, created_by, updated_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		(entity_id, login, email, first_name, last_name, status, password_hash, is_admin, locale, created_by, updated_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		RETURNING id, created_at, updated_at, row_version`,
-		u.EntityID, u.Login, u.Email, u.FirstName, u.LastName, u.Status, u.PasswordHash, u.IsAdmin, u.CreatedBy, u.UpdatedBy,
+		u.EntityID, u.Login, u.Email, u.FirstName, u.LastName, u.Status, u.PasswordHash, u.IsAdmin, u.Locale, u.CreatedBy, u.UpdatedBy,
 	).Scan(&u.ID, &u.CreatedAt, &u.UpdatedAt, &u.RowVersion)
 }
 
 func scanUser(row pgx.Row) (User, error) {
 	var u User
 	err := row.Scan(&u.ID, &u.EntityID, &u.Login, &u.Email, &u.FirstName, &u.LastName,
-		&u.Status, &u.PasswordHash, &u.IsAdmin, &u.FailedAttempts, &u.LockedUntil,
+		&u.Status, &u.PasswordHash, &u.IsAdmin, &u.Locale, &u.FailedAttempts, &u.LockedUntil,
 		&u.CreatedAt, &u.UpdatedAt, &u.CreatedBy, &u.UpdatedBy, &u.RowVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
@@ -70,7 +70,7 @@ func scanUser(row pgx.Row) (User, error) {
 }
 
 const userCols = `id, entity_id, login, email, first_name, last_name, status, password_hash,
-	is_admin, failed_attempts, locked_until, created_at, updated_at, created_by, updated_by, row_version`
+	is_admin, locale, failed_attempts, locked_until, created_at, updated_at, created_by, updated_by, row_version`
 
 func (s *PGStore) UserByID(ctx context.Context, db platform.DBTX, entityID, id int64) (User, error) {
 	return scanUser(db.QueryRow(ctx, `SELECT `+userCols+` FROM ferp_users WHERE id=$1 AND entity_id=$2`, id, entityID))
@@ -124,10 +124,10 @@ func (s *PGStore) UserByEmail(ctx context.Context, db platform.DBTX, entityID in
 
 func (s *PGStore) UpdateUser(ctx context.Context, db platform.DBTX, entityID int64, u *User) error {
 	tag, err := db.Exec(ctx, `UPDATE ferp_users SET email=$1, first_name=$2, last_name=$3,
-		status=$4, password_hash=$5, is_admin=$6, failed_attempts=$7, locked_until=$8,
-		updated_at=now(), updated_by=$9, row_version=row_version+1
-		WHERE id=$10 AND entity_id=$12 AND row_version=$11`,
-		u.Email, u.FirstName, u.LastName, u.Status, u.PasswordHash, u.IsAdmin,
+		status=$4, password_hash=$5, is_admin=$6, locale=$7, failed_attempts=$8, locked_until=$9,
+		updated_at=now(), updated_by=$10, row_version=row_version+1
+		WHERE id=$11 AND entity_id=$13 AND row_version=$12`,
+		u.Email, u.FirstName, u.LastName, u.Status, u.PasswordHash, u.IsAdmin, u.Locale,
 		u.FailedAttempts, u.LockedUntil, u.UpdatedBy, u.ID, u.RowVersion, entityID)
 	if err != nil {
 		return err

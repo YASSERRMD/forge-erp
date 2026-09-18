@@ -42,6 +42,7 @@ type User struct {
 	Status         UserStatus `json:"status"`
 	PasswordHash   string     `json:"-"`
 	IsAdmin        bool       `json:"is_admin"`
+	Locale         string     `json:"locale"` // BCP-47 preference ("" = unset); resolution in platform/locale
 	FailedAttempts int        `json:"-"`
 	LockedUntil    *time.Time `json:"-"`
 	CreatedAt      time.Time  `json:"created_at"`
