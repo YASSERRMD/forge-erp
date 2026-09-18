@@ -12,8 +12,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/catalog"
 	"github.com/YASSERRMD/forge-erp/backend/internal/documents"
+	"github.com/YASSERRMD/forge-erp/backend/internal/identity"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/docgen"
+	localePkg "github.com/YASSERRMD/forge-erp/backend/internal/platform/locale"
 )
 
 // Deps wires handlers to persistence, catalog (for fulfillment), and events.
@@ -361,10 +363,11 @@ func (h *Handler) CreateCreditNote(w http.ResponseWriter, r *http.Request) {
 // RenderDocPDF renders an invoice or credit note through the entity's
 // Kernel-5 print template: POST /sales/documents/{id}/pdf?model=&locale=.
 // The template code comes from ?model= when given, else the entity's
-// ferp_config override (FERP_SALES_DOC_MODEL), else "standard". The document
-// is loaded entity-scoped (cross-tenant ids 404 via load); other families
-// are 422 (no template applies). Bytes stream back as an attachment so the
-// caller can save or forward them to documentsvc.
+// ferp_config override (FERP_SALES_DOC_MODEL), else "standard". The locale
+// resolves ?locale= → user preference → Accept-Language → entity default →
+// English. The document is loaded entity-scoped (cross-tenant ids 404 via
+// load); other families are 422 (no template applies). Bytes stream back as
+// an attachment so the caller can save or forward them to documentsvc.
 func (h *Handler) RenderDocPDF(w http.ResponseWriter, r *http.Request) {
 	entityID, entityErr := platform.EntityOf(r)
 	if entityErr != nil {
@@ -399,11 +402,25 @@ func (h *Handler) RenderDocPDF(w http.ResponseWriter, r *http.Request) {
 	}
 	locale := strings.TrimSpace(r.URL.Query().Get("locale"))
 	if locale == "" {
-		locale = "en"
+		locale = r.URL.Query().Get("lang")
+	}
+	var userPref string
+	if u, ok := identity.AuthUser(r); ok {
+		userPref = u.Locale
+	}
+	entityDefault, err := localePkg.EntityDefault(r.Context(), h.deps.DB, entityID)
+	if err != nil {
+		platform.WriteError(w, err)
+		return
+	}
+	if locale != "" {
+		locale = localePkg.ResolveLocale(r.Header.Get("Accept-Language"), locale, entityDefault)
+	} else {
+		locale = localePkg.ResolveLocale(r.Header.Get("Accept-Language"), userPref, entityDefault)
 	}
 	issued := ""
 	if !d.CreatedAt.IsZero() {
-		issued = d.CreatedAt.UTC().Format("2006-01-02")
+		issued = localePkg.FormatDate(d.CreatedAt, locale)
 	}
 	rd, contentType, err := m.Render(r.Context(), docgen.InvoiceSubject{
 		Ref: d.Ref, DocType: string(d.Type), EntityID: d.EntityID, OrgID: d.OrgID,

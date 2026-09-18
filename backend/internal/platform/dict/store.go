@@ -19,28 +19,28 @@ import (
 
 // Dictionary is one reference list (e.g. "country", "vat_rate").
 type Dictionary struct {
-	Code      string
-	Label     string
-	Scope     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Code      string    `json:"code"`
+	Label     string    `json:"label"`
+	Scope     string    `json:"scope"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Entry is one row inside a dictionary. LocaleOverrides maps a locale tag
 // ("fr", "ar", ...) to the display label in that locale; Extra carries the
 // per-dictionary columns (rate_bps, ISO codes, days, ...) as JSON scalars.
 type Entry struct {
-	ID              int64
-	Dictionary      string
-	Code            string
-	Label           string
-	Sort            int
-	Active          bool
-	IsCore          bool
-	LocaleOverrides map[string]string
-	Extra           map[string]any
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID              int64             `json:"id"`
+	Dictionary      string            `json:"dictionary"`
+	Code            string            `json:"code"`
+	Label           string            `json:"label"`
+	Sort            int               `json:"sort"`
+	Active          bool              `json:"active"`
+	IsCore          bool              `json:"is_core"`
+	LocaleOverrides map[string]string `json:"locale_overrides,omitempty"`
+	Extra           map[string]any    `json:"extra,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
 // ResolvedLabel returns the locale-merged display label: the override wins

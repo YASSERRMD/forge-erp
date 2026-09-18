@@ -47,6 +47,8 @@ import (
 	"github.com/YASSERRMD/forge-erp/backend/internal/partnership"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/cron"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/dict"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/locale"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/module"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform/trigger"
 	"github.com/YASSERRMD/forge-erp/backend/internal/portal"
@@ -383,6 +385,9 @@ func run() error {
 		portal: portal.Deps{Store: portal.NewPGStore(pool), Sales: sstore,
 			Services: svcstore, Bus: bus, DB: pool, Pool: pool},
 		cron: cron.Deps{Store: cronStore, Scheduler: cronSched, Bus: bus, DB: pool},
+		// Phase 4: catalogue surface + reference dictionaries (?locale=).
+		locale: locale.Deps{DB: pool},
+		dict:   dict.Deps{Store: dict.NewPGStore(pool), DB: pool},
 		fx:      fx.Deps{Store: fx.NewPGStore(pool), Bus: bus, DB: pool},
 		sepa: sepa.Deps{Store: sepa.NewPGStore(pool), Bus: bus, DB: pool,
 			Pool: pool, Ledger: fstore},
@@ -547,6 +552,8 @@ type apiWiring struct {
 		dataio        dataio.Deps
 		portal        portal.Deps
 		cron          cron.Deps
+		locale        locale.Deps
+		dict          dict.Deps
 		fx            fx.Deps
 	sepa          sepa.Deps
 	inbound       inbound.Deps
@@ -597,6 +604,8 @@ func mountAPIRoutes(mux chi.Router, w apiWiring) {
 		dataio.Routes(r, w.dataio, idH.Require)
 		portal.Routes(r, w.portal, idH.Require)
 		cron.Routes(r, w.cron, idH.Require)
+		locale.Routes(r, w.locale, idH.Require)
+		dict.Routes(r, w.dict, idH.Require)
 		fx.Routes(r, w.fx, idH.Require)
 		sepa.Routes(r, w.sepa, idH.Require)
 		inbound.Routes(r, w.inbound, idH.Require)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/YASSERRMD/forge-erp/backend/internal/platform"
+	"github.com/YASSERRMD/forge-erp/backend/internal/platform/locale"
 )
 
 // Deps wires handlers to persistence, tokens, and the clock.
@@ -360,6 +361,7 @@ type updateUserRequest struct {
 	LastName  *string `json:"last_name"`
 	Status    *int16  `json:"status"`
 	IsAdmin   *bool   `json:"is_admin"`
+	Locale    *string `json:"locale"` // BCP-47 preference (normalized; "" clears)
 	RowVersion int64  `json:"row_version"`
 }
 
@@ -403,6 +405,9 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.IsAdmin != nil {
 		u.IsAdmin = *req.IsAdmin
+	}
+	if req.Locale != nil {
+		u.Locale = locale.Normalize(*req.Locale)
 	}
 	if err := h.deps.Store.UpdateUser(r.Context(), h.deps.DB, entityID, &u); err != nil {
 		if errors.Is(err, ErrVersionConflict) {

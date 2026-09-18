@@ -2356,3 +2356,27 @@ paths:
       summary: STUB (generated) - route is served but undocumented; fill in contract details
       responses:
         '201': { description: OK }
+  /api/v1/dictionaries:
+    get:
+      operationId: getStubDictionaries
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/dictionaries/{code}:
+    get:
+      operationId: getStubDictionariesCode
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/locales:
+    get:
+      operationId: getStubLocales
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }
+  /api/v1/locales/{code}:
+    get:
+      operationId: getStubLocalesCode
+      summary: STUB (generated) - route is served but undocumented; fill in contract details
+      responses:
+        '200': { description: OK }

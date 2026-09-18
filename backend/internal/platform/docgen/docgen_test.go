@@ -214,3 +214,40 @@ func TestModelForEntityPG(t *testing.T) {
 		t.Fatal("config key must follow FERP_* convention")
 	}
 }
+
+func TestStringsForCatalogue(t *testing.T) {
+	fr := stringsFor("fr-FR")
+	// Catalogued keys resolve (Quantité), uncatalogued keep legacy French
+	// (P.U. HT) — never half-English, never empty.
+	if fr.title != "Facture" || fr.gross != "Total TTC" || fr.qty != "Quantité" {
+		t.Fatalf("fr labels=%+v", fr)
+	}
+	if fr.unit != "P.U. HT" || fr.billed != "Facturé à" {
+		t.Fatalf("fr fallback=%+v", fr)
+	}
+	en := stringsFor("en")
+	if en.title != "Invoice" || en.qty != "Quantity" {
+		t.Fatalf("en labels=%+v", en)
+	}
+	// Unknown locale falls back to the stable English wording.
+	xx := stringsFor("xx")
+	if xx != en {
+		t.Fatalf("xx labels=%+v want en %+v", xx, en)
+	}
+	// Arabic resolves catalogue keys through the fallback chain.
+	ar := stringsFor("ar")
+	if ar.title != "فاتورة" {
+		t.Fatalf("ar title=%q want catalogued Arabic", ar.title)
+	}
+}
+
+func TestRTLTemplateFallsBackToEnglish(t *testing.T) {
+	m := StandardModel{}
+	en := render(t, m, testSubject(), "en")
+	ar := render(t, m, testSubject(), "ar")
+	// Core fonts carry no Arabic glyphs: the RTL template renders English
+	// instead of printing blanks (numbers stay ASCII for the same reason).
+	if !bytes.Equal(en, ar) {
+		t.Fatal("ar template diverged from the English fallback")
+	}
+}
