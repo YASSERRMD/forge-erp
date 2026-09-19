@@ -18,15 +18,19 @@ import {
   HeartHandshake,
   LayoutDashboard,
   LogOut,
+  Mail,
   Package,
   Receipt,
   Settings2,
   ShieldCheck,
+  ShieldHalf,
   ShoppingCart,
+  Sparkles,
   Tag,
   Truck,
   Users,
   Wrench,
+  Handshake,
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { LangProvider, useLang, type DictKey } from './i18n/lang';
@@ -54,6 +58,10 @@ import { Collections } from './pages/Collections';
 import { Transfers } from './pages/Transfers';
 import { Pricing } from './pages/Pricing';
 import { Dictionaries } from './pages/Dictionaries';
+import { AIAssist } from './pages/AIAssist';
+import { Mailing } from './pages/Mailing';
+import { Partnerships } from './pages/Partnerships';
+import { DataPolicy } from './pages/DataPolicy';
 
 interface NavItem {
   to: string;
@@ -70,6 +78,9 @@ const COMMERCE: NavItem[] = [
   { to: '/manufacturing', key: 'manufacturing', icon: <Factory size={17} /> },
   { to: '/transfers', key: 'transfers', icon: <ArrowLeftRight size={17} /> },
   { to: '/pricing', key: 'priceRules', icon: <Tag size={17} /> },
+  { to: '/mailing', key: 'mailing', icon: <Mail size={17} /> },
+  { to: '/partnerships', key: 'partnerships', icon: <Handshake size={17} /> },
+  { to: '/ai', key: 'aiAssist', icon: <Sparkles size={17} /> },
 ];
 
 const OPERATIONS: NavItem[] = [
@@ -83,6 +94,7 @@ const OPERATIONS: NavItem[] = [
   { to: '/events', key: 'events', icon: <CalendarRange size={17} /> },
   { to: '/knowledge', key: 'knowledge', icon: <BookOpen size={17} /> },
   { to: '/dictionaries', key: 'dictionaries', icon: <BookMarked size={17} /> },
+  { to: '/data-policy', key: 'dataPolicy', icon: <ShieldHalf size={17} /> },
 ];
 
 const FINANCE: NavItem[] = [
@@ -175,6 +187,10 @@ function Shell() {
           <Route path="/transfers" element={<Transfers />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/dictionaries" element={<Dictionaries />} />
+          <Route path="/mailing" element={<Mailing />} />
+          <Route path="/partnerships" element={<Partnerships />} />
+          <Route path="/ai" element={<AIAssist />} />
+          <Route path="/data-policy" element={<DataPolicy />} />
         </Routes>
       </main>
     </div>

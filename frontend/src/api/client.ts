@@ -147,6 +147,46 @@ export interface DictionaryEntry {
   active: boolean;
 }
 
+export interface AssistResult {
+  output: string;
+  model: string;
+  run_id: number;
+}
+
+export interface MailingCampaign {
+  id: number;
+  subject: string;
+  body: string;
+  status: string;
+}
+
+export interface PartnerProgram {
+  id: number;
+  code: string;
+  name: string;
+  tiers: Array<{ name: string; min_total: number; rate_bps: number }>;
+}
+
+export interface Referral {
+  id: number;
+  code: string;
+  status: string;
+}
+
+export interface RetentionRule {
+  scope: string;
+  retain_days: number;
+  action: string;
+}
+
+export interface ErasureRequest {
+  id: number;
+  scope: string;
+  subject_id: number;
+  reason: string;
+  status: string;
+}
+
 export interface AgendaEvent {
   id: number;
   title: string;
@@ -652,4 +692,50 @@ export const apiExt = {
   loadChartPack: (t: string, pack: string) =>
     post<{ pack: string; accounts: number }>(t, '/api/v1/finance/charts/load', { pack }),
   fecUrl: () => apiUrl('/api/v1/finance/exports/fec'),
+  // phase 7 batch 2: AI assist (provider-agnostic endpoint, excerpt-logged runs)
+  assist: (t: string, body: { prompt: string; scope?: string; object_type?: string; object_id?: number }) =>
+    post<AssistResult>(t, '/api/v1/ai/assist', body),
+  aiRuns: (t: string) =>
+    get<Array<{ id: number; model: string; prompt_excerpt: string; output_excerpt: string }>>(
+      t,
+      '/api/v1/ai/runs?limit=50',
+    ),
+  // phase 7 batch 2: mailing campaigns (queue, send, suppressions)
+  mailingCampaigns: (t: string) => get<MailingCampaign[]>(t, '/api/v1/mailing-campaigns?limit=50'),
+  createMailingCampaign: (t: string, body: { subject: string; body: string }) =>
+    post<MailingCampaign>(t, '/api/v1/mailing-campaigns', body),
+  queueMailing: (t: string, id: number, extraEmails: string[]) =>
+    post<{ queued: number }>(t, `/api/v1/mailing-campaigns/${id}/queue`, {
+      audience: { extra_emails: extraEmails },
+      members: [],
+      orgs: [],
+    }),
+  sendMailing: (t: string, id: number) =>
+    post<{ sent: number; failed: number }>(t, `/api/v1/mailing-campaigns/${id}/send`),
+  // phase 7 batch 2: partnerships (programs, referrals, accruals)
+  partnerPrograms: (t: string) => get<PartnerProgram[]>(t, '/api/v1/partner-programs?limit=50'),
+  createPartnerProgram: (t: string, body: { code: string; name: string }) =>
+    post<PartnerProgram>(t, '/api/v1/partner-programs', body),
+  programReferrals: (t: string, programId: number) =>
+    get<Referral[]>(t, `/api/v1/partner-programs/${programId}/referrals`),
+  registerReferral: (t: string, programId: number, body: { referrer_org_id: number; referred_org_id: number; code: string }) =>
+    post<Referral>(t, `/api/v1/partner-programs/${programId}/referrals`, body),
+  accrueCommission: (t: string, referralId: number, saleTotal: number) =>
+    post<unknown>(t, `/api/v1/referrals/${referralId}/accruals`, { sale_total: saleTotal }),
+  // phase 7 batch 2: data policy (retention rules, dry-run, erasures)
+  retentionRules: (t: string) =>
+    get<RetentionRule[]>(t, '/api/v1/data-policy/rules'),
+  upsertRetentionRule: (t: string, body: { scope: string; retain_days: number; action: string }) =>
+    request<RetentionRule>(t, '/api/v1/data-policy/rules', { method: 'PUT', body: JSON.stringify(body) }),
+  retentionDryRun: (t: string, scope: string) =>
+    get<{ scope: string; due_count: number; candidates: Array<{ subject_id: number }> }>(
+      t,
+      `/api/v1/data-policy/dry-run?scope=${encodeURIComponent(scope)}`,
+    ),
+  erasureRequests: (t: string) =>
+    get<ErasureRequest[]>(t, '/api/v1/data-policy/erasures?limit=50'),
+  requestErasure: (t: string, body: { scope: string; subject_id: number; reason: string }) =>
+    post<ErasureRequest>(t, '/api/v1/data-policy/erasures', body),
+  completeErasure: (t: string, id: number) =>
+    post<ErasureRequest>(t, `/api/v1/data-policy/erasures/${id}/done`),
 };
