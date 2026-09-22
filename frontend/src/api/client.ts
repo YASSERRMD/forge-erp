@@ -187,6 +187,119 @@ export interface ErasureRequest {
   status: string;
 }
 
+export interface SepaMandate {
+  id: number;
+  umr: string;
+  debtor_name: string;
+  iban: string;
+  bic: string;
+  sequence: string;
+  status: number;
+  row_version: number;
+}
+
+export interface SepaBatch {
+  id: number;
+  ref: string;
+  creditor_name: string;
+  creditor_iban: string;
+  status: number;
+  row_version: number;
+}
+
+export interface SepaTransfer {
+  id: number;
+  ref: string;
+  debtor_name: string;
+  debtor_iban: string;
+  status: number;
+  row_version: number;
+}
+
+export interface RTransaction {
+  id: number;
+  end_to_end_id: string;
+  kind: string;
+  reason: string;
+}
+
+export interface CronJob {
+  id: number;
+  code: string;
+  interval_s: number;
+  cron_expr: string;
+  next_run_at: string;
+  last_status: string;
+  enabled: boolean;
+}
+
+export interface CronRun {
+  id: number;
+  job_id: number;
+  started_at: string;
+  status: string;
+  detail: string;
+}
+
+export interface FxRate {
+  code: string;
+  rate_to_base: number;
+}
+
+export interface Memo {
+  id: number;
+  title: string;
+  body: string;
+  row_version: number;
+}
+
+export interface Bookmark {
+  id: number;
+  user_login: string;
+  scope: string;
+  object_type: string;
+  object_id: number;
+}
+
+export interface Comment {
+  id: number;
+  scope: string;
+  object_type: string;
+  object_id: number;
+  thread: string;
+  author: string;
+  body: string;
+}
+
+export interface WebsitePage {
+  slug: string;
+  title: string;
+  body: string;
+}
+
+export interface LabelSheet {
+  id: number;
+  code: string;
+  name: string;
+  rows: number;
+  cols: number;
+  label_w_mm: number;
+  label_h_mm: number;
+  fields: string[];
+  row_version: number;
+}
+
+export interface LdapUser {
+  login: string;
+  email: string;
+  full_name: string;
+}
+
+export interface Incoterm {
+  code: string;
+  label: string;
+}
+
 export interface AgendaEvent {
   id: number;
   title: string;
@@ -738,4 +851,91 @@ export const apiExt = {
     post<ErasureRequest>(t, '/api/v1/data-policy/erasures', body),
   completeErasure: (t: string, id: number) =>
     post<ErasureRequest>(t, `/api/v1/data-policy/erasures/${id}/done`),
+  // phase 9 batch 3: SEPA direct-debit mandates, collection batches, credit transfers
+  sepaMandates: (t: string) => get<SepaMandate[]>(t, '/api/v1/sepa/mandates'),
+  createSepaMandate: (t: string, body: { umr: string; debtor_name: string; iban: string; bic: string; sequence: string }) =>
+    post<SepaMandate>(t, '/api/v1/sepa/mandates', body),
+  signSepaMandate: (t: string, id: number, rowVersion: number) =>
+    post<SepaMandate>(t, `/api/v1/sepa/mandates/${id}/sign`, {
+      signed_at: new Date().toISOString(),
+      row_version: rowVersion,
+    }),
+  cancelSepaMandate: (t: string, id: number, rowVersion: number) =>
+    post<SepaMandate>(t, `/api/v1/sepa/mandates/${id}/cancel`, { row_version: rowVersion }),
+  sepaBatches: (t: string) => get<SepaBatch[]>(t, '/api/v1/sepa/batches'),
+  createSepaBatch: (t: string, body: { ref: string; creditor_name: string; creditor_iban: string; creditor_bic: string; creditor_id: string; sequence: string; transactions: unknown[] }) =>
+    post<SepaBatch>(t, '/api/v1/sepa/batches', body),
+  setSepaBatchStatus: (t: string, id: number, status: number, rowVersion: number) =>
+    post<SepaBatch>(t, `/api/v1/sepa/batches/${id}/status`, { status, row_version: rowVersion }),
+  sepaBatchXmlUrl: (id: number) => apiUrl(`/api/v1/sepa/batches/${id}/xml`),
+  sepaRTransactions: (t: string, batchId: number) =>
+    get<RTransaction[]>(t, `/api/v1/sepa/batches/${batchId}/rtransactions`),
+  sepaTransfers: (t: string) => get<SepaTransfer[]>(t, '/api/v1/sepa/transfers'),
+  createSepaTransfer: (t: string, body: { ref: string; debtor_name: string; debtor_iban: string; debtor_bic: string; lines: unknown[] }) =>
+    post<SepaTransfer>(t, '/api/v1/sepa/transfers', body),
+  setSepaTransferStatus: (t: string, id: number, status: number, rowVersion: number) =>
+    post<SepaTransfer>(t, `/api/v1/sepa/transfers/${id}/status`, { status, row_version: rowVersion }),
+  sepaTransferXmlUrl: (id: number) => apiUrl(`/api/v1/sepa/transfers/${id}/xml`),
+  // phase 9 batch 3: cron scheduler (due jobs, upsert, run-now, run history)
+  cronJobs: (t: string) => get<CronJob[]>(t, '/api/v1/cron/jobs'),
+  upsertCronJob: (t: string, body: { code: string; interval_s: number; cron_expr: string; enabled: boolean }) =>
+    post<CronJob>(t, '/api/v1/cron/jobs', body),
+  runCronJob: (t: string, code: string) =>
+    post<unknown>(t, `/api/v1/cron/jobs/${encodeURIComponent(code)}/run`),
+  cronRuns: (t: string, code: string) =>
+    get<CronRun[]>(t, `/api/v1/cron/jobs/${encodeURIComponent(code)}/runs?limit=50`),
+  // phase 9 batch 3: FX rates (list, set, convert tester)
+  fxRates: (t: string) => get<FxRate[]>(t, '/api/v1/fx/rates'),
+  setFxRate: (t: string, body: { code: string; rate_to_base: number }) =>
+    post<FxRate>(t, '/api/v1/fx/rates', body),
+  fxConvert: (t: string, amount: number, from: string, to: string) =>
+    get<{ amount: number; from: string; to: string; result: number }>(
+      t,
+      `/api/v1/fx/convert?amount=${amount}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    ),
+  // phase 9 batch 3: quick memos (full CRUD, optimistic locking)
+  memos: (t: string) => get<Memo[]>(t, '/api/v1/memos'),
+  createMemo: (t: string, body: { title: string; body: string }) =>
+    post<Memo>(t, '/api/v1/memos', body),
+  updateMemo: (t: string, id: number, body: { title: string; body: string; row_version: number }) =>
+    request<Memo>(t, `/api/v1/memos/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteMemo: (t: string, id: number) =>
+    request<void>(t, `/api/v1/memos/${id}`, { method: 'DELETE' }),
+  // phase 9 batch 3: bookmarks (add/toggle/list/remove)
+  bookmarks: (t: string) => get<Bookmark[]>(t, '/api/v1/bookmarks'),
+  addBookmark: (t: string, body: { scope: string; object_type: string; object_id: number }) =>
+    post<Bookmark>(t, '/api/v1/bookmarks', body),
+  removeBookmark: (t: string, id: number) =>
+    request<void>(t, `/api/v1/bookmarks/${id}`, { method: 'DELETE' }),
+  // phase 9 batch 3: collab comments (scoped threads)
+  comments: (t: string, scope: string, objectType: string, objectId: number) =>
+    get<Comment[]>(
+      t,
+      `/api/v1/comments?scope=${encodeURIComponent(scope)}&object_type=${encodeURIComponent(objectType)}&object_id=${objectId}&limit=50`,
+    ),
+  addComment: (t: string, body: { scope: string; object_type: string; object_id: number; thread: string; body: string }) =>
+    post<Comment>(t, '/api/v1/comments', body),
+  removeComment: (t: string, id: number) =>
+    request<void>(t, `/api/v1/comments/${id}`, { method: 'DELETE' }),
+  // phase 9 batch 3: portal staff side (mint/revoke customer tokens)
+  mintPortalToken: (t: string, body: { org_id: number; ttl_days: number }) =>
+    post<{ token: string; id: number; org_id: number; expires_at: string }>(t, '/api/v1/portal/tokens', body),
+  revokePortalToken: (t: string, id: number) =>
+    post<{ id: number; revoked: boolean }>(t, `/api/v1/portal/tokens/${id}/revoke`),
+  // phase 9 batch 3: website CMS (read-only published pages)
+  websitePages: (t: string) => get<WebsitePage[]>(t, '/api/v1/website/pages?limit=50'),
+  websitePage: (t: string, slug: string) =>
+    get<WebsitePage>(t, `/api/v1/website/pages/${encodeURIComponent(slug)}`),
+  // phase 9 batch 3: LDAP directory (status gate, sync, mirrored users)
+  ldapStatus: (t: string) => get<{ enabled: boolean }>(t, '/api/v1/ldap/status'),
+  ldapSync: (t: string) => post<{ synced: number }>(t, '/api/v1/ldap/sync'),
+  ldapUsers: (t: string) => get<LdapUser[]>(t, '/api/v1/ldap/users'),
+  // phase 9 batch 3: label sheets (CRUD + PDF render)
+  labelSheets: (t: string) => get<LabelSheet[]>(t, '/api/v1/label-sheets?limit=50'),
+  createLabelSheet: (t: string, body: { code: string; name: string; rows: number; cols: number; label_w_mm: number; label_h_mm: number; fields: string[] }) =>
+    post<LabelSheet>(t, '/api/v1/label-sheets', body),
+  deleteLabelSheet: (t: string, id: number) =>
+    request<void>(t, `/api/v1/label-sheets/${id}`, { method: 'DELETE' }),
+  // phase 9 batch 3: incoterms (read-only trade terms)
+  incoterms: (t: string) => get<Incoterm[]>(t, '/api/v1/incoterms'),
 };
