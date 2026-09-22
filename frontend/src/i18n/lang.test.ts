@@ -53,4 +53,11 @@ const cognates = new Set([
   'stMaintenance',
   'note',
   'expression',
+  // Phase 9: SEPA/IBAN/BIC are pan-European acronyms; Collaboration and
+  // Incoterms are spelled identically in French.
+  'sepa',
+  'iban',
+  'bic',
+  'collab',
+  'incoterms',
 ]);

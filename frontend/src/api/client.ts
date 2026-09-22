@@ -685,9 +685,7 @@ export const apiExt = {
   createDonation: (t: string, body: unknown) => post<Donation>(t, '/api/v1/donations', body),
   setDonationStatus: (t: string, id: number, body: unknown) =>
     post<Donation>(t, `/api/v1/donations/${id}/status`, body),
-  // sepa
-  sepaBatches: (t: string) => get<unknown[]>(t, '/api/v1/sepa/batches'),
-  createSepaBatch: (t: string, body: unknown) => post<unknown>(t, '/api/v1/sepa/batches', body),
+  // sepa (superseded by typed phase 9 helpers below)
   setSepaStatus: (t: string, id: number, body: unknown) =>
     post<unknown>(t, `/api/v1/sepa/batches/${id}/status`, body),
   sepaXMLUrl: (id: number) => apiUrl(`/api/v1/sepa/batches/${id}/xml`),
