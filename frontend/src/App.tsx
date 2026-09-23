@@ -3,6 +3,7 @@ import {
   Anvil,
   ArrowLeftRight,
   Banknote,
+  Bookmark,
   BookMarked,
   BookOpen,
   BookOpenCheck,
@@ -10,27 +11,37 @@ import {
   CalendarDays,
   CalendarRange,
   ClipboardList,
+  Coins,
   CreditCard,
   Euro,
   FileText,
   FileUp,
   Factory,
+  Globe,
+  Handshake,
   HeartHandshake,
+  KeyRound,
+  Landmark,
   LayoutDashboard,
   LogOut,
   Mail,
+  MessagesSquare,
+  Network,
+  NotebookPen,
   Package,
+  Printer,
   Receipt,
   Settings2,
   ShieldCheck,
   ShieldHalf,
+  Ship,
   ShoppingCart,
   Sparkles,
   Tag,
+  Timer,
   Truck,
   Users,
   Wrench,
-  Handshake,
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { LangProvider, useLang, type DictKey } from './i18n/lang';
@@ -62,6 +73,17 @@ import { AIAssist } from './pages/AIAssist';
 import { Mailing } from './pages/Mailing';
 import { Partnerships } from './pages/Partnerships';
 import { DataPolicy } from './pages/DataPolicy';
+import { SEPA } from './pages/SEPA';
+import { CronJobs } from './pages/CronJobs';
+import { FXRates } from './pages/FXRates';
+import { Memos } from './pages/Memos';
+import { Bookmarks } from './pages/Bookmarks';
+import { Collab } from './pages/Collab';
+import { PortalAdmin } from './pages/PortalAdmin';
+import { Website } from './pages/Website';
+import { LDAP } from './pages/LDAP';
+import { Labels } from './pages/Labels';
+import { Incoterms } from './pages/Incoterms';
 
 interface NavItem {
   to: string;
@@ -80,6 +102,10 @@ const COMMERCE: NavItem[] = [
   { to: '/pricing', key: 'priceRules', icon: <Tag size={17} /> },
   { to: '/mailing', key: 'mailing', icon: <Mail size={17} /> },
   { to: '/partnerships', key: 'partnerships', icon: <Handshake size={17} /> },
+  { to: '/portal', key: 'portalAdmin', icon: <KeyRound size={17} /> },
+  { to: '/website', key: 'website', icon: <Globe size={17} /> },
+  { to: '/labels', key: 'labelSheets', icon: <Printer size={17} /> },
+  { to: '/incoterms', key: 'incoterms', icon: <Ship size={17} /> },
   { to: '/ai', key: 'aiAssist', icon: <Sparkles size={17} /> },
 ];
 
@@ -95,6 +121,11 @@ const OPERATIONS: NavItem[] = [
   { to: '/knowledge', key: 'knowledge', icon: <BookOpen size={17} /> },
   { to: '/dictionaries', key: 'dictionaries', icon: <BookMarked size={17} /> },
   { to: '/data-policy', key: 'dataPolicy', icon: <ShieldHalf size={17} /> },
+  { to: '/memos', key: 'memos', icon: <NotebookPen size={17} /> },
+  { to: '/bookmarks', key: 'bookmarks', icon: <Bookmark size={17} /> },
+  { to: '/collab', key: 'collab', icon: <MessagesSquare size={17} /> },
+  { to: '/cron', key: 'cronJobs', icon: <Timer size={17} /> },
+  { to: '/ldap', key: 'ldap', icon: <Network size={17} /> },
 ];
 
 const FINANCE: NavItem[] = [
@@ -103,6 +134,8 @@ const FINANCE: NavItem[] = [
   { to: '/suppliers', key: 'suppliers', icon: <Truck size={17} /> },
   { to: '/payments', key: 'payments', icon: <CreditCard size={17} /> },
   { to: '/collections', key: 'collections', icon: <Euro size={17} /> },
+  { to: '/sepa', key: 'sepa', icon: <Landmark size={17} /> },
+  { to: '/fx', key: 'fxRates', icon: <Coins size={17} /> },
   { to: '/admin', key: 'admin', icon: <ShieldCheck size={17} /> },
 ];
 
@@ -191,6 +224,17 @@ function Shell() {
           <Route path="/partnerships" element={<Partnerships />} />
           <Route path="/ai" element={<AIAssist />} />
           <Route path="/data-policy" element={<DataPolicy />} />
+          <Route path="/sepa" element={<SEPA />} />
+          <Route path="/cron" element={<CronJobs />} />
+          <Route path="/fx" element={<FXRates />} />
+          <Route path="/memos" element={<Memos />} />
+          <Route path="/bookmarks" element={<Bookmarks />} />
+          <Route path="/collab" element={<Collab />} />
+          <Route path="/portal" element={<PortalAdmin />} />
+          <Route path="/website" element={<Website />} />
+          <Route path="/ldap" element={<LDAP />} />
+          <Route path="/labels" element={<Labels />} />
+          <Route path="/incoterms" element={<Incoterms />} />
         </Routes>
       </main>
     </div>
