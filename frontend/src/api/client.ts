@@ -729,9 +729,8 @@ export const apiExt = {
   setSepaStatus: (t: string, id: number, body: unknown) =>
     post<unknown>(t, `/api/v1/sepa/batches/${id}/status`, body),
   sepaXMLUrl: (id: number) => apiUrl(`/api/v1/sepa/batches/${id}/xml`),
-  // inbound
+  // inbound (mailboxes/receive superseded by typed phase 10 helpers below)
   mailboxes: (t: string) => get<unknown[]>(t, '/api/v1/inbound/mailboxes'),
-  upsertMailbox: (t: string, body: unknown) => post<unknown>(t, '/api/v1/inbound/mailboxes', body),
   receiveMessage: (t: string, body: unknown) => post<unknown>(t, '/api/v1/inbound/messages', body),
   // kb + assets
   articles: (t: string, published: boolean) =>

@@ -100,7 +100,7 @@ export function Collections() {
             className="primary"
             onClick={() =>
               token &&
-              act(apiExt.upsertMailbox(token, { code: mcode, host: mhost, port: 993, active: true }), t('save'))
+              act(apiExt.upsertMailbox(token, { code: mcode, host: mhost, port: 993, username: '', use_tls: true, active: true }), t('save'))
             }
           >
             {t('save')}
