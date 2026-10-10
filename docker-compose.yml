@@ -64,6 +64,8 @@ services:
     environment:
       FERP_ENV: development
       FERP_DATABASE_URL: postgres://forgeerp:forgeerp@postgres:5432/forgeerp?sslmode=disable
+      # Empty by default (admin seed skipped); E2E/CI sets it to seed the admin login.
+      FERP_ADMIN_PASSWORD: ${FERP_ADMIN_PASSWORD:-}
     ports: ["8080:8080"]
     depends_on:
       postgres:
