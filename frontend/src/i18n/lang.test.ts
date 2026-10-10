@@ -60,4 +60,8 @@ const cognates = new Set([
   'bic',
   'collab',
   'incoterms',
+  // Phase 10: Modules/Activations/Version are identical loanwords in French.
+  'modules',
+  'activations',
+  'version',
 ]);

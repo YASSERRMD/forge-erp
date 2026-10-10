@@ -300,6 +300,46 @@ export interface Incoterm {
   label: string;
 }
 
+export interface ModuleInfo {
+  name: string;
+  family: string;
+  enabled: boolean;
+  rights: Array<{ module: string; entity: string; action: string }>;
+}
+
+export interface Activation {
+  name: string;
+  enabled: boolean;
+  version: string;
+}
+
+export interface Mailbox {
+  id: number;
+  code: string;
+  host: string;
+  port: number;
+  username: string;
+  use_tls: boolean;
+  active: boolean;
+  last_error: string;
+}
+
+export interface LocaleInfo {
+  code: string;
+  direction: string;
+  plural: string;
+  decimal: string;
+  thousand: string;
+  keys: number;
+}
+
+export interface SearchHit {
+  scope: string;
+  id: number;
+  label: string;
+  ref: string;
+}
+
 export interface AgendaEvent {
   id: number;
   title: string;
@@ -689,9 +729,8 @@ export const apiExt = {
   setSepaStatus: (t: string, id: number, body: unknown) =>
     post<unknown>(t, `/api/v1/sepa/batches/${id}/status`, body),
   sepaXMLUrl: (id: number) => apiUrl(`/api/v1/sepa/batches/${id}/xml`),
-  // inbound
+  // inbound (mailboxes/receive superseded by typed phase 10 helpers below)
   mailboxes: (t: string) => get<unknown[]>(t, '/api/v1/inbound/mailboxes'),
-  upsertMailbox: (t: string, body: unknown) => post<unknown>(t, '/api/v1/inbound/mailboxes', body),
   receiveMessage: (t: string, body: unknown) => post<unknown>(t, '/api/v1/inbound/messages', body),
   // kb + assets
   articles: (t: string, published: boolean) =>
@@ -936,4 +975,32 @@ export const apiExt = {
     request<void>(t, `/api/v1/label-sheets/${id}`, { method: 'DELETE' }),
   // phase 9 batch 3: incoterms (read-only trade terms)
   incoterms: (t: string) => get<Incoterm[]>(t, '/api/v1/incoterms'),
+  // phase 10 batch 4: module registry (kernel catalogue + persisted state)
+  modules: (t: string) => get<ModuleInfo[]>(t, '/api/v1/modules'),
+  // phase 10 batch 4: module builder (scaffold, validate, install, activations)
+  mbScaffold: (t: string, body: { name: string; family: string }) =>
+    post<{ files: Record<string, string>; keys: string[] }>(t, '/api/v1/modulebuilder/scaffold', body),
+  mbValidate: (t: string, body: { name: string; family: string; version: string; routes: string[]; rights: Array<{ module: string; entity: string; action: string }> }) =>
+    post<{ valid: boolean }>(t, '/api/v1/modulebuilder/validate', body),
+  mbInstall: (t: string, body: { name: string; family: string; version: string; routes: string[]; rights: Array<{ module: string; entity: string; action: string }> }) =>
+    post<{ installed: boolean }>(t, '/api/v1/modulebuilder/install', { manifest: body }),
+  mbUninstall: (t: string, body: { name: string; version: string }) =>
+    post<{ uninstalled: boolean }>(t, '/api/v1/modulebuilder/uninstall', body),
+  mbActivations: (t: string) => get<Activation[]>(t, '/api/v1/modulebuilder/modules'),
+  // phase 10 batch 4: inbound email (mailboxes + ticket intake)
+  inboundMailboxes: (t: string) => get<Mailbox[]>(t, '/api/v1/inbound/mailboxes'),
+  upsertMailbox: (t: string, body: { code: string; host: string; port: number; username: string; use_tls: boolean; active: boolean }) =>
+    post<Mailbox>(t, '/api/v1/inbound/mailboxes', body),
+  inboundReceive: (t: string, body: { mailbox: string; from: string; subject: string; body: string }) =>
+    post<unknown>(t, '/api/v1/inbound/messages', body),
+  // phase 10 batch 4: cross-entity search
+  searchAll: (t: string, q: string, scope: string) =>
+    get<SearchHit[]>(
+      t,
+      `/api/v1/search?q=${encodeURIComponent(q)}${scope ? `&scope=${encodeURIComponent(scope)}` : ''}`,
+    ),
+  // phase 10 batch 4: locale catalogue (server-side strings, direction, separators)
+  locales: (t: string) => get<LocaleInfo[]>(t, '/api/v1/locales'),
+  localeDetail: (t: string, code: string) =>
+    get<LocaleInfo & { strings?: Record<string, string> }>(t, `/api/v1/locales/${encodeURIComponent(code)}`),
 };

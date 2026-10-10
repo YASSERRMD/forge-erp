@@ -3,6 +3,7 @@ import {
   Anvil,
   ArrowLeftRight,
   Banknote,
+  Blocks,
   Bookmark,
   BookMarked,
   BookOpen,
@@ -20,8 +21,10 @@ import {
   Globe,
   Handshake,
   HeartHandshake,
+  Inbox,
   KeyRound,
   Landmark,
+  Languages,
   LayoutDashboard,
   LogOut,
   Mail,
@@ -32,6 +35,7 @@ import {
   Printer,
   Receipt,
   Settings2,
+  Search as SearchIcon,
   ShieldCheck,
   ShieldHalf,
   Ship,
@@ -84,6 +88,10 @@ import { Website } from './pages/Website';
 import { LDAP } from './pages/LDAP';
 import { Labels } from './pages/Labels';
 import { Incoterms } from './pages/Incoterms';
+import { Modules } from './pages/Modules';
+import { Inbound } from './pages/Inbound';
+import { Search } from './pages/Search';
+import { Locales } from './pages/Locales';
 
 interface NavItem {
   to: string;
@@ -124,8 +132,12 @@ const OPERATIONS: NavItem[] = [
   { to: '/memos', key: 'memos', icon: <NotebookPen size={17} /> },
   { to: '/bookmarks', key: 'bookmarks', icon: <Bookmark size={17} /> },
   { to: '/collab', key: 'collab', icon: <MessagesSquare size={17} /> },
+  { to: '/search', key: 'globalSearch', icon: <SearchIcon size={17} /> },
   { to: '/cron', key: 'cronJobs', icon: <Timer size={17} /> },
   { to: '/ldap', key: 'ldap', icon: <Network size={17} /> },
+  { to: '/modules', key: 'modules', icon: <Blocks size={17} /> },
+  { to: '/inbound', key: 'inbound', icon: <Inbox size={17} /> },
+  { to: '/locales', key: 'localeCatalogue', icon: <Languages size={17} /> },
 ];
 
 const FINANCE: NavItem[] = [
@@ -235,6 +247,10 @@ function Shell() {
           <Route path="/ldap" element={<LDAP />} />
           <Route path="/labels" element={<Labels />} />
           <Route path="/incoterms" element={<Incoterms />} />
+          <Route path="/modules" element={<Modules />} />
+          <Route path="/inbound" element={<Inbound />} />
+          <Route path="/search" element={<Search />} />
+          <Route path="/locales" element={<Locales />} />
         </Routes>
       </main>
     </div>
